@@ -12,33 +12,34 @@
 
 ## File Map
 
-| Action | Path | Responsibility |
-|---|---|---|
-| Create | `.yarnrc.yml` | Switch Yarn to node-modules linker (Prisma PnP incompatibility) |
-| Create | `docker-compose.yaml` | Postgres + pgvector local container |
-| Create | `.env` | `DATABASE_URL` (gitignored) |
-| Create | `vitest.config.ts` | Test runner config |
-| Create | `data/prisma/schema.prisma` | Full Prisma schema — all entities from spec |
-| Create | `data/queries/index.ts` | `getTaskContext(taskId)` — the typed query function |
-| Create | `mcp/index.ts` | MCP server with `health` + `get_task_context` tools |
-| Create | `shared/types.ts` | `TaskContext` type + re-exported Prisma enums |
-| Create | `plugin/skills/task_start.md` | First skill template with `{{variable}}` placeholders |
-| Create | `integrations/notion/index.ts` | Moved from `src/notion/index.ts` (bug fix included) |
-| Create | `tests/contracts/data-to-mcp.test.ts` | Contract test — Step 1 proof criteria |
-| Create | `tests/unit/skill-injection.test.ts` | Unit test — skill variable injection |
-| Modify | `package.json` | Add deps, update `bin`, update `build` script, add `test` script |
-| Modify | `tsconfig.json` | `rootDir: .`, `include` explicit list, exclude tests |
-| Modify | `.gitignore` | Add `.env`, `build/` |
-| Delete | `src/index.ts` | Replaced by `mcp/index.ts` |
-| Delete | `src/middleware.ts` | Empty stub |
-| Delete | `src/tools/attention-list.ts` | Empty stub |
-| Delete | `src/notion/index.ts` | Moved to `integrations/notion/index.ts` |
+| Action | Path                                  | Responsibility                                                   |
+| ------ | ------------------------------------- | ---------------------------------------------------------------- |
+| Create | `.yarnrc.yml`                         | Switch Yarn to node-modules linker (Prisma PnP incompatibility)  |
+| Create | `docker-compose.yaml`                 | Postgres + pgvector local container                              |
+| Create | `.env`                                | `DATABASE_URL` (gitignored)                                      |
+| Create | `vitest.config.ts`                    | Test runner config                                               |
+| Create | `data/prisma/schema.prisma`           | Full Prisma schema — all entities from spec                      |
+| Create | `data/queries/index.ts`               | `getTaskContext(taskId)` — the typed query function              |
+| Create | `mcp/index.ts`                        | MCP server with `health` + `get_task_context` tools              |
+| Create | `shared/types.ts`                     | `TaskContext` type + re-exported Prisma enums                    |
+| Create | `plugin/skills/task_start.md`         | First skill template with `{{variable}}` placeholders            |
+| Create | `integrations/notion/index.ts`        | Moved from `src/notion/index.ts` (bug fix included)              |
+| Create | `tests/contracts/data-to-mcp.test.ts` | Contract test — Step 1 proof criteria                            |
+| Create | `tests/unit/skill-injection.test.ts`  | Unit test — skill variable injection                             |
+| Modify | `package.json`                        | Add deps, update `bin`, update `build` script, add `test` script |
+| Modify | `tsconfig.json`                       | `rootDir: .`, `include` explicit list, exclude tests             |
+| Modify | `.gitignore`                          | Add `.env`, `build/`                                             |
+| Delete | `src/index.ts`                        | Replaced by `mcp/index.ts`                                       |
+| Delete | `src/middleware.ts`                   | Empty stub                                                       |
+| Delete | `src/tools/attention-list.ts`         | Empty stub                                                       |
+| Delete | `src/notion/index.ts`                 | Moved to `integrations/notion/index.ts`                          |
 
 ---
 
 ## Task 1: Bootstrap — Yarn, Docker, Dependencies
 
 **Files:**
+
 - Create: `.yarnrc.yml`
 - Create: `docker-compose.yaml`
 - Create: `.env`
@@ -119,9 +120,7 @@ Replace the full content of `package.json` with:
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "files": [
-    "build"
-  ]
+  "files": ["build"]
 }
 ```
 
@@ -140,6 +139,7 @@ docker-compose up -d
 ```
 
 Expected output ends with:
+
 ```
 ✔ Container wizard-postgres-1  Started
 ```
@@ -151,6 +151,7 @@ docker-compose exec postgres psql -U wizard -d wizard -c "SELECT 1;"
 ```
 
 Expected:
+
 ```
  ?column?
 ----------
@@ -179,6 +180,7 @@ git commit -m "chore: bootstrap yarn node-modules, docker, and dependencies"
 ## Task 2: Restructure — Migrate `src/`, Update `tsconfig.json`
 
 **Files:**
+
 - Create: `mcp/index.ts`
 - Create: `integrations/notion/index.ts`
 - Create: `vitest.config.ts`
@@ -199,26 +201,21 @@ This migrates `src/index.ts`. The `health` tool response is fixed (`text` field 
 
 ```typescript
 // mcp/index.ts
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { z } from 'zod'
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 
 const server = new McpServer({
-  name: 'wizard',
-  version: '0.2.0',
-})
+  name: "wizard",
+  version: "0.2.0",
+});
 
-server.tool(
-  'health',
-  'Get health of Wizard System',
-  {},
-  async () => ({
-    content: [{ type: 'text', text: 'OK' }],
-  })
-)
+server.tool("health", "Get health of Wizard System", {}, async () => ({
+  content: [{ type: "text", text: "OK" }],
+}));
 
-const transport = new StdioServerTransport()
-await server.connect(transport)
+const transport = new StdioServerTransport();
+await server.connect(transport);
 ```
 
 - [ ] **Step 2.3: Create `integrations/notion/index.ts`**
@@ -227,17 +224,17 @@ Move from `src/notion/index.ts`. Fix the bug: `(database_id = dBId)` → `({ dat
 
 ```typescript
 // integrations/notion/index.ts
-import { Client } from '@notionhq/client'
+import { Client } from "@notionhq/client";
 
 export function createNotionClient(): Client {
-  const auth = process.env.NOTION_API_KEY
-  if (!auth) throw new Error('NOTION_API_KEY is not set')
-  return new Client({ auth })
+  const auth = process.env.NOTION_API_KEY;
+  if (!auth) throw new Error("NOTION_API_KEY is not set");
+  return new Client({ auth });
 }
 
 export function getNotionDBByID(dBId: string) {
-  const client = createNotionClient()
-  return client.databases.retrieve({ database_id: dBId })
+  const client = createNotionClient();
+  return client.databases.retrieve({ database_id: dBId });
 }
 ```
 
@@ -245,13 +242,13 @@ export function getNotionDBByID(dBId: string) {
 
 ```typescript
 // vitest.config.ts
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
+    include: ["tests/**/*.test.ts"],
   },
-})
+});
 ```
 
 - [ ] **Step 2.5: Update `tsconfig.json`**
@@ -277,11 +274,7 @@ Replace the full content with:
     "shared/**/*.ts",
     "integrations/**/*.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "build",
-    "tests"
-  ]
+  "exclude": ["node_modules", "build", "tests"]
 }
 ```
 
@@ -312,6 +305,7 @@ git commit -m "refactor: migrate src/ to layered directory structure"
 ## Task 3: Prisma Schema + Migration
 
 **Files:**
+
 - Create: `data/prisma/schema.prisma`
 - Create: `data/prisma/migrations/` (generated by Prisma)
 
@@ -516,9 +510,7 @@ Full `package.json` after edit:
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "files": [
-    "build"
-  ]
+  "files": ["build"]
 }
 ```
 
@@ -560,6 +552,7 @@ git commit -m "feat: add full prisma schema with pgvector"
 ## Task 4: `shared/types.ts`
 
 **Files:**
+
 - Create: `shared/types.ts`
 
 ---
@@ -570,29 +563,35 @@ git commit -m "feat: add full prisma schema with pgvector"
 
 ```typescript
 // shared/types.ts
-export { TaskStatus, Priority, TaskType, SessionStatus, WorkflowStatus } from '@prisma/client'
-import type { TaskStatus, Priority, TaskType } from '@prisma/client'
+export {
+  TaskStatus,
+  Priority,
+  TaskType,
+  SessionStatus,
+  WorkflowStatus,
+} from "@prisma/client";
+import type { TaskStatus, Priority, TaskType } from "@prisma/client";
 
 export type TaskContext = {
-  id: string
-  title: string
-  description: string | null
-  status: TaskStatus
-  priority: Priority | null
-  dueDate: Date | null
-  taskType: TaskType
-  jiraKey: string | null
-  githubBranch: string | null
-  githubRepo: string | null
+  id: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: Priority | null;
+  dueDate: Date | null;
+  taskType: TaskType;
+  jiraKey: string | null;
+  githubBranch: string | null;
+  githubRepo: string | null;
   meeting: {
-    id: string
-    title: string
-    outline: string | null
-    keyPoints: string[]
-    actionItems: string[]
-    krispUrl: string | null
-  } | null
-}
+    id: string;
+    title: string;
+    outline: string | null;
+    keyPoints: string[];
+    actionItems: string[];
+    krispUrl: string | null;
+  } | null;
+};
 ```
 
 - [ ] **Step 4.2: Verify TypeScript compiles**
@@ -615,6 +614,7 @@ git commit -m "feat: add TaskContext type to shared/types"
 ## Task 5: Write the Failing Contract Test
 
 **Files:**
+
 - Create: `tests/contracts/data-to-mcp.test.ts`
 
 The contract test is the Step 1 proof. Write it before implementing the query function — it must fail first.
@@ -625,111 +625,115 @@ The contract test is the Step 1 proof. Write it before implementing the query fu
 
 ```typescript
 // tests/contracts/data-to-mcp.test.ts
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { PrismaClient } from '@prisma/client'
-import { getTaskContext } from '../../data/queries/index.js'
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { PrismaClient } from "@prisma/client";
+import { getTaskContext } from "../../data/queries/index.js";
 
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
 
-describe('Data → MCP contract', () => {
-  let meetingId: string
-  let taskId: string
+describe("Data → MCP contract", () => {
+  let meetingId: string;
+  let taskId: string;
 
   beforeAll(async () => {
     const meeting = await prisma.meeting.create({
       data: {
-        title: 'Sprint Planning',
-        outline: 'Plan the sprint',
-        keyPoints: ['Deploy auth', 'Fix bug'],
-        actionItems: ['Create ticket PD-42'],
-        krispUrl: 'https://krisp.ai/meetings/test',
+        title: "Sprint Planning",
+        outline: "Plan the sprint",
+        keyPoints: ["Deploy auth", "Fix bug"],
+        actionItems: ["Create ticket PD-42"],
+        krispUrl: "https://krisp.ai/meetings/test",
       },
-    })
-    meetingId = meeting.id
+    });
+    meetingId = meeting.id;
 
     const task = await prisma.task.create({
       data: {
-        title: 'Add authentication',
-        description: 'Implement JWT auth',
-        status: 'IN_PROGRESS',
-        priority: 'HIGH',
-        dueDate: new Date('2026-04-10T00:00:00.000Z'),
-        taskType: 'CODING',
-        jiraKey: 'PD-42',
-        githubBranch: 'feat/auth',
-        githubRepo: 'sisu-universe',
+        title: "Add authentication",
+        description: "Implement JWT auth",
+        status: "IN_PROGRESS",
+        priority: "HIGH",
+        dueDate: new Date("2026-04-10T00:00:00.000Z"),
+        taskType: "CODING",
+        jiraKey: "PD-42",
+        githubBranch: "feat/auth",
+        githubRepo: "sisu-universe",
         meetingId: meeting.id,
       },
-    })
-    taskId = task.id
-  })
+    });
+    taskId = task.id;
+  });
 
   afterAll(async () => {
-    await prisma.task.delete({ where: { id: taskId } })
-    await prisma.meeting.delete({ where: { id: meetingId } })
-    await prisma.$disconnect()
-  })
+    await prisma.task.delete({ where: { id: taskId } });
+    await prisma.meeting.delete({ where: { id: meetingId } });
+    await prisma.$disconnect();
+  });
 
-  it('returns a TaskContext matching the seeded task exactly', async () => {
-    const context = await getTaskContext(taskId)
+  it("returns a TaskContext matching the seeded task exactly", async () => {
+    const context = await getTaskContext(taskId);
 
-    expect(context).not.toBeNull()
-    expect(context!.id).toBe(taskId)
-    expect(context!.title).toBe('Add authentication')
-    expect(context!.description).toBe('Implement JWT auth')
-    expect(context!.status).toBe('IN_PROGRESS')
-    expect(context!.priority).toBe('HIGH')
-    expect(context!.dueDate).toBeInstanceOf(Date)
-    expect(context!.dueDate!.toISOString()).toBe('2026-04-10T00:00:00.000Z')
-    expect(context!.taskType).toBe('CODING')
-    expect(context!.jiraKey).toBe('PD-42')
-    expect(context!.githubBranch).toBe('feat/auth')
-    expect(context!.githubRepo).toBe('sisu-universe')
-  })
+    expect(context).not.toBeNull();
+    expect(context!.id).toBe(taskId);
+    expect(context!.title).toBe("Add authentication");
+    expect(context!.description).toBe("Implement JWT auth");
+    expect(context!.status).toBe("IN_PROGRESS");
+    expect(context!.priority).toBe("HIGH");
+    expect(context!.dueDate).toBeInstanceOf(Date);
+    expect(context!.dueDate!.toISOString()).toBe("2026-04-10T00:00:00.000Z");
+    expect(context!.taskType).toBe("CODING");
+    expect(context!.jiraKey).toBe("PD-42");
+    expect(context!.githubBranch).toBe("feat/auth");
+    expect(context!.githubRepo).toBe("sisu-universe");
+  });
 
-  it('returns null (not undefined, not empty string) for jiraKey when not set', async () => {
+  it("returns null (not undefined, not empty string) for jiraKey when not set", async () => {
     const bare = await prisma.task.create({
-      data: { title: 'Bare task', status: 'TODO', taskType: 'INVESTIGATION' },
-    })
+      data: { title: "Bare task", status: "TODO", taskType: "INVESTIGATION" },
+    });
 
-    const context = await getTaskContext(bare.id)
+    const context = await getTaskContext(bare.id);
 
-    expect(context!.jiraKey).toBeNull()
-    expect(context!.jiraKey).not.toBeUndefined()
-    expect(context!.jiraKey).not.toBe('')
+    expect(context!.jiraKey).toBeNull();
+    expect(context!.jiraKey).not.toBeUndefined();
+    expect(context!.jiraKey).not.toBe("");
 
-    await prisma.task.delete({ where: { id: bare.id } })
-  })
+    await prisma.task.delete({ where: { id: bare.id } });
+  });
 
-  it('returns the linked meeting with all fields matching the seed', async () => {
-    const context = await getTaskContext(taskId)
-    const meeting = context!.meeting
+  it("returns the linked meeting with all fields matching the seed", async () => {
+    const context = await getTaskContext(taskId);
+    const meeting = context!.meeting;
 
-    expect(meeting).not.toBeNull()
-    expect(meeting!.title).toBe('Sprint Planning')
-    expect(meeting!.outline).toBe('Plan the sprint')
-    expect(meeting!.keyPoints).toEqual(['Deploy auth', 'Fix bug'])
-    expect(meeting!.actionItems).toEqual(['Create ticket PD-42'])
-    expect(meeting!.krispUrl).toBe('https://krisp.ai/meetings/test')
-  })
+    expect(meeting).not.toBeNull();
+    expect(meeting!.title).toBe("Sprint Planning");
+    expect(meeting!.outline).toBe("Plan the sprint");
+    expect(meeting!.keyPoints).toEqual(["Deploy auth", "Fix bug"]);
+    expect(meeting!.actionItems).toEqual(["Create ticket PD-42"]);
+    expect(meeting!.krispUrl).toBe("https://krisp.ai/meetings/test");
+  });
 
-  it('returns null for meeting when task has none', async () => {
+  it("returns null for meeting when task has none", async () => {
     const bare = await prisma.task.create({
-      data: { title: 'No meeting task', status: 'TODO', taskType: 'INVESTIGATION' },
-    })
+      data: {
+        title: "No meeting task",
+        status: "TODO",
+        taskType: "INVESTIGATION",
+      },
+    });
 
-    const context = await getTaskContext(bare.id)
+    const context = await getTaskContext(bare.id);
 
-    expect(context!.meeting).toBeNull()
+    expect(context!.meeting).toBeNull();
 
-    await prisma.task.delete({ where: { id: bare.id } })
-  })
+    await prisma.task.delete({ where: { id: bare.id } });
+  });
 
-  it('returns null when task does not exist', async () => {
-    const context = await getTaskContext('nonexistent-id-xyz')
-    expect(context).toBeNull()
-  })
-})
+  it("returns null when task does not exist", async () => {
+    const context = await getTaskContext("nonexistent-id-xyz");
+    expect(context).toBeNull();
+  });
+});
 ```
 
 - [ ] **Step 5.2: Run the test — verify it fails with the right error**
@@ -758,6 +762,7 @@ git commit -m "test(contract): add data-to-mcp contract test (failing)"
 ## Task 6: `data/queries/index.ts` — Make the Contract Test Pass
 
 **Files:**
+
 - Create: `data/queries/index.ts`
 
 ---
@@ -766,12 +771,14 @@ git commit -m "test(contract): add data-to-mcp contract test (failing)"
 
 ```typescript
 // data/queries/index.ts
-import { PrismaClient } from '@prisma/client'
-import type { TaskContext } from '../../shared/types.js'
+import { PrismaClient } from "@prisma/client";
+import type { TaskContext } from "../../shared/types.js";
 
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
 
-export async function getTaskContext(taskId: string): Promise<TaskContext | null> {
+export async function getTaskContext(
+  taskId: string,
+): Promise<TaskContext | null> {
   return prisma.task.findUnique({
     where: { id: taskId },
     select: {
@@ -796,7 +803,7 @@ export async function getTaskContext(taskId: string): Promise<TaskContext | null
         },
       },
     },
-  })
+  });
 }
 ```
 
@@ -839,6 +846,7 @@ git commit -m "feat: add getTaskContext query — contract test passing"
 ## Task 7: Register `get_task_context` in the MCP Server
 
 **Files:**
+
 - Modify: `mcp/index.ts`
 
 ---
@@ -849,47 +857,42 @@ Replace the full file content:
 
 ```typescript
 // mcp/index.ts
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { z } from 'zod'
-import { getTaskContext } from '../data/queries/index.js'
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { getTaskContext } from "../data/queries/index.js";
 
 const server = new McpServer({
-  name: 'wizard',
-  version: '0.2.0',
-})
+  name: "wizard",
+  version: "0.2.0",
+});
+
+server.tool("health", "Get health of Wizard System", {}, async () => ({
+  content: [{ type: "text", text: "OK" }],
+}));
 
 server.tool(
-  'health',
-  'Get health of Wizard System',
-  {},
-  async () => ({
-    content: [{ type: 'text', text: 'OK' }],
-  })
-)
-
-server.tool(
-  'get_task_context',
-  'Get the full context for a task by ID. Returns task details, linked meeting, Jira key, and GitHub branch.',
-  { task_id: z.string().describe('The Wizard task ID (cuid)') },
+  "get_task_context",
+  "Get the full context for a task by ID. Returns task details, linked meeting, Jira key, and GitHub branch.",
+  { task_id: z.string().describe("The Wizard task ID (cuid)") },
   async ({ task_id }) => {
-    const context = await getTaskContext(task_id)
+    const context = await getTaskContext(task_id);
 
     if (!context) {
       return {
-        content: [{ type: 'text', text: `Task not found: ${task_id}` }],
+        content: [{ type: "text", text: `Task not found: ${task_id}` }],
         isError: true,
-      }
+      };
     }
 
     return {
-      content: [{ type: 'text', text: JSON.stringify(context, null, 2) }],
-    }
-  }
-)
+      content: [{ type: "text", text: JSON.stringify(context, null, 2) }],
+    };
+  },
+);
 
-const transport = new StdioServerTransport()
-await server.connect(transport)
+const transport = new StdioServerTransport();
+await server.connect(transport);
 ```
 
 - [ ] **Step 7.2: Verify TypeScript compiles**
@@ -912,6 +915,7 @@ git commit -m "feat: register get_task_context MCP tool"
 ## Task 8: First Skill Template
 
 **Files:**
+
 - Create: `plugin/skills/task_start.md`
 
 ---
@@ -934,15 +938,15 @@ Context:
 
 **Variable table** (used by the unit test in Task 9):
 
-| Placeholder | Source | Type |
-|---|---|---|
-| `{{task_id}}` | `TaskContext.id` | string |
-| `{{title}}` | `TaskContext.title` | string |
-| `{{task_type}}` | `TaskContext.taskType` | TaskType enum as string |
-| `{{status}}` | `TaskContext.status` | TaskStatus enum as string |
-| `{{jira_key}}` | `TaskContext.jiraKey` | string or "none" when null |
-| `{{due_date}}` | `TaskContext.dueDate` | ISO date string or "none" when null |
-| `{{context}}` | Full `TaskContext` | JSON string |
+| Placeholder     | Source                 | Type                                |
+| --------------- | ---------------------- | ----------------------------------- |
+| `{{task_id}}`   | `TaskContext.id`       | string                              |
+| `{{title}}`     | `TaskContext.title`    | string                              |
+| `{{task_type}}` | `TaskContext.taskType` | TaskType enum as string             |
+| `{{status}}`    | `TaskContext.status`   | TaskStatus enum as string           |
+| `{{jira_key}}`  | `TaskContext.jiraKey`  | string or "none" when null          |
+| `{{due_date}}`  | `TaskContext.dueDate`  | ISO date string or "none" when null |
+| `{{context}}`   | Full `TaskContext`     | JSON string                         |
 
 - [ ] **Step 8.2: Commit**
 
@@ -956,6 +960,7 @@ git commit -m "feat: add task_start skill template"
 ## Task 9: Unit Test — Skill Variable Injection
 
 **Files:**
+
 - Create: `tests/unit/skill-injection.test.ts`
 
 This test does two things: verifies the `task_start.md` template has the expected placeholders, and verifies that a correct substitution leaves no unresolved `{{...}}` patterns.
@@ -968,71 +973,76 @@ The `injectVariables` function is inlined here — it belongs to the Orchestrati
 
 ```typescript
 // tests/unit/skill-injection.test.ts
-import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 // Inline implementation — the real version lives in orchestrator/ (Step 2).
 // This function defines the expected contract for variable injection.
-function injectVariables(template: string, variables: Record<string, string>): string {
-  let result = template
+function injectVariables(
+  template: string,
+  variables: Record<string, string>,
+): string {
+  let result = template;
   for (const [key, value] of Object.entries(variables)) {
-    result = result.replaceAll(`{{${key}}}`, value)
+    result = result.replaceAll(`{{${key}}}`, value);
   }
-  const unresolved = result.match(/\{\{[^}]+\}\}/g)
+  const unresolved = result.match(/\{\{[^}]+\}\}/g);
   if (unresolved) {
-    throw new Error(`Unresolved placeholders: ${unresolved.join(', ')}`)
+    throw new Error(`Unresolved placeholders: ${unresolved.join(", ")}`);
   }
-  return result
+  return result;
 }
 
-const TASK_START_PATH = join(process.cwd(), 'plugin/skills/task_start.md')
+const TASK_START_PATH = join(process.cwd(), "plugin/skills/task_start.md");
 
 const TASK_START_VARIABLES: Record<string, string> = {
-  task_id: 'clxyz123',
-  title: 'Add authentication',
-  task_type: 'CODING',
-  status: 'IN_PROGRESS',
-  jira_key: 'PD-42',
-  due_date: '2026-04-10T00:00:00.000Z',
-  context: JSON.stringify({ id: 'clxyz123', title: 'Add authentication' }),
-}
+  task_id: "clxyz123",
+  title: "Add authentication",
+  task_type: "CODING",
+  status: "IN_PROGRESS",
+  jira_key: "PD-42",
+  due_date: "2026-04-10T00:00:00.000Z",
+  context: JSON.stringify({ id: "clxyz123", title: "Add authentication" }),
+};
 
-describe('task_start skill variable injection', () => {
-  it('resolves all placeholders when given a complete variable map', () => {
-    const template = readFileSync(TASK_START_PATH, 'utf-8')
-    const result = injectVariables(template, TASK_START_VARIABLES)
+describe("task_start skill variable injection", () => {
+  it("resolves all placeholders when given a complete variable map", () => {
+    const template = readFileSync(TASK_START_PATH, "utf-8");
+    const result = injectVariables(template, TASK_START_VARIABLES);
 
-    expect(result).not.toMatch(/\{\{[^}]+\}\}/)
-    expect(result).toContain('clxyz123')
-    expect(result).toContain('Add authentication')
-    expect(result).toContain('CODING')
-    expect(result).toContain('IN_PROGRESS')
-    expect(result).toContain('PD-42')
-  })
+    expect(result).not.toMatch(/\{\{[^}]+\}\}/);
+    expect(result).toContain("clxyz123");
+    expect(result).toContain("Add authentication");
+    expect(result).toContain("CODING");
+    expect(result).toContain("IN_PROGRESS");
+    expect(result).toContain("PD-42");
+  });
 
-  it('contains exactly the expected placeholders and no others', () => {
-    const template = readFileSync(TASK_START_PATH, 'utf-8')
-    const found = [...template.matchAll(/\{\{([^}]+)\}\}/g)].map((m) => m[1])
-    const expected = Object.keys(TASK_START_VARIABLES)
+  it("contains exactly the expected placeholders and no others", () => {
+    const template = readFileSync(TASK_START_PATH, "utf-8");
+    const found = [...template.matchAll(/\{\{([^}]+)\}\}/g)].map((m) => m[1]);
+    const expected = Object.keys(TASK_START_VARIABLES);
 
-    expect(found.sort()).toEqual(expected.sort())
-  })
+    expect(found.sort()).toEqual(expected.sort());
+  });
 
-  it('throws when a placeholder is not in the variable map', () => {
-    const template = 'Hello {{name}}'
+  it("throws when a placeholder is not in the variable map", () => {
+    const template = "Hello {{name}}";
     expect(() => injectVariables(template, {})).toThrow(
-      'Unresolved placeholders: {{name}}'
-    )
-  })
+      "Unresolved placeholders: {{name}}",
+    );
+  });
 
-  it('throws when variables are missing from a partial map', () => {
-    const template = readFileSync(TASK_START_PATH, 'utf-8')
-    const partial = { task_id: 'clxyz123', title: 'Add authentication' }
+  it("throws when variables are missing from a partial map", () => {
+    const template = readFileSync(TASK_START_PATH, "utf-8");
+    const partial = { task_id: "clxyz123", title: "Add authentication" };
 
-    expect(() => injectVariables(template, partial)).toThrow('Unresolved placeholders')
-  })
-})
+    expect(() => injectVariables(template, partial)).toThrow(
+      "Unresolved placeholders",
+    );
+  });
+});
 ```
 
 - [ ] **Step 9.2: Run the unit test**
