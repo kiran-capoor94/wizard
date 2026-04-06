@@ -1,0 +1,33 @@
+{
+  "name": "wizard",
+  "packageManager": "yarn@4.12.0",
+  "type": "module",
+  "bin": "./build/mcp/index.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@notionhq/client": "^5.15.0",
+    "@prisma/adapter-pg": "^7.6.0",
+    "@prisma/client": "^7.6.0",
+    "dotenv": "^17.4.0",
+    "ollama": "^0.6.3",
+    "pg": "^8.20.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@types/pg": "^8.20.0",
+    "pgvector": "^0.2.0",
+    "prisma": "^7.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^3.0.0"
+  },
+  "scripts": {
+    "build": "tsc && chmod 755 build/mcp/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "files": [
+    "build"
+  ]
+}
