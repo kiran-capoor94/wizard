@@ -14,17 +14,17 @@
 
 ## File Map
 
-| Action | Path | Responsibility |
-|---|---|---|
-| Create | `orchestrator/inject.ts` | Variable injection — replaces `{{key}}` placeholders; throws on unresolved |
-| Create | `orchestrator/preflight.ts` | Pre-flight check — Postgres reachable + pgvector installed |
-| Create | `orchestrator/session.ts` | Session lifecycle — create, attach task, end, re-query |
-| Create | `orchestrator/workflow.ts` | Workflow execution — runs task_start, returns formatted prompt |
-| Create | `core/workflows/task-start.ts` | Hardcoded task_start workflow definition |
-| Modify | `mcp/index.ts` | Add `session_start` and `task_start` MCP tools |
-| Modify | `tsconfig.json` | Add `orchestrator/**/*.ts` and `core/**/*.ts` to `include` |
-| Create | `tests/unit/inject.test.ts` | Unit test for `injectVariables` (migrated from inline test) |
-| Create | `tests/contracts/orchestration-to-claude.test.ts` | Step 2 proof criteria |
+| Action | Path                                              | Responsibility                                                             |
+| ------ | ------------------------------------------------- | -------------------------------------------------------------------------- |
+| Create | `orchestrator/inject.ts`                          | Variable injection — replaces `{{key}}` placeholders; throws on unresolved |
+| Create | `orchestrator/preflight.ts`                       | Pre-flight check — Postgres reachable + pgvector installed                 |
+| Create | `orchestrator/session.ts`                         | Session lifecycle — create, attach task, end, re-query                     |
+| Create | `orchestrator/workflow.ts`                        | Workflow execution — runs task_start, returns formatted prompt             |
+| Create | `core/workflows/task-start.ts`                    | Hardcoded task_start workflow definition                                   |
+| Modify | `mcp/index.ts`                                    | Add `session_start` and `task_start` MCP tools                             |
+| Modify | `tsconfig.json`                                   | Add `orchestrator/**/*.ts` and `core/**/*.ts` to `include`                 |
+| Create | `tests/unit/inject.test.ts`                       | Unit test for `injectVariables` (migrated from inline test)                |
+| Create | `tests/contracts/orchestration-to-claude.test.ts` | Step 2 proof criteria                                                      |
 
 ---
 
@@ -32,7 +32,7 @@
 
 **This task must be completed before any other task in this step.**
 
-The spec states: *"Serena deterministic invocation — spike needed before Step 2. Unresolved. Do not proceed to Step 2 without this."*
+The spec states: _"Serena deterministic invocation — spike needed before Step 2. Unresolved. Do not proceed to Step 2 without this."_
 
 Serena is an MCP server providing code intelligence (symbol lookup, file search, grep). In v1, Claude decides when to call it. In v2, Orchestration must call it programmatically — before Claude sees any context — so the result is deterministic and auditable.
 
@@ -58,20 +58,23 @@ Serena runs as an MCP server. To call it from TypeScript code, use `@modelcontex
 
 ```typescript
 // Prototype — do not commit, just confirm it works
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const transport = new StdioClientTransport({
-  command: 'serena',       // adjust to actual Serena binary/command
+  command: "serena", // adjust to actual Serena binary/command
   args: [],
-})
-const client = new Client({ name: 'wizard-spike', version: '0.0.1' })
-await client.connect(transport)
+});
+const client = new Client({ name: "wizard-spike", version: "0.0.1" });
+await client.connect(transport);
 
-const result = await client.callTool({ name: 'find_symbol', arguments: { name: 'TaskContext' } })
-console.log(result)
+const result = await client.callTool({
+  name: "find_symbol",
+  arguments: { name: "TaskContext" },
+});
+console.log(result);
 
-await client.close()
+await client.close();
 ```
 
 Run this prototype. If it works, the invocation pattern is confirmed.
@@ -84,22 +87,27 @@ Create `docs/spikes/serena-invocation.md`:
 # Serena Deterministic Invocation — Spike Result
 
 ## Serena command
+
 [exact command/binary used]
 
 ## Working prototype
+
 [paste the working TypeScript snippet]
 
 ## Tools used in Wizard
-| Tool | Purpose |
-|---|---|
-| find_symbol | Locate a function/class by name in the codebase |
-| get_symbols_overview | List symbols in a file |
-| search_for_pattern | Regex search across files |
+
+| Tool                 | Purpose                                         |
+| -------------------- | ----------------------------------------------- |
+| find_symbol          | Locate a function/class by name in the codebase |
+| get_symbols_overview | List symbols in a file                          |
+| search_for_pattern   | Regex search across files                       |
 
 ## Known constraints
+
 [any timeouts, errors, or limitations discovered]
 
 ## Decision
+
 [confirmed approach for integrations/serena/invoke.ts in Step 5]
 ```
 
@@ -117,6 +125,7 @@ Only proceed past this point once the spike doc exists and the invocation patter
 ## Task 1: `tsconfig.json` — Add New Directories
 
 **Files:**
+
 - Modify: `tsconfig.json`
 
 ---
@@ -144,11 +153,7 @@ Only proceed past this point once the spike doc exists and the invocation patter
     "orchestrator/**/*.ts",
     "core/**/*.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "build",
-    "tests"
-  ]
+  "exclude": ["node_modules", "build", "tests"]
 }
 ```
 
@@ -178,6 +183,7 @@ git commit -m "chore: add orchestrator/ and core/ to tsconfig"
 ## Task 2: `orchestrator/inject.ts` — Variable Injection
 
 **Files:**
+
 - Create: `orchestrator/inject.ts`
 - Create: `tests/unit/inject.test.ts`
 - Modify: `tests/unit/skill-injection.test.ts` (update import)
@@ -190,40 +196,40 @@ The `injectVariables` function was inlined in the Step 1 unit test. It now moves
 
 ```typescript
 // tests/unit/inject.test.ts
-import { describe, it, expect } from 'vitest'
-import { injectVariables } from '../../orchestrator/inject.js'
+import { describe, it, expect } from "vitest";
+import { injectVariables } from "../../orchestrator/inject.js";
 
-describe('injectVariables', () => {
-  it('replaces all placeholders with their values', () => {
-    const result = injectVariables('Hello {{name}}, your task is {{task}}', {
-      name: 'Kiran',
-      task: 'implement auth',
-    })
-    expect(result).toBe('Hello Kiran, your task is implement auth')
-  })
+describe("injectVariables", () => {
+  it("replaces all placeholders with their values", () => {
+    const result = injectVariables("Hello {{name}}, your task is {{task}}", {
+      name: "Kiran",
+      task: "implement auth",
+    });
+    expect(result).toBe("Hello Kiran, your task is implement auth");
+  });
 
-  it('throws when a placeholder has no matching variable', () => {
-    expect(() => injectVariables('Hello {{name}}', {})).toThrow(
-      'Unresolved placeholders: {{name}}'
-    )
-  })
+  it("throws when a placeholder has no matching variable", () => {
+    expect(() => injectVariables("Hello {{name}}", {})).toThrow(
+      "Unresolved placeholders: {{name}}",
+    );
+  });
 
-  it('throws listing all unresolved placeholders', () => {
+  it("throws listing all unresolved placeholders", () => {
     expect(() =>
-      injectVariables('{{a}} and {{b}} and {{c}}', { a: 'x' })
-    ).toThrow('Unresolved placeholders: {{b}}, {{c}}')
-  })
+      injectVariables("{{a}} and {{b}} and {{c}}", { a: "x" }),
+    ).toThrow("Unresolved placeholders: {{b}}, {{c}}");
+  });
 
-  it('handles a template with no placeholders', () => {
-    const result = injectVariables('No placeholders here.', {})
-    expect(result).toBe('No placeholders here.')
-  })
+  it("handles a template with no placeholders", () => {
+    const result = injectVariables("No placeholders here.", {});
+    expect(result).toBe("No placeholders here.");
+  });
 
-  it('replaces multiple occurrences of the same placeholder', () => {
-    const result = injectVariables('{{x}} and {{x}}', { x: 'hello' })
-    expect(result).toBe('hello and hello')
-  })
-})
+  it("replaces multiple occurrences of the same placeholder", () => {
+    const result = injectVariables("{{x}} and {{x}}", { x: "hello" });
+    expect(result).toBe("hello and hello");
+  });
+});
 ```
 
 - [ ] **Step 2.2: Run the test — verify it fails**
@@ -239,22 +245,25 @@ Expected: `Error: Failed to resolve import "../../orchestrator/inject.js"`
 ```typescript
 // orchestrator/inject.ts
 
-export type Variables = Record<string, string>
+export type Variables = Record<string, string>;
 
 /**
  * Replaces {{key}} placeholders in a template with values from the variables map.
  * Throws if any placeholder remains unresolved after substitution.
  */
-export function injectVariables(template: string, variables: Variables): string {
-  let result = template
+export function injectVariables(
+  template: string,
+  variables: Variables,
+): string {
+  let result = template;
   for (const [key, value] of Object.entries(variables)) {
-    result = result.replaceAll(`{{${key}}}`, value)
+    result = result.replaceAll(`{{${key}}}`, value);
   }
-  const unresolved = result.match(/\{\{[^}]+\}\}/g)
+  const unresolved = result.match(/\{\{[^}]+\}\}/g);
   if (unresolved) {
-    throw new Error(`Unresolved placeholders: ${unresolved.join(', ')}`)
+    throw new Error(`Unresolved placeholders: ${unresolved.join(", ")}`);
   }
-  return result
+  return result;
 }
 ```
 
@@ -283,60 +292,62 @@ Replace the inline `injectVariables` function at the top of the file with an imp
 
 ```typescript
 // tests/unit/skill-injection.test.ts
-import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { injectVariables } from '../../orchestrator/inject.js'
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { injectVariables } from "../../orchestrator/inject.js";
 
 // Remove the inline injectVariables function — it now lives in orchestrator/inject.ts
 
-const TASK_START_PATH = join(process.cwd(), 'plugin/skills/task_start.md')
+const TASK_START_PATH = join(process.cwd(), "plugin/skills/task_start.md");
 
 const TASK_START_VARIABLES: Record<string, string> = {
-  task_id: 'clxyz123',
-  title: 'Add authentication',
-  task_type: 'CODING',
-  status: 'IN_PROGRESS',
-  jira_key: 'PD-42',
-  due_date: '2026-04-10T00:00:00.000Z',
-  context: JSON.stringify({ id: 'clxyz123', title: 'Add authentication' }),
-}
+  task_id: "clxyz123",
+  title: "Add authentication",
+  task_type: "CODING",
+  status: "IN_PROGRESS",
+  jira_key: "PD-42",
+  due_date: "2026-04-10T00:00:00.000Z",
+  context: JSON.stringify({ id: "clxyz123", title: "Add authentication" }),
+};
 
-describe('task_start skill variable injection', () => {
-  it('resolves all placeholders when given a complete variable map', () => {
-    const template = readFileSync(TASK_START_PATH, 'utf-8')
-    const result = injectVariables(template, TASK_START_VARIABLES)
+describe("task_start skill variable injection", () => {
+  it("resolves all placeholders when given a complete variable map", () => {
+    const template = readFileSync(TASK_START_PATH, "utf-8");
+    const result = injectVariables(template, TASK_START_VARIABLES);
 
-    expect(result).not.toMatch(/\{\{[^}]+\}\}/)
-    expect(result).toContain('clxyz123')
-    expect(result).toContain('Add authentication')
-    expect(result).toContain('CODING')
-    expect(result).toContain('IN_PROGRESS')
-    expect(result).toContain('PD-42')
-  })
+    expect(result).not.toMatch(/\{\{[^}]+\}\}/);
+    expect(result).toContain("clxyz123");
+    expect(result).toContain("Add authentication");
+    expect(result).toContain("CODING");
+    expect(result).toContain("IN_PROGRESS");
+    expect(result).toContain("PD-42");
+  });
 
-  it('contains exactly the expected placeholders and no others', () => {
-    const template = readFileSync(TASK_START_PATH, 'utf-8')
-    const found = [...template.matchAll(/\{\{([^}]+)\}\}/g)].map((m) => m[1])
-    const expected = Object.keys(TASK_START_VARIABLES)
+  it("contains exactly the expected placeholders and no others", () => {
+    const template = readFileSync(TASK_START_PATH, "utf-8");
+    const found = [...template.matchAll(/\{\{([^}]+)\}\}/g)].map((m) => m[1]);
+    const expected = Object.keys(TASK_START_VARIABLES);
 
-    expect(found.sort()).toEqual(expected.sort())
-  })
+    expect(found.sort()).toEqual(expected.sort());
+  });
 
-  it('throws when a placeholder is not in the variable map', () => {
-    const template = 'Hello {{name}}'
+  it("throws when a placeholder is not in the variable map", () => {
+    const template = "Hello {{name}}";
     expect(() => injectVariables(template, {})).toThrow(
-      'Unresolved placeholders: {{name}}'
-    )
-  })
+      "Unresolved placeholders: {{name}}",
+    );
+  });
 
-  it('throws when variables are missing from a partial map', () => {
-    const template = readFileSync(TASK_START_PATH, 'utf-8')
-    const partial = { task_id: 'clxyz123', title: 'Add authentication' }
+  it("throws when variables are missing from a partial map", () => {
+    const template = readFileSync(TASK_START_PATH, "utf-8");
+    const partial = { task_id: "clxyz123", title: "Add authentication" };
 
-    expect(() => injectVariables(template, partial)).toThrow('Unresolved placeholders')
-  })
-})
+    expect(() => injectVariables(template, partial)).toThrow(
+      "Unresolved placeholders",
+    );
+  });
+});
 ```
 
 - [ ] **Step 2.6: Run the full unit test suite**
@@ -359,6 +370,7 @@ git commit -m "feat: add injectVariables to orchestrator/inject"
 ## Task 3: `orchestrator/preflight.ts` — Pre-Flight Check
 
 **Files:**
+
 - Create: `orchestrator/preflight.ts`
 - Create: `tests/unit/preflight.test.ts`
 
@@ -368,16 +380,16 @@ git commit -m "feat: add injectVariables to orchestrator/inject"
 
 ```typescript
 // tests/unit/preflight.test.ts
-import { describe, it, expect } from 'vitest'
-import { runPreflight } from '../../orchestrator/preflight.js'
+import { describe, it, expect } from "vitest";
+import { runPreflight } from "../../orchestrator/preflight.js";
 
-describe('runPreflight', () => {
-  it('returns ok: true when Postgres is reachable and pgvector is installed', async () => {
+describe("runPreflight", () => {
+  it("returns ok: true when Postgres is reachable and pgvector is installed", async () => {
     // Requires: docker-compose up -d and DATABASE_URL set
-    const result = await runPreflight()
-    expect(result.ok).toBe(true)
-  })
-})
+    const result = await runPreflight();
+    expect(result.ok).toBe(true);
+  });
+});
 ```
 
 - [ ] **Step 3.2: Run the test — verify it fails**
@@ -392,13 +404,11 @@ Expected: `Error: Failed to resolve import "../../orchestrator/preflight.js"`
 
 ```typescript
 // orchestrator/preflight.ts
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
 
-export type PreflightResult =
-  | { ok: true }
-  | { ok: false; reason: string }
+export type PreflightResult = { ok: true } | { ok: false; reason: string };
 
 /**
  * Checks that Postgres is reachable and the pgvector extension is installed.
@@ -406,21 +416,21 @@ export type PreflightResult =
  */
 export async function runPreflight(): Promise<PreflightResult> {
   try {
-    await prisma.$queryRaw`SELECT 1`
+    await prisma.$queryRaw`SELECT 1`;
   } catch (err) {
-    return { ok: false, reason: `Postgres unreachable: ${String(err)}` }
+    return { ok: false, reason: `Postgres unreachable: ${String(err)}` };
   }
 
   const rows = await prisma.$queryRaw<{ count: bigint }[]>`
     SELECT count(*) AS count
     FROM pg_extension
     WHERE extname = 'vector'
-  `
+  `;
   if (Number(rows[0].count) === 0) {
-    return { ok: false, reason: 'pgvector extension not installed' }
+    return { ok: false, reason: "pgvector extension not installed" };
   }
 
-  return { ok: true }
+  return { ok: true };
 }
 ```
 
@@ -451,6 +461,7 @@ git commit -m "feat: add runPreflight to orchestrator/preflight"
 ## Task 4: `orchestrator/session.ts` — Session Lifecycle
 
 **Files:**
+
 - Create: `orchestrator/session.ts`
 - Create: `tests/unit/session.test.ts`
 
@@ -460,98 +471,100 @@ git commit -m "feat: add runPreflight to orchestrator/preflight"
 
 ```typescript
 // tests/unit/session.test.ts
-import { describe, it, expect, afterEach } from 'vitest'
-import { PrismaClient } from '@prisma/client'
+import { describe, it, expect, afterEach } from "vitest";
+import { PrismaClient } from "@prisma/client";
 import {
   createSession,
   endSession,
   getSession,
   attachTaskToSession,
-} from '../../orchestrator/session.js'
+} from "../../orchestrator/session.js";
 
-const prisma = new PrismaClient()
-const createdSessionIds: string[] = []
-const createdTaskIds: string[] = []
+const prisma = new PrismaClient();
+const createdSessionIds: string[] = [];
+const createdTaskIds: string[] = [];
 
 afterEach(async () => {
   // Clean up in FK order
   for (const id of createdSessionIds) {
-    await prisma.sessionTask.deleteMany({ where: { sessionId: id } }).catch(() => {})
-    await prisma.session.delete({ where: { id } }).catch(() => {})
+    await prisma.sessionTask
+      .deleteMany({ where: { sessionId: id } })
+      .catch(() => {});
+    await prisma.session.delete({ where: { id } }).catch(() => {});
   }
   for (const id of createdTaskIds) {
-    await prisma.task.delete({ where: { id } }).catch(() => {})
+    await prisma.task.delete({ where: { id } }).catch(() => {});
   }
-  createdSessionIds.length = 0
-  createdTaskIds.length = 0
-  await prisma.$disconnect()
-})
+  createdSessionIds.length = 0;
+  createdTaskIds.length = 0;
+  await prisma.$disconnect();
+});
 
-describe('createSession', () => {
-  it('creates an ACTIVE session and returns its ID', async () => {
-    const id = await createSession()
-    createdSessionIds.push(id)
+describe("createSession", () => {
+  it("creates an ACTIVE session and returns its ID", async () => {
+    const id = await createSession();
+    createdSessionIds.push(id);
 
     // Re-query with a fresh client to prove it is in Postgres (not in-memory)
-    const fresh = new PrismaClient()
-    const session = await fresh.session.findUnique({ where: { id } })
-    await fresh.$disconnect()
+    const fresh = new PrismaClient();
+    const session = await fresh.session.findUnique({ where: { id } });
+    await fresh.$disconnect();
 
-    expect(session).not.toBeNull()
-    expect(session!.status).toBe('ACTIVE')
-    expect(session!.startedAt).toBeInstanceOf(Date)
-    expect(session!.endedAt).toBeNull()
-  })
-})
+    expect(session).not.toBeNull();
+    expect(session!.status).toBe("ACTIVE");
+    expect(session!.startedAt).toBeInstanceOf(Date);
+    expect(session!.endedAt).toBeNull();
+  });
+});
 
-describe('endSession', () => {
-  it('sets status to ENDED and stamps endedAt', async () => {
-    const id = await createSession()
-    createdSessionIds.push(id)
+describe("endSession", () => {
+  it("sets status to ENDED and stamps endedAt", async () => {
+    const id = await createSession();
+    createdSessionIds.push(id);
 
-    await endSession(id)
+    await endSession(id);
 
-    const fresh = new PrismaClient()
-    const session = await fresh.session.findUnique({ where: { id } })
-    await fresh.$disconnect()
+    const fresh = new PrismaClient();
+    const session = await fresh.session.findUnique({ where: { id } });
+    await fresh.$disconnect();
 
-    expect(session!.status).toBe('ENDED')
-    expect(session!.endedAt).toBeInstanceOf(Date)
-  })
-})
+    expect(session!.status).toBe("ENDED");
+    expect(session!.endedAt).toBeInstanceOf(Date);
+  });
+});
 
-describe('attachTaskToSession', () => {
-  it('links a task to a session', async () => {
-    const sessionId = await createSession()
-    createdSessionIds.push(sessionId)
+describe("attachTaskToSession", () => {
+  it("links a task to a session", async () => {
+    const sessionId = await createSession();
+    createdSessionIds.push(sessionId);
 
     const task = await prisma.task.create({
-      data: { title: 'Test task', status: 'TODO', taskType: 'CODING' },
-    })
-    createdTaskIds.push(task.id)
+      data: { title: "Test task", status: "TODO", taskType: "CODING" },
+    });
+    createdTaskIds.push(task.id);
 
-    await attachTaskToSession(sessionId, task.id)
+    await attachTaskToSession(sessionId, task.id);
 
-    const session = await getSession(sessionId)
-    expect(session!.tasks).toHaveLength(1)
-    expect(session!.tasks[0].taskId).toBe(task.id)
-  })
-})
+    const session = await getSession(sessionId);
+    expect(session!.tasks).toHaveLength(1);
+    expect(session!.tasks[0].taskId).toBe(task.id);
+  });
+});
 
-describe('crash durability', () => {
-  it('session state is retrievable after simulated crash (new PrismaClient)', async () => {
-    const id = await createSession()
-    createdSessionIds.push(id)
+describe("crash durability", () => {
+  it("session state is retrievable after simulated crash (new PrismaClient)", async () => {
+    const id = await createSession();
+    createdSessionIds.push(id);
 
     // Simulate crash: entirely new connection
-    const afterCrash = new PrismaClient()
-    const session = await afterCrash.session.findUnique({ where: { id } })
-    await afterCrash.$disconnect()
+    const afterCrash = new PrismaClient();
+    const session = await afterCrash.session.findUnique({ where: { id } });
+    await afterCrash.$disconnect();
 
-    expect(session).not.toBeNull()
-    expect(session!.status).toBe('ACTIVE')
-  })
-})
+    expect(session).not.toBeNull();
+    expect(session!.status).toBe("ACTIVE");
+  });
+});
 ```
 
 - [ ] **Step 4.2: Run the test — verify it fails**
@@ -566,22 +579,22 @@ Expected: `Error: Failed to resolve import "../../orchestrator/session.js"`
 
 ```typescript
 // orchestrator/session.ts
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
 
 export async function createSession(): Promise<string> {
   const session = await prisma.session.create({
-    data: { status: 'ACTIVE' },
-  })
-  return session.id
+    data: { status: "ACTIVE" },
+  });
+  return session.id;
 }
 
 export async function endSession(sessionId: string): Promise<void> {
   await prisma.session.update({
     where: { id: sessionId },
-    data: { status: 'ENDED', endedAt: new Date() },
-  })
+    data: { status: "ENDED", endedAt: new Date() },
+  });
 }
 
 export async function getSession(sessionId: string) {
@@ -592,16 +605,16 @@ export async function getSession(sessionId: string) {
         include: { task: true },
       },
     },
-  })
+  });
 }
 
 export async function attachTaskToSession(
   sessionId: string,
-  taskId: string
+  taskId: string,
 ): Promise<void> {
   await prisma.sessionTask.create({
     data: { sessionId, taskId },
-  })
+  });
 }
 ```
 
@@ -635,6 +648,7 @@ git commit -m "feat: add session lifecycle to orchestrator/session"
 ## Task 5: `core/workflows/task-start.ts` + `orchestrator/workflow.ts`
 
 **Files:**
+
 - Create: `core/workflows/task-start.ts`
 - Create: `orchestrator/workflow.ts`
 - Create: `tests/unit/workflow.test.ts`
@@ -647,8 +661,8 @@ git commit -m "feat: add session lifecycle to orchestrator/session"
 
 ```typescript
 // core/workflows/task-start.ts
-import type { TaskContext } from '../../shared/types.js'
-import type { Variables } from '../../orchestrator/inject.js'
+import type { TaskContext } from "../../shared/types.js";
+import type { Variables } from "../../orchestrator/inject.js";
 
 /**
  * Builds the variable map for the task_start skill template from a TaskContext.
@@ -660,12 +674,12 @@ export function buildTaskStartVariables(context: TaskContext): Variables {
     title: context.title,
     task_type: context.taskType,
     status: context.status,
-    jira_key: context.jiraKey ?? 'none',
+    jira_key: context.jiraKey ?? "none",
     due_date: context.dueDate
-      ? context.dueDate.toISOString().split('T')[0]
-      : 'none',
+      ? context.dueDate.toISOString().split("T")[0]
+      : "none",
     context: JSON.stringify(context, null, 2),
-  }
+  };
 }
 ```
 
@@ -673,64 +687,62 @@ export function buildTaskStartVariables(context: TaskContext): Variables {
 
 ```typescript
 // tests/unit/workflow.test.ts
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { PrismaClient } from '@prisma/client'
-import { runTaskStartWorkflow } from '../../orchestrator/workflow.js'
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { PrismaClient } from "@prisma/client";
+import { runTaskStartWorkflow } from "../../orchestrator/workflow.js";
 
-const prisma = new PrismaClient()
-let taskId: string
+const prisma = new PrismaClient();
+let taskId: string;
 
 beforeAll(async () => {
   const task = await prisma.task.create({
     data: {
-      title: 'Implement auth',
-      status: 'IN_PROGRESS',
-      taskType: 'CODING',
-      jiraKey: 'PD-99',
-      dueDate: new Date('2026-05-01T00:00:00.000Z'),
+      title: "Implement auth",
+      status: "IN_PROGRESS",
+      taskType: "CODING",
+      jiraKey: "PD-99",
+      dueDate: new Date("2026-05-01T00:00:00.000Z"),
     },
-  })
-  taskId = task.id
-})
+  });
+  taskId = task.id;
+});
 
 afterAll(async () => {
-  await prisma.task.delete({ where: { id: taskId } })
-  await prisma.$disconnect()
-})
+  await prisma.task.delete({ where: { id: taskId } });
+  await prisma.$disconnect();
+});
 
-describe('runTaskStartWorkflow', () => {
-  it('returns a formatted prompt with no unresolved placeholders', async () => {
-    const result = await runTaskStartWorkflow(taskId)
+describe("runTaskStartWorkflow", () => {
+  it("returns a formatted prompt with no unresolved placeholders", async () => {
+    const result = await runTaskStartWorkflow(taskId);
 
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
 
-    expect(result.prompt).not.toMatch(/\{\{[^}]+\}\}/)
-    expect(result.prompt).toContain('Implement auth')
-    expect(result.prompt).toContain('CODING')
-    expect(result.prompt).toContain('PD-99')
-    expect(result.prompt).toContain('2026-05-01')
-  })
+    expect(result.prompt).not.toMatch(/\{\{[^}]+\}\}/);
+    expect(result.prompt).toContain("Implement auth");
+    expect(result.prompt).toContain("CODING");
+    expect(result.prompt).toContain("PD-99");
+    expect(result.prompt).toContain("2026-05-01");
+  });
 
-  it('returns ok: false when task does not exist', async () => {
-    const result = await runTaskStartWorkflow('nonexistent-task-id')
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    expect(result.reason).toContain('not found')
-  })
+  it("returns ok: false when task does not exist", async () => {
+    const result = await runTaskStartWorkflow("nonexistent-task-id");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("not found");
+  });
 
-  it('prompt contains the full context as JSON', async () => {
-    const result = await runTaskStartWorkflow(taskId)
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
+  it("prompt contains the full context as JSON", async () => {
+    const result = await runTaskStartWorkflow(taskId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
 
-    const parsed = JSON.parse(
-      result.prompt.split('Context:\n')[1] ?? '{}'
-    )
-    expect(parsed.id).toBe(taskId)
-    expect(parsed.title).toBe('Implement auth')
-  })
-})
+    const parsed = JSON.parse(result.prompt.split("Context:\n")[1] ?? "{}");
+    expect(parsed.id).toBe(taskId);
+    expect(parsed.title).toBe("Implement auth");
+  });
+});
 ```
 
 - [ ] **Step 5.3: Run the test — verify it fails**
@@ -745,37 +757,39 @@ Expected: `Error: Failed to resolve import "../../orchestrator/workflow.js"`
 
 ```typescript
 // orchestrator/workflow.ts
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { injectVariables } from './inject.js'
-import { runPreflight } from './preflight.js'
-import { getTaskContext } from '../data/queries/index.js'
-import { buildTaskStartVariables } from '../core/workflows/task-start.js'
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { injectVariables } from "./inject.js";
+import { runPreflight } from "./preflight.js";
+import { getTaskContext } from "../data/queries/index.js";
+import { buildTaskStartVariables } from "../core/workflows/task-start.js";
 
 export type WorkflowResult =
   | { ok: true; prompt: string }
-  | { ok: false; reason: string }
+  | { ok: false; reason: string };
 
-export async function runTaskStartWorkflow(taskId: string): Promise<WorkflowResult> {
-  const preflight = await runPreflight()
+export async function runTaskStartWorkflow(
+  taskId: string,
+): Promise<WorkflowResult> {
+  const preflight = await runPreflight();
   if (!preflight.ok) {
-    return { ok: false, reason: `Pre-flight failed: ${preflight.reason}` }
+    return { ok: false, reason: `Pre-flight failed: ${preflight.reason}` };
   }
 
-  const context = await getTaskContext(taskId)
+  const context = await getTaskContext(taskId);
   if (!context) {
-    return { ok: false, reason: `Task not found: ${taskId}` }
+    return { ok: false, reason: `Task not found: ${taskId}` };
   }
 
   const template = readFileSync(
-    join(process.cwd(), 'plugin/skills/task_start.md'),
-    'utf-8'
-  )
+    join(process.cwd(), "plugin/skills/task_start.md"),
+    "utf-8",
+  );
 
-  const variables = buildTaskStartVariables(context)
-  const prompt = injectVariables(template, variables)
+  const variables = buildTaskStartVariables(context);
+  const prompt = injectVariables(template, variables);
 
-  return { ok: true, prompt }
+  return { ok: true, prompt };
 }
 ```
 
@@ -808,6 +822,7 @@ git commit -m "feat: add task-start workflow and orchestrator/workflow"
 ## Task 6: MCP Tools — `session_start` and `task_start`
 
 **Files:**
+
 - Modify: `mcp/index.ts`
 
 ---
@@ -818,95 +833,94 @@ Replace the full file content:
 
 ```typescript
 // mcp/index.ts
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { z } from 'zod'
-import { getTaskContext } from '../data/queries/index.js'
-import { createSession, endSession, attachTaskToSession } from '../orchestrator/session.js'
-import { runTaskStartWorkflow } from '../orchestrator/workflow.js'
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { getTaskContext } from "../data/queries/index.js";
+import {
+  createSession,
+  endSession,
+  attachTaskToSession,
+} from "../orchestrator/session.js";
+import { runTaskStartWorkflow } from "../orchestrator/workflow.js";
 
 const server = new McpServer({
-  name: 'wizard',
-  version: '0.2.0',
-})
+  name: "wizard",
+  version: "0.2.0",
+});
+
+server.tool("health", "Get health of Wizard System", {}, async () => ({
+  content: [{ type: "text", text: "OK" }],
+}));
 
 server.tool(
-  'health',
-  'Get health of Wizard System',
-  {},
-  async () => ({
-    content: [{ type: 'text', text: 'OK' }],
-  })
-)
-
-server.tool(
-  'get_task_context',
-  'Get the full context for a task by ID. Returns task details, linked meeting, Jira key, and GitHub branch.',
-  { task_id: z.string().describe('The Wizard task ID (cuid)') },
+  "get_task_context",
+  "Get the full context for a task by ID. Returns task details, linked meeting, Jira key, and GitHub branch.",
+  { task_id: z.string().describe("The Wizard task ID (cuid)") },
   async ({ task_id }) => {
-    const context = await getTaskContext(task_id)
+    const context = await getTaskContext(task_id);
     if (!context) {
       return {
-        content: [{ type: 'text', text: `Task not found: ${task_id}` }],
+        content: [{ type: "text", text: `Task not found: ${task_id}` }],
         isError: true,
-      }
+      };
     }
     return {
-      content: [{ type: 'text', text: JSON.stringify(context, null, 2) }],
-    }
-  }
-)
+      content: [{ type: "text", text: JSON.stringify(context, null, 2) }],
+    };
+  },
+);
 
 server.tool(
-  'session_start',
-  'Start a new Wizard session. Returns the session ID.',
+  "session_start",
+  "Start a new Wizard session. Returns the session ID.",
   {},
   async () => {
-    const sessionId = await createSession()
+    const sessionId = await createSession();
     return {
-      content: [{ type: 'text', text: JSON.stringify({ sessionId }) }],
-    }
-  }
-)
+      content: [{ type: "text", text: JSON.stringify({ sessionId }) }],
+    };
+  },
+);
 
 server.tool(
-  'task_start',
-  'Start work on a task within the current session. Runs pre-flight, loads context, and returns the prepared prompt.',
+  "task_start",
+  "Start work on a task within the current session. Runs pre-flight, loads context, and returns the prepared prompt.",
   {
-    task_id: z.string().describe('The Wizard task ID (cuid)'),
-    session_id: z.string().describe('The current session ID'),
+    task_id: z.string().describe("The Wizard task ID (cuid)"),
+    session_id: z.string().describe("The current session ID"),
   },
   async ({ task_id, session_id }) => {
-    await attachTaskToSession(session_id, task_id)
+    await attachTaskToSession(session_id, task_id);
 
-    const result = await runTaskStartWorkflow(task_id)
+    const result = await runTaskStartWorkflow(task_id);
     if (!result.ok) {
       return {
-        content: [{ type: 'text', text: result.reason }],
+        content: [{ type: "text", text: result.reason }],
         isError: true,
-      }
+      };
     }
 
     return {
-      content: [{ type: 'text', text: result.prompt }],
-    }
-  }
-)
+      content: [{ type: "text", text: result.prompt }],
+    };
+  },
+);
 
 server.tool(
-  'session_end',
-  'End the current Wizard session.',
-  { session_id: z.string().describe('The session ID to end') },
+  "session_end",
+  "End the current Wizard session.",
+  { session_id: z.string().describe("The session ID to end") },
   async ({ session_id }) => {
-    await endSession(session_id)
+    await endSession(session_id);
     return {
-      content: [{ type: 'text', text: `Session ${session_id} ended.` }],
-    }
-  }
-)
+      content: [{ type: "text", text: `Session ${session_id} ended.` }],
+    };
+  },
+);
 
-const transport = new StdioServerTransport()
-await server.connect(transport)
+const transport = new StdioServerTransport();
+await server.connect(transport);
 ```
 
 - [ ] **Step 6.2: Verify TypeScript compiles**
@@ -929,6 +943,7 @@ git commit -m "feat: add session_start, task_start, session_end MCP tools"
 ## Task 7: Contract Test — Step 2 Proof Criteria
 
 **Files:**
+
 - Create: `tests/contracts/orchestration-to-claude.test.ts`
 
 ---
@@ -937,85 +952,89 @@ git commit -m "feat: add session_start, task_start, session_end MCP tools"
 
 ```typescript
 // tests/contracts/orchestration-to-claude.test.ts
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { PrismaClient } from '@prisma/client'
-import { runTaskStartWorkflow } from '../../orchestrator/workflow.js'
-import { createSession, endSession, getSession } from '../../orchestrator/session.js'
-import { runPreflight } from '../../orchestrator/preflight.js'
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { PrismaClient } from "@prisma/client";
+import { runTaskStartWorkflow } from "../../orchestrator/workflow.js";
+import {
+  createSession,
+  endSession,
+  getSession,
+} from "../../orchestrator/session.js";
+import { runPreflight } from "../../orchestrator/preflight.js";
 
-const prisma = new PrismaClient()
-let taskId: string
-let sessionId: string
+const prisma = new PrismaClient();
+let taskId: string;
+let sessionId: string;
 
 beforeAll(async () => {
   const task = await prisma.task.create({
     data: {
-      title: 'Contract test task',
-      status: 'IN_PROGRESS',
-      taskType: 'CODING',
-      jiraKey: 'PD-CONTRACT',
+      title: "Contract test task",
+      status: "IN_PROGRESS",
+      taskType: "CODING",
+      jiraKey: "PD-CONTRACT",
     },
-  })
-  taskId = task.id
-  sessionId = await createSession()
-})
+  });
+  taskId = task.id;
+  sessionId = await createSession();
+});
 
 afterAll(async () => {
-  await prisma.sessionTask.deleteMany({ where: { sessionId } })
-  await prisma.session.delete({ where: { id: sessionId } })
-  await prisma.task.delete({ where: { id: taskId } })
-  await prisma.$disconnect()
-})
+  await prisma.sessionTask.deleteMany({ where: { sessionId } });
+  await prisma.session.delete({ where: { id: sessionId } });
+  await prisma.task.delete({ where: { id: taskId } });
+  await prisma.$disconnect();
+});
 
-describe('Orchestration → Claude contract', () => {
-  it('pre-flight passes before workflow invocation', async () => {
-    const result = await runPreflight()
-    expect(result.ok).toBe(true)
-  })
+describe("Orchestration → Claude contract", () => {
+  it("pre-flight passes before workflow invocation", async () => {
+    const result = await runPreflight();
+    expect(result.ok).toBe(true);
+  });
 
-  it('workflow returns a formatted prompt — pre-flight runs internally', async () => {
-    const result = await runTaskStartWorkflow(taskId)
+  it("workflow returns a formatted prompt — pre-flight runs internally", async () => {
+    const result = await runTaskStartWorkflow(taskId);
 
-    expect(result.ok).toBe(true)
-    if (!result.ok) throw new Error(result.reason)
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
 
     // No unresolved placeholders
-    expect(result.prompt).not.toMatch(/\{\{[^}]+\}\}/)
+    expect(result.prompt).not.toMatch(/\{\{[^}]+\}\}/);
     // Task data is present
-    expect(result.prompt).toContain('Contract test task')
-    expect(result.prompt).toContain('PD-CONTRACT')
-  })
+    expect(result.prompt).toContain("Contract test task");
+    expect(result.prompt).toContain("PD-CONTRACT");
+  });
 
-  it('session state persists across a simulated crash', async () => {
+  it("session state persists across a simulated crash", async () => {
     // Simulate crash: brand new PrismaClient with fresh connection
-    const afterCrash = new PrismaClient()
+    const afterCrash = new PrismaClient();
     const session = await afterCrash.session.findUnique({
       where: { id: sessionId },
-    })
-    await afterCrash.$disconnect()
+    });
+    await afterCrash.$disconnect();
 
-    expect(session).not.toBeNull()
-    expect(session!.id).toBe(sessionId)
-    expect(session!.status).toBe('ACTIVE')
-  })
+    expect(session).not.toBeNull();
+    expect(session!.id).toBe(sessionId);
+    expect(session!.status).toBe("ACTIVE");
+  });
 
-  it('session transitions to ENDED after endSession', async () => {
-    const newSessionId = await createSession()
+  it("session transitions to ENDED after endSession", async () => {
+    const newSessionId = await createSession();
 
-    await endSession(newSessionId)
+    await endSession(newSessionId);
 
-    const afterCrash = new PrismaClient()
+    const afterCrash = new PrismaClient();
     const session = await afterCrash.session.findUnique({
       where: { id: newSessionId },
-    })
-    await afterCrash.$disconnect()
+    });
+    await afterCrash.$disconnect();
 
-    expect(session!.status).toBe('ENDED')
-    expect(session!.endedAt).toBeInstanceOf(Date)
+    expect(session!.status).toBe("ENDED");
+    expect(session!.endedAt).toBeInstanceOf(Date);
 
-    await prisma.session.delete({ where: { id: newSessionId } })
-  })
-})
+    await prisma.session.delete({ where: { id: newSessionId } });
+  });
+});
 ```
 
 - [ ] **Step 7.2: Run the contract test — verify it passes**
