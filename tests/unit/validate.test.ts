@@ -1,42 +1,24 @@
 // tests/unit/validate.test.ts
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { PrismaClient } from '../../generated/prisma/client.js'
-import { PrismaPg } from '@prisma/adapter-pg'
+import { describe, it, expect, vi } from 'vitest'
 import { validateOutput } from '../../core/output/validate.js'
+import type { ValidateDeps } from '../../core/output/validate.js'
 
-// Mock embedding and similarity so tests don't call Ollama or pgvector
-vi.mock('../../data/repositories/embeddings.js', () => ({
-  getCosineSimilarity: vi.fn(),
-  getAttributionThreshold: vi.fn().mockResolvedValue(0.75),
-}))
+// Hardcoded integer IDs — no database needed
+const taskId = 1
+const meetingId = 42
 
-import { getCosineSimilarity } from '../../data/repositories/embeddings.js'
-
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) })
-let taskId: number
-let meetingId: number
-
-beforeAll(async () => {
-  const meeting = await prisma.meeting.create({
-    data: { title: 'Sprint Planning', keyPoints: [] },
-  })
-  meetingId = meeting.id
-
-  const task = await prisma.task.create({
-    data: { title: 'Implement auth', status: 'IN_PROGRESS', taskType: 'CODING' },
-  })
-  taskId = task.id
-})
-
-afterAll(async () => {
-  await prisma.task.delete({ where: { id: taskId } })
-  await prisma.meeting.delete({ where: { id: meetingId } })
-  await prisma.$disconnect()
-})
+function makeDeps(overrides: Partial<ValidateDeps> = {}): ValidateDeps {
+  return {
+    computeEmbedding: vi.fn().mockResolvedValue({ ok: true, value: new Array(768).fill(0.1) }),
+    getCosineSimilarity: vi.fn().mockResolvedValue(null),
+    getAttributionThreshold: vi.fn().mockResolvedValue(0.75),
+    ...overrides,
+  }
+}
 
 describe('validateOutput', () => {
   it('passes schema contract for valid TransformedOutput', async () => {
-    vi.mocked(getCosineSimilarity).mockResolvedValue(null)
+    const deps = makeDeps()
 
     const result = await validateOutput({
       taskId,
@@ -45,13 +27,15 @@ describe('validateOutput', () => {
       meetingId: null,
       externalTaskId: null,
       notes: null,
-    })
+    }, deps)
 
     expect(result.ok).toBe(true)
   })
 
   it('passes attribution check when similarity is above threshold', async () => {
-    vi.mocked(getCosineSimilarity).mockResolvedValue(0.90)
+    const deps = makeDeps({
+      getCosineSimilarity: vi.fn().mockResolvedValue(0.90),
+    })
 
     const result = await validateOutput({
       taskId,
@@ -60,13 +44,15 @@ describe('validateOutput', () => {
       meetingId,
       externalTaskId: null,
       notes: null,
-    })
+    }, deps)
 
     expect(result.ok).toBe(true)
   })
 
   it('rejects when similarity is below threshold (wrong attribution)', async () => {
-    vi.mocked(getCosineSimilarity).mockResolvedValue(0.30)
+    const deps = makeDeps({
+      getCosineSimilarity: vi.fn().mockResolvedValue(0.30),
+    })
 
     const result = await validateOutput({
       taskId,
@@ -75,7 +61,7 @@ describe('validateOutput', () => {
       meetingId,
       externalTaskId: null,
       notes: null,
-    })
+    }, deps)
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -84,7 +70,7 @@ describe('validateOutput', () => {
   })
 
   it('skips attribution check when no meetingId is claimed', async () => {
-    vi.mocked(getCosineSimilarity).mockClear()
+    const deps = makeDeps()
 
     const result = await validateOutput({
       taskId,
@@ -93,14 +79,16 @@ describe('validateOutput', () => {
       meetingId: null,
       externalTaskId: null,
       notes: null,
-    })
+    }, deps)
 
     expect(result.ok).toBe(true)
-    expect(getCosineSimilarity).not.toHaveBeenCalled()
+    expect(deps.getCosineSimilarity).not.toHaveBeenCalled()
   })
 
   it('skips attribution check when task has no stored embedding', async () => {
-    vi.mocked(getCosineSimilarity).mockResolvedValue(null)
+    const deps = makeDeps({
+      getCosineSimilarity: vi.fn().mockResolvedValue(null),
+    })
 
     const result = await validateOutput({
       taskId,
@@ -109,8 +97,43 @@ describe('validateOutput', () => {
       meetingId,
       externalTaskId: null,
       notes: null,
-    })
+    }, deps)
 
     expect(result.ok).toBe(true)
+  })
+
+  it('skips attribution check when embedding computation fails', async () => {
+    const deps = makeDeps({
+      computeEmbedding: vi.fn().mockResolvedValue({ ok: false, reason: 'Ollama unreachable' }),
+    })
+
+    const result = await validateOutput({
+      taskId,
+      summary: 'Work done with Ollama down',
+      status: 'DONE',
+      meetingId,
+      externalTaskId: null,
+      notes: null,
+    }, deps)
+
+    expect(result.ok).toBe(true)
+    expect(deps.getCosineSimilarity).not.toHaveBeenCalled()
+  })
+
+  it('rejects schema-invalid output (empty summary)', async () => {
+    const deps = makeDeps()
+
+    const result = await validateOutput({
+      taskId,
+      summary: '',
+      status: 'DONE',
+      meetingId: null,
+      externalTaskId: null,
+      notes: null,
+    }, deps)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toContain('Schema contract failed')
   })
 })
