@@ -1,4 +1,3 @@
-export type { Variables } from "../shared/types.js";
 import type { Variables } from "../shared/types.js";
 
 /**
