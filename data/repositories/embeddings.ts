@@ -45,14 +45,11 @@ export async function getCosineSimilarity(
 
 /**
  * Returns the current attribution threshold from SemanticConfig.
- * Throws if not configured.
+ * Returns null if not configured — caller decides whether that is fatal.
  */
-export async function getAttributionThreshold(): Promise<number> {
+export async function getAttributionThreshold(): Promise<number | null> {
   const config = await prisma.semanticConfig.findUnique({
     where: { key: 'attribution_threshold' },
   })
-  if (!config) {
-    throw new Error('SemanticConfig missing attribution_threshold — run migration')
-  }
-  return config.value
+  return config?.value ?? null
 }
