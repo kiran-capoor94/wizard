@@ -1190,7 +1190,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Inline implementation — the real version lives in orchestrator/ (Step 2).
+// Inline implementation — the real version lives in services/ (Step 2).
 // This function defines the expected contract for variable injection.
 function injectVariables(
   template: string,

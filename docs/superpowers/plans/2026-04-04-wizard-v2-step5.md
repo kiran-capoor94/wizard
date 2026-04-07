@@ -927,7 +927,7 @@ export const ollamaTarget: PackagingTarget = {
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { injectVariables } from '../../orchestrator/inject.js'
+import { injectVariables } from '../../services/inject.js'
 
 const SKILLS_DIR = join(process.cwd(), 'llm/prompts')
 
@@ -1064,7 +1064,7 @@ Session flow uses int IDs throughout. All entity references are `Int @id @defaul
 
 ```typescript
 // interfaces/cli/commands/session.ts
-import { createSession, endSession, getSession } from '../../orchestrator/session.js'
+import { createSession, endSession, getSession } from '../../services/session.js'
 
 export async function sessionStart(): Promise<void> {
   const sessionId = await createSession()
@@ -1097,8 +1097,8 @@ export async function sessionEnd(sessionId: string): Promise<void> {
 
 ```typescript
 // interfaces/cli/commands/task.ts
-import { attachTaskToSession } from '../../orchestrator/session.js'
-import { runTaskStartWorkflow } from '../../orchestrator/workflow.js'
+import { attachTaskToSession } from '../../services/session.js'
+import { runTaskStartWorkflow } from '../../services/workflow.js'
 import { runOutputPipeline } from '../../core/output/pipeline.js'
 
 export async function taskStart(taskIdStr: string, sessionIdStr: string): Promise<void> {
@@ -1137,7 +1137,7 @@ export async function taskEnd(rawOutput: string): Promise<void> {
 
 ```typescript
 // interfaces/cli/commands/doctor.ts
-import { runPreflight } from '../../orchestrator/preflight.js'
+import { runPreflight } from '../../services/preflight.js'
 import { getIntegrationToken } from '../../data/repositories/config.js'
 import { createNotionClient } from '../../integrations/notion/index.js'
 
@@ -1454,8 +1454,8 @@ All IDs are integers. Import from `../../generated/prisma/index.js`, not `@prism
 // tests/contracts/full-session.test.ts
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { PrismaClient } from '../../generated/prisma/index.js'
-import { createSession, endSession, getSession, attachTaskToSession } from '../../orchestrator/session.js'
-import { runTaskStartWorkflow } from '../../orchestrator/workflow.js'
+import { createSession, endSession, getSession, attachTaskToSession } from '../../services/session.js'
+import { runTaskStartWorkflow } from '../../services/workflow.js'
 import { runOutputPipeline } from '../../core/output/pipeline.js'
 import { loadContext } from '../../core/context-loader.js'
 import { scrub } from '../../security/scrub.js'
