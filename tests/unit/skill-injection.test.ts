@@ -1,23 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-
-// Inline implementation — the real version lives in services/ (Step 2).
-// This function defines the expected contract for variable injection.
-function injectVariables(
-  template: string,
-  variables: Record<string, string>,
-): string {
-  let result = template;
-  for (const [key, value] of Object.entries(variables)) {
-    result = result.replaceAll(`{{${key}}}`, value);
-  }
-  const unresolved = result.match(/\{\{[^}]+\}\}/g);
-  if (unresolved) {
-    throw new Error(`Unresolved placeholders: ${unresolved.join(", ")}`);
-  }
-  return result;
-}
+import { injectVariables } from "../../services/inject.js";
 
 const TASK_START_PATH = join(process.cwd(), "llm/prompts/task_start.md");
 
