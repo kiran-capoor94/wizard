@@ -45,8 +45,8 @@ describe('processOutput', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    expect(result.value.meetingId).toBeUndefined()
-    expect(result.value.notes).toBeUndefined()
+    expect(result.value.meetingId).toBeNull()
+    expect(result.value.notes).toBeNull()
   })
 
   it('returns ok: false when no JSON block is present', () => {

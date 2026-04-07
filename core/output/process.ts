@@ -1,13 +1,15 @@
+// core/output/process.ts
 import { z } from 'zod'
 import type { LLMRawOutput, ProcessedOutput, PipelineResult } from './types.js'
+import { TASK_STATUS_VALUES } from '../../shared/types.js'
 
 const ProcessedOutputSchema = z.object({
   taskId: z.number().int().positive(),
   summary: z.string().min(1),
-  status: z.enum(['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED']),
-  meetingId: z.number().int().positive().optional().nullable(),
-  externalTaskId: z.string().optional().nullable(),
-  notes: z.string().optional().nullable(),
+  status: z.enum(TASK_STATUS_VALUES as unknown as [string, ...string[]]),
+  meetingId: z.number().int().positive().optional().nullable().transform((v) => v ?? null),
+  externalTaskId: z.string().optional().nullable().transform((v) => v ?? null),
+  notes: z.string().optional().nullable().transform((v) => v ?? null),
 })
 
 /**

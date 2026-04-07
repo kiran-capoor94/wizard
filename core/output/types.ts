@@ -20,9 +20,9 @@ export type ProcessedOutput = {
   taskId: number
   summary: string
   status: TaskStatus
-  meetingId?: number | null   // claimed attribution — may be wrong
-  externalTaskId?: string | null
-  notes?: string | null
+  meetingId: number | null   // claimed attribution — may be wrong
+  externalTaskId: string | null
+  notes: string | null
 }
 
 /**
