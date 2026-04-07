@@ -1,5 +1,4 @@
-import type { TaskContext } from "../../shared/types.js";
-import type { Variables } from "../../services/inject.js";
+import type { TaskContext, Variables } from "../../shared/types.js";
 
 /**
  * Builds the variable map for the task_start skill template from a TaskContext.
