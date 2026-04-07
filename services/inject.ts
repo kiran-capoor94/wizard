@@ -1,4 +1,5 @@
-export type Variables = Record<string, string>;
+export type { Variables } from "../shared/types.js";
+import type { Variables } from "../shared/types.js";
 
 /**
  * Replaces {{key}} placeholders in a template with values from the variables map.
