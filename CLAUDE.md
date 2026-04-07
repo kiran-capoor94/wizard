@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Wizard
 
-Wizard is a local-first, AI-powered engineering workflow system. It orchestrates LLM-driven skills (meeting review, code investigation, etc.) over a Postgres + pgvector backend. Currently in early build — Step 1 of 5 is in progress.
+Wizard is a local-first, AI-powered engineering workflow system. It orchestrates LLM-driven skills (meeting review, code investigation, etc.) over a Postgres + pgvector backend. Currently in early build — Step 3 of 5 is in progress.
 
 ## Commands
 
@@ -54,4 +54,4 @@ See `AGENTS.md` for the full project structure and architecture principles — i
 
 ## Build Sequence
 
-The system is built in 5 sequential steps (see `AGENTS.md` and `docs/superpowers/plans/` for details). Each step proves a contract before the next begins. Step 1 (schema, repositories, services, first skill) is in progress.
+The system is built in 5 sequential steps (see `AGENTS.md` and `docs/superpowers/plans/` for details). Each step proves a contract before the next begins. Steps 1 and 2 are complete. Step 3 (security, integrations, CLI) is in progress.
