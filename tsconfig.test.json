@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": [
+    "data/**/*.ts",
+    "interfaces/**/*.ts",
+    "shared/**/*.ts",
+    "llm/**/*.ts",
+    "services/**/*.ts",
+    "integrations/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": ["node_modules", "build", "generated"]
+}
