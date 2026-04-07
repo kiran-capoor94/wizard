@@ -29,7 +29,7 @@
 | Modify | `package.json`                        | Add deps, update `bin`, update `build` script, add `test` script |
 | Modify | `tsconfig.json`                       | `rootDir: .`, `include` explicit list, exclude tests             |
 | Modify | `.gitignore`                          | Add `.env`, `build/`, `generated/`                               |
-| Delete | `src/index.ts`                        | Replaced by `interfaces/mcp/index.ts`                                       |
+| Delete | `src/index.ts`                        | Replaced by `interfaces/mcp/index.ts`                            |
 | Delete | `src/middleware.ts`                   | Empty stub                                                       |
 | Delete | `src/tools/attention-list.ts`         | Empty stub                                                       |
 | Delete | `src/notion/index.ts`                 | Moved to `integrations/notion/index.ts`                          |
@@ -1150,16 +1150,16 @@ Context:
 
 **Variable table** (used by the unit test in Task 9):
 
-| Placeholder              | Source                       | Type                                |
-| ------------------------ | ---------------------------- | ----------------------------------- |
-| `{{task_id}}`            | `TaskContext.id`             | number as string                    |
-| `{{title}}`              | `TaskContext.title`          | string                              |
-| `{{task_type}}`          | `TaskContext.taskType`       | TaskType enum as string             |
-| `{{status}}`             | `TaskContext.status`         | TaskStatus enum as string           |
-| `{{external_task_id}}`   | `TaskContext.externalTaskId` | string or "none" when null          |
-| `{{branch}}`             | `TaskContext.branch`         | string or "none" when null          |
-| `{{due_date}}`           | `TaskContext.dueDate`        | ISO date string or "none" when null |
-| `{{context}}`            | Full `TaskContext`           | JSON string                         |
+| Placeholder            | Source                       | Type                                |
+| ---------------------- | ---------------------------- | ----------------------------------- |
+| `{{task_id}}`          | `TaskContext.id`             | number as string                    |
+| `{{title}}`            | `TaskContext.title`          | string                              |
+| `{{task_type}}`        | `TaskContext.taskType`       | TaskType enum as string             |
+| `{{status}}`           | `TaskContext.status`         | TaskStatus enum as string           |
+| `{{external_task_id}}` | `TaskContext.externalTaskId` | string or "none" when null          |
+| `{{branch}}`           | `TaskContext.branch`         | string or "none" when null          |
+| `{{due_date}}`         | `TaskContext.dueDate`        | ISO date string or "none" when null |
+| `{{context}}`          | Full `TaskContext`           | JSON string                         |
 
 - [ ] **Step 8.2: Commit**
 
