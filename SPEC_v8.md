@@ -1,33 +1,33 @@
 # WIZARD v2 — Architecture & Specification
 
-**Version:** 2.0  
-**Date:** March 2026  
-**Author:** Kiran Capoor  
-**Status:** Pre-build. Validated.  
-**First Customer:** Tom — Tech Lead, SISU Health UK  
-**Deployment:** Local-first  
+**Version:** 2.0
+**Date:** March 2026
+**Author:** Kiran Capoor
+**Status:** Pre-build. Validated.
+**First Customer:** Tom — Tech Lead, SISU Health UK
+**Deployment:** Local-first
 
 ---
 
 ## 1. Problem Statement
 
-> *"I kept losing track of my notes, investigations, meeting notes, tasks context, and had to spend hours collecting, writing then managing them across multiple sources."*
+> _"I kept losing track of my notes, investigations, meeting notes, tasks context, and had to spend hours collecting, writing then managing them across multiple sources."_
 
 Every AI coding session starts from zero. Context lives across Jira, Notion, Krisp, and the codebase — disconnected, unstructured, and never pre-loaded before work begins. Engineers are the integration layer. Wizard removes that tax.
 
 ### v1 Gaps That v2 Resolves
 
-| Gap | Impact |
-|-----|--------|
-| No database — raw data sent everywhere | LLM receives unvalidated, unstructured input every session |
-| ~300k tokens/session, ~100k/task | Expensive and unsustainable at any scale |
-| All steps manual, no orchestration | Brittle. Breaks when engineer forgets a step |
-| LLM owns connections + orchestration + reasoning | Nothing is testable, auditable, or deterministic |
-| Serena invoked by LLM, not deterministically | v2 resolution: Wizard does not own Serena invocation. LLM uses Serena as a peer MCP server. Wizard owns pre-session code context via CodeChunkEmbedding. |
-| No state management | Session context lost on crash or restart |
-| No PII protection | Engineer discipline is the only safeguard |
-| No evaluation scaffolding | No foundation for measuring if prompts are working |
-| Not reusable, not model-agnostic | Hardcoded to Neovim + Notion + Jira + Claude |
+| Gap                                              | Impact                                                                                                                                                   |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No database — raw data sent everywhere           | LLM receives unvalidated, unstructured input every session                                                                                               |
+| ~300k tokens/session, ~100k/task                 | Expensive and unsustainable at any scale                                                                                                                 |
+| All steps manual, no orchestration               | Brittle. Breaks when engineer forgets a step                                                                                                             |
+| LLM owns connections + orchestration + reasoning | Nothing is testable, auditable, or deterministic                                                                                                         |
+| Serena invoked by LLM, not deterministically     | v2 resolution: Wizard does not own Serena invocation. LLM uses Serena as a peer MCP server. Wizard owns pre-session code context via CodeChunkEmbedding. |
+| No state management                              | Session context lost on crash or restart                                                                                                                 |
+| No PII protection                                | Engineer discipline is the only safeguard                                                                                                                |
+| No evaluation scaffolding                        | No foundation for measuring if prompts are working                                                                                                       |
+| Not reusable, not model-agnostic                 | Hardcoded to Neovim + Notion + Jira + Claude                                                                                                             |
 
 ---
 
@@ -63,12 +63,12 @@ MCP, CLI, Plugin, and future API are interfaces into the same underlying impleme
 
 ### 3.2 Why Postgres Over SQLite
 
-| Factor | Justification |
-|--------|--------------|
-| pgvector maturity | sqlite-vec is early-stage. pgvector is production-grade with active maintenance and HNSW index support. This is an observed capability gap, not an anticipated one. |
-| ACID guarantees for sessions | Session state requires atomicity and durability across crashes. Postgres transactions give this natively. |
-| Production parity | SISU Health UK runs Postgres in production. Local development on the same engine eliminates environment-specific bugs. |
-| Multi-user path | Tom's delivery requires multiple engineers. SQLite is file-locked — concurrent access requires workarounds. Postgres handles this natively even for local deployment. |
+| Factor                       | Justification                                                                                                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pgvector maturity            | sqlite-vec is early-stage. pgvector is production-grade with active maintenance and HNSW index support. This is an observed capability gap, not an anticipated one.   |
+| ACID guarantees for sessions | Session state requires atomicity and durability across crashes. Postgres transactions give this natively.                                                             |
+| Production parity            | SISU Health UK runs Postgres in production. Local development on the same engine eliminates environment-specific bugs.                                                |
+| Multi-user path              | Tom's delivery requires multiple engineers. SQLite is file-locked — concurrent access requires workarounds. Postgres handles this natively even for local deployment. |
 
 > SQLite remains the simpler choice for a strictly single-user personal tool. Wizard's scope includes Tom's team, which makes concurrent local access a current requirement, not an anticipated one. That justifies Postgres.
 
@@ -107,6 +107,7 @@ Postgres + pgvector as a single unified store. No separate vector database.
 - Eliminates sync complexity. One store, one connection, one backup strategy.
 
 **Schema entities:**
+
 - `User` — owns Tasks, Sessions, Notes. Auth fields deferred to post-v2.
 - `Repo` — first-class model. Tasks, Meetings, Notes, and CodeChunkEmbedding reference it.
 - `Meeting` — title, outline, keyPoints, krispUrl, notionUrl. Produces ActionItems. Originates Tasks.
@@ -147,42 +148,42 @@ Owns context assembly and workflow execution. Called by all interfaces (MCP, CLI
 
 Pre-flight is a hard gate. Any failure exits before a WorkflowRun is created.
 
-| Step | Action on Failure |
-|------|------------------|
-| 1. Check Postgres connectivity | CLI error + non-zero exit. No WorkflowRun created. |
+| Step                                                    | Action on Failure                                                            |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 1. Check Postgres connectivity                          | CLI error + non-zero exit. No WorkflowRun created.                           |
 | 2. Check pending vector syncs (if integrations present) | CLI error + non-zero exit. Fail-fast — do not proceed with stale embeddings. |
-| 3. Create WorkflowRun with status RUNNING | Pre-flight passed. Execution begins. |
-| 4. Invoke LLM layer via Service | Output pipeline handles LLM failures. |
+| 3. Create WorkflowRun with status RUNNING               | Pre-flight passed. Execution begins.                                         |
+| 4. Invoke LLM layer via Service                         | Output pipeline handles LLM failures.                                        |
 
 #### Call Graph — wizard task start
 
-| Step | Component |
-|------|-----------|
-| 1. User runs command | CLI |
-| 2. CLI triggers workflow | Orchestrator |
-| 3. Orchestrator runs pre-flight | Orchestrator → Postgres |
-| 4. Orchestrator creates WorkflowRun | Orchestrator → Repository → Postgres |
-| 5. Orchestrator calls Service | Service (context assembly) |
-| 6. Service queries data | Service → Repository → Postgres + pgvector |
-| 7. Service passes context to LLM layer | Service → LLM Adapter |
-| 8. LLM adapter calls model | LLM Adapter → Model (Ollama/Claude/etc) |
-| 9. Output returned to pipeline | LLM Adapter → Output Pipeline |
-| 10. Pipeline validates output | Output Pipeline — schema + attribution check |
-| 11. Pipeline writes result | Output Pipeline → Repository → Postgres |
-| 12. Orchestrator updates WorkflowRun | Orchestrator → Repository → Postgres |
-| 13. CLI surfaces result to user | CLI |
+| Step                                   | Component                                    |
+| -------------------------------------- | -------------------------------------------- |
+| 1. User runs command                   | CLI                                          |
+| 2. CLI triggers workflow               | Orchestrator                                 |
+| 3. Orchestrator runs pre-flight        | Orchestrator → Postgres                      |
+| 4. Orchestrator creates WorkflowRun    | Orchestrator → Repository → Postgres         |
+| 5. Orchestrator calls Service          | Service (context assembly)                   |
+| 6. Service queries data                | Service → Repository → Postgres + pgvector   |
+| 7. Service passes context to LLM layer | Service → LLM Adapter                        |
+| 8. LLM adapter calls model             | LLM Adapter → Model (Ollama/Claude/etc)      |
+| 9. Output returned to pipeline         | LLM Adapter → Output Pipeline                |
+| 10. Pipeline validates output          | Output Pipeline — schema + attribution check |
+| 11. Pipeline writes result             | Output Pipeline → Repository → Postgres      |
+| 12. Orchestrator updates WorkflowRun   | Orchestrator → Repository → Postgres         |
+| 13. CLI surfaces result to user        | CLI                                          |
 
 #### LLM Layer (Reasoning & Synthesis Only)
 
 The model-agnostic reasoning boundary. Orchestration calls in, the model responds, the adapter enforces the contract.
 
-| Component | Responsibility | Location |
-|-----------|---------------|----------|
-| `adapters/` (LLM) | Model-specific clients for reasoning. Handles auth, API format, capability negotiation. One adapter per model. | `llm/adapters/` |
-| `adapters/` (Embedding) | Independent interface for vector generation. `EmbeddingAdapter.embed()` is separate from `LLMAdapter.generate()`. Switching LLM does not change embeddings. | `llm/adapters/` |
-| `prompts/` | Model-agnostic prompt templates with typed variable placeholders. Source of truth for all skills. | `llm/prompts/` |
-| `schemas/` | I/O contracts. Defines what the LLM is allowed to say, structurally. Input schemas prevent prompt drift. Output schemas enforce machine-validated shapes. | `llm/schemas/` |
-| `packaging/` | Renders prompt templates into model-specific installation formats. Deploys to `.claude-plugin/` for Claude, equivalent for other models. | `llm/packaging/` |
+| Component               | Responsibility                                                                                                                                              | Location         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `adapters/` (LLM)       | Model-specific clients for reasoning. Handles auth, API format, capability negotiation. One adapter per model.                                              | `llm/adapters/`  |
+| `adapters/` (Embedding) | Independent interface for vector generation. `EmbeddingAdapter.embed()` is separate from `LLMAdapter.generate()`. Switching LLM does not change embeddings. | `llm/adapters/`  |
+| `prompts/`              | Model-agnostic prompt templates with typed variable placeholders. Source of truth for all skills.                                                           | `llm/prompts/`   |
+| `schemas/`              | I/O contracts. Defines what the LLM is allowed to say, structurally. Input schemas prevent prompt drift. Output schemas enforce machine-validated shapes.   | `llm/schemas/`   |
+| `packaging/`            | Renders prompt templates into model-specific installation formats. Deploys to `.claude-plugin/` for Claude, equivalent for other models.                    | `llm/packaging/` |
 
 > **MENTAL MODEL:** `prompts/` = how you ASK | `schemas/` = what you ACCEPT | `adapters/` = how you CALL the model | `packaging/` = how you INSTALL it
 
@@ -190,12 +191,12 @@ The model-agnostic reasoning boundary. Orchestration calls in, the model respond
 
 #### LLM Output Pipeline
 
-| Step | Responsibility | Failure Mode |
-|------|---------------|-------------|
+| Step               | Responsibility                                                                                                                                                                                                     | Failure Mode                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
 | Process + Validate | Handled by `generateObject` (Vercel AI SDK, deferred) or `OllamaAdapter.generate()` — structured output is Zod-validated before it reaches application code. Malformed output is rejected at the adapter boundary. | Adapter throws — service function writes FAILED WorkflowRun |
-| Transform | Map validated output to Postgres schema, resolve foreign keys (e.g. link output to correct Meeting, Task, Session) | Wrong entity linked — flag for review |
-| Store | Prisma write to Postgres, trigger pgvector sync via `pgvector-node` raw query | Partial write — transaction rollback |
-| Materialise | For skills flagged `materialise: true` in `core/`, create a Note entity (investigation or decision type), link to current Task and Session, trigger embedding. One function, not a framework. | Note creation fails — logged, does not fail the pipeline |
+| Transform          | Map validated output to Postgres schema, resolve foreign keys (e.g. link output to correct Meeting, Task, Session)                                                                                                 | Wrong entity linked — flag for review                       |
+| Store              | Prisma write to Postgres, trigger pgvector sync via `pgvector-node` raw query                                                                                                                                      | Partial write — transaction rollback                        |
+| Materialise        | For skills flagged `materialise: true` in `core/`, create a Note entity (investigation or decision type), link to current Task and Session, trigger embedding. One function, not a framework.                      | Note creation fails — logged, does not fail the pipeline    |
 
 > **ERROR PROPAGATION:** Output pipeline errors bubble to Orchestration. Orchestration writes a FAILED WorkflowRun record to Postgres with error details. CLI surfaces the failure to the user.
 
@@ -254,12 +255,12 @@ integrations:
   github:
     token: <token>
 llm:
-  adapter: claude          # claude | openai | gemini | ollama
+  adapter: claude # claude | openai | gemini | ollama
   model: claude-sonnet-4-5
   api_key: <key>
 embedding:
-  adapter: ollama          # fixed for v2
-  model: nomic-embed-text  # vector(768)
+  adapter: ollama # fixed for v2
+  model: nomic-embed-text # vector(768)
   dimensions: 768
 ide:
   primary: neovim
@@ -270,14 +271,14 @@ security:
 
 ### Setup Commands
 
-| Command | Action |
-|---------|--------|
-| `wizard setup` | Reads wizard.config.yaml, starts Docker (Postgres + pgvector + Presidio sidecar), installs all plugins and skills, starts daemons, configures all integrations in sequence |
-| `wizard integrate add <source>` | Adds a new integration post-setup |
-| `wizard ide init --neovim` | Configures Neovim with sidekick and keybindings |
-| `wizard ide init --vscode` | Configures VS Code extension |
-| `wizard ide init --claude-desktop` | Configures Claude Desktop plugin |
-| `wizard doctor` | Validates all integrations, checks DB health, reports any broken connections |
+| Command                            | Action                                                                                                                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wizard setup`                     | Reads wizard.config.yaml, starts Docker (Postgres + pgvector + Presidio sidecar), installs all plugins and skills, starts daemons, configures all integrations in sequence |
+| `wizard integrate add <source>`    | Adds a new integration post-setup                                                                                                                                          |
+| `wizard ide init --neovim`         | Configures Neovim with sidekick and keybindings                                                                                                                            |
+| `wizard ide init --vscode`         | Configures VS Code extension                                                                                                                                               |
+| `wizard ide init --claude-desktop` | Configures Claude Desktop plugin                                                                                                                                           |
+| `wizard doctor`                    | Validates all integrations, checks DB health, reports any broken connections                                                                                               |
 
 ---
 
@@ -294,24 +295,24 @@ security:
 
 Context is loaded based on the type of work being started, not time of day. This is the primary mechanism for reducing token consumption.
 
-| Task Type | Context Pulled | Sources |
-|-----------|---------------|---------|
-| Coding | Relevant tasks, recent ADRs, code embeddings + live symbols (Serena) | Jira, Notion, GitHub, pgvector, Serena |
-| Debugging / Incident | Relevant code chunks, recent changes, related tasks | pgvector, Git, Jira, Serena |
-| Investigation | Meeting notes, tasks, ADRs, code embeddings | All sources |
-| ADR | Architecture history, related decisions | GitHub, Notion |
-| Test generation | Code embeddings, task context | pgvector, Jira |
-| Meeting review | Krisp transcript only | Krisp |
+| Task Type            | Context Pulled                                                       | Sources                                |
+| -------------------- | -------------------------------------------------------------------- | -------------------------------------- |
+| Coding               | Relevant tasks, recent ADRs, code embeddings + live symbols (Serena) | Jira, Notion, GitHub, pgvector, Serena |
+| Debugging / Incident | Relevant code chunks, recent changes, related tasks                  | pgvector, Git, Jira, Serena            |
+| Investigation        | Meeting notes, tasks, ADRs, code embeddings                          | All sources                            |
+| ADR                  | Architecture history, related decisions                              | GitHub, Notion                         |
+| Test generation      | Code embeddings, task context                                        | pgvector, Jira                         |
+| Meeting review       | Krisp transcript only                                                | Krisp                                  |
 
 ### Daily Session Flow
 
-| Command | What Happens |
-|---------|-------------|
-| `wizard session start` | Pulls tasks and meeting notes. Lists them. Asks which task to start. Does not load code context yet. |
-| `wizard task start` | Loads task-type-specific context only. Invokes Serena deterministically via Orchestration if task type requires live symbol traversal. |
-| Work begins | LLM works with prepared context. No raw data. No unnecessary sources loaded. |
-| `wizard task end` | Generates task summary, updates task status, stores output to Postgres, updates Jira if ticket exists. |
-| `wizard session end` | Session summary. Writes session Note to Postgres (session type). Updates Today page in Notion. Routes team knowledge to Engineering Docs. |
+| Command                | What Happens                                                                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `wizard session start` | Pulls tasks and meeting notes. Lists them. Asks which task to start. Does not load code context yet.                                      |
+| `wizard task start`    | Loads task-type-specific context only. Invokes Serena deterministically via Orchestration if task type requires live symbol traversal.    |
+| Work begins            | LLM works with prepared context. No raw data. No unnecessary sources loaded.                                                              |
+| `wizard task end`      | Generates task summary, updates task status, stores output to Postgres, updates Jira if ticket exists.                                    |
+| `wizard session end`   | Session summary. Writes session Note to Postgres (session type). Updates Today page in Notion. Routes team knowledge to Engineering Docs. |
 
 ---
 
@@ -319,24 +320,24 @@ Context is loaded based on the type of work being started, not time of day. This
 
 Skills and prompts live in `llm/prompts/` as model-agnostic templates. At install time, `llm/packaging/` renders them into the format required by the configured model.
 
-| Model | Install Location |
-|-------|----------------|
+| Model                   | Install Location                                     |
+| ----------------------- | ---------------------------------------------------- |
 | Claude (Code / Desktop) | `.claude-plugin/` or Claude Desktop plugin directory |
-| GPT-4 / OpenAI | OpenAI assistant configuration |
-| Gemini | Gemini plugin format |
-| Ollama (local) | Ollama modelfile prompt injection |
+| GPT-4 / OpenAI          | OpenAI assistant configuration                       |
+| Gemini                  | Gemini plugin format                                 |
+| Ollama (local)          | Ollama modelfile prompt injection                    |
 
 ### Default Skills (ship with Wizard)
 
-| Skill | Description |
-|-------|-------------|
-| `session_start` | Loads task list and meeting notes. Presents daily briefing. Asks which task to start. |
-| `task_start` | Loads task-type-specific context. Invokes Serena if required. |
-| `task_end` | Generates task summary. Updates status. Stores output. |
-| `session_end` | Session summary. Routes learnings. Updates Notion and Jira. |
-| `meeting_review` | Reads Krisp transcript. Creates Meeting Note in Notion. Creates SISU Tasks linked to meeting. |
-| `code_review` | Six-step review: correctness, blast radius, invariants, observability, tests, simplicity. |
-| `blast_radius` | Traces every caller and dependent via Serena. Reports what breaks if changed. |
+| Skill                 | Description                                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `session_start`       | Loads task list and meeting notes. Presents daily briefing. Asks which task to start.                            |
+| `task_start`          | Loads task-type-specific context. Invokes Serena if required.                                                    |
+| `task_end`            | Generates task summary. Updates status. Stores output.                                                           |
+| `session_end`         | Session summary. Routes learnings. Updates Notion and Jira.                                                      |
+| `meeting_review`      | Reads Krisp transcript. Creates Meeting Note in Notion. Creates SISU Tasks linked to meeting.                    |
+| `code_review`         | Six-step review: correctness, blast radius, invariants, observability, tests, simplicity.                        |
+| `blast_radius`        | Traces every caller and dependent via Serena. Reports what breaks if changed.                                    |
 | `architecture_debate` | Four-position debate: Domain, Simplicity, Operations, Devil's Advocate. Recommendation with explicit trade-offs. |
 
 ### Variable Injection
@@ -351,14 +352,14 @@ Skills and prompts live in `llm/prompts/` as model-agnostic templates. At instal
 
 Every skill in `llm/prompts/` has a corresponding schema in `llm/schemas/skills/`. This is a 1:1 mapping. If a skill changes, its schema version must change.
 
-| Skill | Schema |
-|-------|--------|
-| `task_start` | `llm/schemas/skills/task_start.schema.json` |
-| `task_end` | `llm/schemas/skills/task_end.schema.json` |
+| Skill            | Schema                                          |
+| ---------------- | ----------------------------------------------- |
+| `task_start`     | `llm/schemas/skills/task_start.schema.json`     |
+| `task_end`       | `llm/schemas/skills/task_end.schema.json`       |
 | `meeting_review` | `llm/schemas/skills/meeting_review.schema.json` |
-| `code_review` | `llm/schemas/skills/code_review.schema.json` |
-| `session_start` | `llm/schemas/skills/session_start.schema.json` |
-| `session_end` | `llm/schemas/skills/session_end.schema.json` |
+| `code_review`    | `llm/schemas/skills/code_review.schema.json`    |
+| `session_start`  | `llm/schemas/skills/session_start.schema.json`  |
+| `session_end`    | `llm/schemas/skills/session_end.schema.json`    |
 
 ---
 
@@ -370,13 +371,13 @@ Three types of tests. Each owns a distinct concern.
 
 At every layer boundary. Verify the interface between layers holds under real conditions.
 
-| Boundary | What is Verified |
-|----------|----------------|
-| Integration → Security | Raw data enters, PII is detected and removed, clean data exits |
-| Security → Data | Only PII-free data is written to Postgres |
-| Data → Orchestration | LLM layer receives exactly what Postgres contains for a given query — type-checked and complete |
+| Boundary                  | What is Verified                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| Integration → Security    | Raw data enters, PII is detected and removed, clean data exits                                      |
+| Security → Data           | Only PII-free data is written to Postgres                                                           |
+| Data → Orchestration      | LLM layer receives exactly what Postgres contains for a given query — type-checked and complete     |
 | Orchestration → LLM Layer | Context is normalised, variables are resolved, schema is valid, pre-flight passes before invocation |
-| LLM Layer → Data | Output conforms to schema contract, attribution is semantically valid via pgvector |
+| LLM Layer → Data          | Output conforms to schema contract, attribution is semantically valid via pgvector                  |
 
 ### Unit Tests — tests/unit/
 
@@ -411,11 +412,11 @@ Serena is an LSP-to-MCP bridge. It wraps Language Server Protocol responses into
 
 ### Code Intelligence Architecture
 
-| Concern | Owner |
-|---------|-------|
-| Pre-session code context (what code is relevant to this task?) | `CodeChunkEmbedding` in Postgres + pgvector — persisted, queried semantically |
+| Concern                                                             | Owner                                                                                           |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Pre-session code context (what code is relevant to this task?)      | `CodeChunkEmbedding` in Postgres + pgvector — persisted, queried semantically                   |
 | Live symbol traversal during task (where is this function defined?) | Serena — LLM invokes this independently as an MCP server. Wizard does not own or invoke Serena. |
-| Staleness detection for code chunks | `contentHash` on `CodeChunkEmbedding` — invalidated on commit via git hook |
+| Staleness detection for code chunks                                 | `contentHash` on `CodeChunkEmbedding` — invalidated on commit via git hook                      |
 
 > **DECISION:** Four code intelligence structures (LSP symbols, TreeSitter blocks, call maps, inheritance) were proposed and rejected. They introduce staleness synchronisation problems without clear retrieval benefit over semantic embeddings at this scale. Revisit with real usage data.
 
@@ -438,27 +439,27 @@ Step 0 is complete. Four contract tests pass. Implementation is at the boundary 
 
 ### Step 0 — Complete
 
-| File | Status |
-|------|--------|
-| `llm/types.ts` | Complete — LLMRequest, LLMResponse, LLMCapabilities, LLMError types |
-| `llm/adapters/base.ts` | Complete — BaseLLMAdapter interface, AbstractLLMAdapter with safeParse and validate |
-| `llm/adapters/ollama.ts` | Complete — OllamaAdapter, gemma4:latest-16k default, Zod v4 toJSONSchema(), PROVIDER_ERROR with traceId |
-| `tests/contracts/llm-adapter.test.ts` | 4 passing — valid JSON, PARSE_ERROR, SCHEMA_VALIDATION, PROVIDER_ERROR |
-| `llm/adapters/embedding-base.ts` | Needed — EmbeddingAdapter interface (embed() method). Not yet built. |
-| `llm/adapters/ollama-embedding.ts` | Needed — OllamaEmbeddingAdapter using nomic-embed-text, vector(768). Not yet built. |
+| File                                  | Status                                                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `llm/types.ts`                        | Complete — LLMRequest, LLMResponse, LLMCapabilities, LLMError types                                     |
+| `llm/adapters/base.ts`                | Complete — BaseLLMAdapter interface, AbstractLLMAdapter with safeParse and validate                     |
+| `llm/adapters/ollama.ts`              | Complete — OllamaAdapter, gemma4:latest-16k default, Zod v4 toJSONSchema(), PROVIDER_ERROR with traceId |
+| `tests/contracts/llm-adapter.test.ts` | 4 passing — valid JSON, PARSE_ERROR, SCHEMA_VALIDATION, PROVIDER_ERROR                                  |
+| `llm/adapters/embedding-base.ts`      | Needed — EmbeddingAdapter interface (embed() method). Not yet built.                                    |
+| `llm/adapters/ollama-embedding.ts`    | Needed — OllamaEmbeddingAdapter using nomic-embed-text, vector(768). Not yet built.                     |
 
 ### Step 1 — In Progress
 
 Schema updated (vector(768), services/, repositories in data/). Migration not yet run.
 
-| Item | Status |
-|------|--------|
-| Prisma schema | Updated — vector(768), all entities and relations correct |
-| Migration | Not run. CodeChunkEmbedding excluded from this migration — deferred to Step 5. Run with `prisma migrate dev --name init`. |
-| EmbeddingAdapter interface + OllamaEmbeddingAdapter | Not started |
-| Repository layer (data/) | Not started |
-| Service layer (services/) | Not started |
-| LLM layer connection to Data via Service | Not started |
+| Item                                                | Status                                                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Prisma schema                                       | Updated — vector(768), all entities and relations correct                                                                 |
+| Migration                                           | Not run. CodeChunkEmbedding excluded from this migration — deferred to Step 5. Run with `prisma migrate dev --name init`. |
+| EmbeddingAdapter interface + OllamaEmbeddingAdapter | Not started                                                                                                               |
+| Repository layer (data/)                            | Not started                                                                                                               |
+| Service layer (services/)                           | Not started                                                                                                               |
+| LLM layer connection to Data via Service            | Not started                                                                                                               |
 
 ---
 
@@ -466,13 +467,13 @@ Schema updated (vector(768), services/, repositories in data/). Migration not ye
 
 The following were designed then removed. Each failed the removal test for a local, single-user system at v2 validation stage.
 
-| Removed | Reason |
-|---------|--------|
-| Queues and DLQ | No concurrency requirement. No background jobs that can't fail synchronously. Fails removal test for local single-user tool. |
-| Exaggeration detection | Research problem, not a build step. Implementation was undefined. Not an observed v1 failure mode. |
-| Hallucination detection | Not an observed v1 failure mode — anticipated. Attribution check via pgvector remains as a data integrity concern, which is different. |
-| Full eval framework | Most valuable with real production data. Scaffold only in v2. |
-| Four code intelligence structures (LSP symbols, TreeSitter, call maps, inheritance) | Introduce staleness synchronisation problems without clear retrieval benefit. Replaced by CodeChunkEmbedding + Serena live traversal. |
+| Removed                                                                             | Reason                                                                                                                                 |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Queues and DLQ                                                                      | No concurrency requirement. No background jobs that can't fail synchronously. Fails removal test for local single-user tool.           |
+| Exaggeration detection                                                              | Research problem, not a build step. Implementation was undefined. Not an observed v1 failure mode.                                     |
+| Hallucination detection                                                             | Not an observed v1 failure mode — anticipated. Attribution check via pgvector remains as a data integrity concern, which is different. |
+| Full eval framework                                                                 | Most valuable with real production data. Scaffold only in v2.                                                                          |
+| Four code intelligence structures (LSP symbols, TreeSitter, call maps, inheritance) | Introduce staleness synchronisation problems without clear retrieval benefit. Replaced by CodeChunkEmbedding + Serena live traversal.  |
 
 > **PRINCIPLE:** Design principle #4: complexity must be justified by a specific observed problem, not an anticipated one. These items failed that test.
 
@@ -482,12 +483,12 @@ The following were designed then removed. Each failed the removal test for a loc
 
 pgvector similarity scores are used to detect wrong attributions. The threshold must be calibrated — not assumed.
 
-| Phase | Action |
-|-------|--------|
-| Phase 1 — Manufacture | Create labelled examples of known correct and known wrong task-to-meeting links |
-| Phase 2 — Calibrate | Run similarity scores against labelled set. Set threshold that maximises precision on known wrong links. |
-| Phase 3 — Collect | Real production corrections (wrong links caught in review) become new labelled examples |
-| Phase 4 — Recalibrate | Periodically re-run calibration against growing real-world set |
+| Phase                 | Action                                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| Phase 1 — Manufacture | Create labelled examples of known correct and known wrong task-to-meeting links                          |
+| Phase 2 — Calibrate   | Run similarity scores against labelled set. Set threshold that maximises precision on known wrong links. |
+| Phase 3 — Collect     | Real production corrections (wrong links caught in review) become new labelled examples                  |
+| Phase 4 — Recalibrate | Periodically re-run calibration against growing real-world set                                           |
 
 - Threshold value is stored in Postgres — owned by Data layer.
 - Recalibration is triggered by Orchestration — not by the Data layer itself.
@@ -572,16 +573,16 @@ Tom (Tech Lead, SISU Health UK) has validated the problem and requested Wizard b
 
 ## 15. Open Questions
 
-| Question | Status |
-|----------|--------|
-| CodeChunkEmbedding chunk strategy | **RESOLVED** — overlapping chunks with sliding window (chunk size 512 tokens, stride 256). Deferred to Step 5. Not a blocker for Step 1 migration. |
-| EmbeddingAdapter contract tests | Needed before Step 1 is proved. Same pattern as LLMAdapter — mock Ollama, test embed() returns vector(768), handles provider errors. |
-| 30-minute setup promise with Docker in the path | Must be tested on a clean machine before being promised to any SISU Health engineer. |
-| Serena invocation | **CLOSED.** Wizard does not invoke Serena. Serena is an MCP server the LLM accesses independently. No spike needed. |
-| UK GDPR and NHS DSP Toolkit compliance for clinical data in pipeline | Requires legal review. v2 scope is engineering context only until resolved. |
-| Multi-user local deployment — shared Postgres or separate instances per engineer? | Deferred to post-v2. |
-| Semantic similarity threshold initial value | Requires manufactured labelled examples first. Cannot be set before Phase 1 of calibration. |
-| IDE support beyond Neovim — VS Code extension build effort | Deferred. Neovim first, VS Code after v2 is stable. |
+| Question                                                                          | Status                                                                                                                                             |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CodeChunkEmbedding chunk strategy                                                 | **RESOLVED** — overlapping chunks with sliding window (chunk size 512 tokens, stride 256). Deferred to Step 5. Not a blocker for Step 1 migration. |
+| EmbeddingAdapter contract tests                                                   | Needed before Step 1 is proved. Same pattern as LLMAdapter — mock Ollama, test embed() returns vector(768), handles provider errors.               |
+| 30-minute setup promise with Docker in the path                                   | Must be tested on a clean machine before being promised to any SISU Health engineer.                                                               |
+| Serena invocation                                                                 | **CLOSED.** Wizard does not invoke Serena. Serena is an MCP server the LLM accesses independently. No spike needed.                                |
+| UK GDPR and NHS DSP Toolkit compliance for clinical data in pipeline              | Requires legal review. v2 scope is engineering context only until resolved.                                                                        |
+| Multi-user local deployment — shared Postgres or separate instances per engineer? | Deferred to post-v2.                                                                                                                               |
+| Semantic similarity threshold initial value                                       | Requires manufactured labelled examples first. Cannot be set before Phase 1 of calibration.                                                        |
+| IDE support beyond Neovim — VS Code extension build effort                        | Deferred. Neovim first, VS Code after v2 is stable.                                                                                                |
 
 ---
 
@@ -604,4 +605,4 @@ Tom (Tech Lead, SISU Health UK) has validated the problem and requested Wizard b
 
 ---
 
-*Kiran Capoor · SISU Health UK · March 2026*
+_Kiran Capoor · SISU Health UK · March 2026_
