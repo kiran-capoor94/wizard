@@ -2,7 +2,7 @@
   "name": "wizard",
   "packageManager": "yarn@4.12.0",
   "type": "module",
-  "bin": "./build/mcp/index.js",
+  "bin": "./build/interfaces/mcp/index.js",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@notionhq/client": "^5.15.0",
@@ -23,7 +23,7 @@
     "vitest": "^3.0.0"
   },
   "scripts": {
-    "build": "tsc && chmod 755 build/mcp/index.js",
+    "build": "tsc && chmod 755 build/interfaces/mcp/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
