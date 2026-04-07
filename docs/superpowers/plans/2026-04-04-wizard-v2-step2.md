@@ -12,9 +12,11 @@
 
 | Action | Path                                              | Responsibility                                                             |
 | ------ | ------------------------------------------------- | -------------------------------------------------------------------------- |
+| Create | `data/repositories/health.ts`                     | Health repository — checkPostgresConnectivity, checkPgvectorInstalled      |
+| Create | `data/repositories/session.ts`                    | Session repository — createSessionRecord, endSessionRecord, findSessionById, attachTask |
 | Create | `services/inject.ts`                              | Variable injection — replaces `{{key}}` placeholders; throws on unresolved |
-| Create | `services/preflight.ts`                           | Pre-flight check — Postgres reachable + pgvector installed                 |
-| Create | `services/session.ts`                             | Session lifecycle — create, attach task, end, re-query                     |
+| Create | `services/preflight.ts`                           | Pre-flight check — delegates to health repository                          |
+| Create | `services/session.ts`                             | Session lifecycle — delegates to session repository                        |
 | Create | `services/workflow.ts`                            | Workflow execution — runs task_start, returns formatted prompt             |
 | Create | `core/workflows/task-start.ts`                    | Hardcoded task_start workflow definition                                   |
 | Modify | `interfaces/mcp/index.ts`                         | Add `session_start` and `task_start` MCP tools                             |
