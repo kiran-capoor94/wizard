@@ -1,4 +1,7 @@
-import { prisma } from "../data/db.js";
+import {
+  checkPostgresConnectivity,
+  checkPgvectorInstalled,
+} from "../data/repositories/health.js";
 
 export type PreflightResult = { ok: true } | { ok: false; reason: string };
 
@@ -7,18 +10,13 @@ export type PreflightResult = { ok: true } | { ok: false; reason: string };
  * Must pass before any LLM invocation.
  */
 export async function runPreflight(): Promise<PreflightResult> {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-  } catch (err) {
-    return { ok: false, reason: `Postgres unreachable: ${String(err)}` };
+  const connected = await checkPostgresConnectivity();
+  if (!connected) {
+    return { ok: false, reason: "Postgres unreachable" };
   }
 
-  const rows = await prisma.$queryRaw<{ count: bigint }[]>`
-    SELECT count(*) AS count
-    FROM pg_extension
-    WHERE extname = 'vector'
-  `;
-  if (Number(rows[0].count) === 0) {
+  const hasPgvector = await checkPgvectorInstalled();
+  if (!hasPgvector) {
     return { ok: false, reason: "pgvector extension not installed" };
   }
 
