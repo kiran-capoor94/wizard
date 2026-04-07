@@ -11,15 +11,15 @@ export type IntegrationSource = 'notion' | 'jira' | 'github' | 'krisp'
 export async function storeIntegrationToken(
   source: IntegrationSource,
   token: string,
-  metadata?: Record<string, unknown>
+  metadata?: any
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const encrypted = encrypt(token)
   if (!encrypted.ok) return encrypted
 
   await prisma.integrationConfig.upsert({
     where: { source },
-    update: { token: encrypted.value },
-    create: { source, token: encrypted.value, metadata: metadata as any },
+    update: { token: encrypted.value, metadata: metadata ?? {} },
+    create: { source, token: encrypted.value, metadata: metadata ?? {} },
   })
   return { ok: true }
 }
