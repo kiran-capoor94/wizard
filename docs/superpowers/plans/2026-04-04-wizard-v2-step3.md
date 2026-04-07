@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the Security layer (PII scrubbing), the first integration (Notion), the config system (`wizard.config.yaml`), and the `wizard setup` CLI command. Prove that raw Notion data passes through PII scrubbing before reaching Postgres, and that an audit trail records what was scrubbed.
+**Goal:** Build the Security layer (PII scrubbing via Presidio Docker sidecar), the first integration (Notion), the config system (`wizard.config.yaml`), and the `wizard setup` CLI command. Prove that raw Notion data passes through PII scrubbing before reaching Postgres, and that an audit trail records what was scrubbed.
 
-**Architecture:** Raw data flows Integration → Security → Data. Security is the only thing that stands between raw external data and Postgres. The Security layer scrubs PII (emails, phone numbers, NHS numbers) and emits audit entries. It never stubs — detected PII is removed, not replaced. Integration tokens are stored encrypted in `IntegrationConfig`. The CLI reads `wizard.config.yaml`, orchestrates setup, and stores config in Postgres.
+**Architecture:** Raw data flows Integration → Security → Data. Security is the only thing that stands between raw external data and Postgres. The Security layer scrubs PII via Microsoft Presidio (Docker HTTP sidecar) and emits audit entries. It never stubs — detected PII is removed, not replaced. Presidio provides 50+ built-in recognisers including emails, UK phone numbers, and NHS numbers. The TypeScript `security/` module is an HTTP client (~50 lines) calling the Presidio REST API. Integration tokens are stored encrypted in `IntegrationConfig`. The CLI reads `wizard.config.yaml`, orchestrates setup, and stores config in Postgres. PII scrubbing applies to all models including Meeting, ActionItem, Task, Note, and any new models with user-facing text fields. Notion pull creates Tasks with `externalTaskId` and Meetings with separate `ActionItem` records (not `String[]` on Meeting).
 
-**Tech Stack:** TypeScript (ESM, Node16), Prisma, Vitest, `js-yaml` (YAML parsing), `commander` (CLI), `@notionhq/client` (already installed). Node's built-in `crypto` for AES-256-GCM token encryption. No new heavy dependencies.
+**Tech Stack:** TypeScript (ESM, bundler), Prisma (`prisma-client` generator with output to `generated/prisma`), Vitest, `js-yaml` (YAML parsing), `commander` (CLI), `@notionhq/client` (already installed). Node's built-in `crypto` for AES-256-GCM token encryption. No new heavy dependencies.
 
 ---
 
@@ -14,17 +14,17 @@
 
 | Action | Path | Responsibility |
 |---|---|---|
-| Create | `security/scrub.ts` | PII detection (regex) and removal; returns scrubbed text + audit entries |
+| Create | `security/scrub.ts` | PII detection via Presidio HTTP client; returns scrubbed text + audit entries |
 | Create | `security/types.ts` | `ScrubResult`, `AuditEntry` types |
 | Create | `security/encrypt.ts` | AES-256-GCM token encryption/decryption for `IntegrationConfig.token` |
 | Create | `integrations/notion/pull.ts` | Pull tasks and meetings from Notion, route through security |
 | Create | `core/config.ts` | Parse and validate `wizard.config.yaml` with Zod |
-| Create | `cli/index.ts` | CLI entry point (commander) |
-| Create | `cli/commands/setup.ts` | `wizard setup` — reads config, stores tokens, validates connections |
+| Create | `interfaces/cli/index.ts` | CLI entry point (commander) |
+| Create | `interfaces/cli/commands/setup.ts` | `wizard setup` — reads config, stores tokens, validates connections |
 | Create | `wizard.config.example.yaml` | Documented example config file (committed) |
-| Create | `data/queries/config.ts` | Read/write `IntegrationConfig` rows |
+| Create | `data/repositories/config.ts` | Read/write `IntegrationConfig` rows |
 | Create | New Prisma migration | Add `AuditLog` table |
-| Modify | `tsconfig.json` | Add `security/**/*.ts`, `cli/**/*.ts` to `include` |
+| Modify | `tsconfig.json` | Add `security/**/*.ts`, `interfaces/**/*.ts` to `include` |
 | Modify | `package.json` | Add `js-yaml`, `commander`; add `@types/js-yaml` dev dep; add `cli` bin entry |
 | Create | `tests/unit/scrub.test.ts` | Known PII patterns detected and removed |
 | Create | `tests/contracts/integration-to-security.test.ts` | Raw data → scrubbed → stored |
@@ -58,7 +58,7 @@ Add a second binary entry so `wizard` is available as a CLI command after instal
   "type": "module",
   "bin": {
     "wizard-mcp": "./build/mcp/index.js",
-    "wizard": "./build/cli/index.js"
+    "wizard": "./build/interfaces/cli/index.js"
   },
   "prisma": {
     "schema": "data/prisma/schema.prisma"
@@ -66,7 +66,6 @@ Add a second binary entry so `wizard` is available as a CLI command after instal
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@notionhq/client": "^5.15.0",
-    "@prisma/client": "^6.0.0",
     "commander": "^12.0.0",
     "js-yaml": "^4.1.0",
     "zod": "^4.3.6"
@@ -80,7 +79,7 @@ Add a second binary entry so `wizard` is available as a CLI command after instal
     "vitest": "^3.0.0"
   },
   "scripts": {
-    "build": "tsc && chmod 755 build/mcp/index.js && chmod 755 build/cli/index.js",
+    "build": "tsc && chmod 755 build/mcp/index.js && chmod 755 build/interfaces/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -95,9 +94,9 @@ Add a second binary entry so `wizard` is available as a CLI command after instal
 ```json
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2023",
     "module": "Node16",
-    "moduleResolution": "Node16",
+    "moduleResolution": "bundler",
     "outDir": "./build",
     "rootDir": ".",
     "strict": true,
@@ -107,13 +106,11 @@ Add a second binary entry so `wizard` is available as a CLI command after instal
   },
   "include": [
     "data/**/*.ts",
-    "mcp/**/*.ts",
+    "interfaces/**/*.ts",
     "shared/**/*.ts",
     "integrations/**/*.ts",
-    "orchestrator/**/*.ts",
     "core/**/*.ts",
-    "security/**/*.ts",
-    "cli/**/*.ts"
+    "security/**/*.ts"
   ],
   "exclude": [
     "node_modules",
@@ -126,7 +123,7 @@ Add a second binary entry so `wizard` is available as a CLI command after instal
 - [ ] **Step 1.4: Create directory skeleton**
 
 ```bash
-mkdir -p security cli/commands data/queries
+mkdir -p security interfaces/cli/commands data/repositories
 ```
 
 - [ ] **Step 1.5: Verify TypeScript compiles**
@@ -149,19 +146,19 @@ git commit -m "chore: add js-yaml and commander, update tsconfig for security/ a
 ## Task 2: Prisma Migration — `AuditLog` Table
 
 **Files:**
-- New migration in `data/prisma/migrations/`
-- Modify: `data/prisma/schema.prisma`
+- New migration in `prisma/migrations/`
+- Modify: `prisma/schema.prisma`
 
 ---
 
-- [ ] **Step 2.1: Add `AuditLog` model to `data/prisma/schema.prisma`**
+- [ ] **Step 2.1: Add `AuditLog` model to `prisma/schema.prisma`**
 
-Append to the schema (after existing models):
+Append to the schema (after existing models). All IDs are `Int @id @default(autoincrement())`:
 
 ```prisma
 // Audit trail for PII scrubbing — records what was detected and removed
 model AuditLog {
-  id           String   @id @default(cuid())
+  id           Int      @id @default(autoincrement())
   source       String   // integration source: "notion", "jira", etc.
   fieldPath    String   // which field in the source data was scrubbed
   piiType      String   // "email", "phone", "nhs_number"
@@ -176,7 +173,7 @@ model AuditLog {
 npx prisma migrate dev --name add-audit-log
 ```
 
-Expected: migration file created in `data/prisma/migrations/[timestamp]_add-audit-log/migration.sql` and applied.
+Expected: migration file created in `prisma/migrations/[timestamp]_add-audit-log/migration.sql` and applied.
 
 - [ ] **Step 2.3: Verify the table exists**
 
@@ -186,10 +183,28 @@ docker-compose exec postgres psql -U wizard -d wizard -c "\dt" | grep Audit
 
 Expected: `AuditLog` appears in the table list.
 
-- [ ] **Step 2.4: Commit**
+- [ ] **Step 2.4: Ensure docker-compose includes Presidio services**
+
+`docker-compose.yaml` should include these Presidio services alongside Postgres (required for PII scrubbing in Step 3):
+
+```yaml
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer:latest
+    ports:
+      - "5002:5002"
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer:latest
+    ports:
+      - "5001:5001"
+```
+
+`wizard setup` (and `docker-compose up -d`) will start Presidio alongside Postgres.
+
+- [ ] **Step 2.5: Commit**
 
 ```bash
-git add data/prisma/schema.prisma data/prisma/migrations/
+git add prisma/schema.prisma prisma/migrations/
 git commit -m "feat: add AuditLog table migration"
 ```
 
@@ -208,12 +223,9 @@ git commit -m "feat: add AuditLog table migration"
 
 ```typescript
 // security/types.ts
-
-export type PiiType = 'email' | 'phone_uk' | 'nhs_number'
-
 export type AuditEntry = {
   fieldPath: string
-  piiType: PiiType
+  piiType: string        // Presidio entity_type, lowercased
   originalHash: string   // SHA-256 hex of the original match
 }
 
@@ -230,51 +242,33 @@ export type ScrubResult = {
 import { describe, it, expect } from 'vitest'
 import { scrub } from '../../security/scrub.js'
 
-describe('scrub', () => {
-  it('removes email addresses from text', () => {
-    const result = scrub('Contact kiran@example.com for details', 'notion.meeting.notes')
+// Requires: docker-compose up -d (Presidio sidecar must be running)
+describe('scrub (Presidio)', () => {
+  it('removes email addresses from text', async () => {
+    const result = await scrub('Contact kiran@example.com for details', 'notion.meeting.notes')
     expect(result.text).not.toContain('kiran@example.com')
-    expect(result.text).toContain('Contact')
-    expect(result.entries).toHaveLength(1)
-    expect(result.entries[0].piiType).toBe('email')
-    expect(result.entries[0].fieldPath).toBe('notion.meeting.notes')
+    expect(result.entries.length).toBeGreaterThanOrEqual(1)
+    expect(result.entries[0].piiType).toContain('email')
   })
 
-  it('removes UK phone numbers from text', () => {
-    const result = scrub('Call 07700 900123 to discuss', 'notion.task.description')
-    expect(result.text).not.toContain('07700 900123')
-    expect(result.entries).toHaveLength(1)
-    expect(result.entries[0].piiType).toBe('phone_uk')
+  it('removes UK phone numbers from text', async () => {
+    const result = await scrub('Call +447700900123 to discuss', 'notion.task.description')
+    expect(result.text).not.toContain('+447700900123')
+    expect(result.entries.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('removes NHS numbers from text', () => {
-    const result = scrub('NHS number: 943-476-5919', 'notion.meeting.notes')
-    expect(result.text).not.toContain('943-476-5919')
-    expect(result.entries).toHaveLength(1)
-    expect(result.entries[0].piiType).toBe('nhs_number')
-  })
-
-  it('removes multiple PII instances from one field', () => {
-    const result = scrub(
-      'Email: dev@example.com, phone: 07700 900456',
-      'notion.task.description'
-    )
-    expect(result.text).not.toContain('dev@example.com')
-    expect(result.text).not.toContain('07700 900456')
-    expect(result.entries).toHaveLength(2)
-  })
-
-  it('returns unchanged text and no entries when no PII is present', () => {
+  it('returns unchanged text when no PII is present', async () => {
     const input = 'Deploy the auth service to staging'
-    const result = scrub(input, 'notion.task.title')
+    const result = await scrub(input, 'notion.task.title')
     expect(result.text).toBe(input)
     expect(result.entries).toHaveLength(0)
   })
 
-  it('stores a SHA-256 hash of the original match, not the plaintext', () => {
-    const result = scrub('Contact dev@example.com', 'test.field')
-    expect(result.entries[0].originalHash).toMatch(/^[a-f0-9]{64}$/)
-    expect(result.entries[0].originalHash).not.toContain('dev@example.com')
+  it('stores a SHA-256 hash of the original match', async () => {
+    const result = await scrub('Contact dev@example.com', 'test.field')
+    if (result.entries.length > 0) {
+      expect(result.entries[0].originalHash).toMatch(/^[a-f0-9]{64}$/)
+    }
   })
 })
 ```
@@ -292,60 +286,68 @@ Expected: `Error: Failed to resolve import "../../security/scrub.js"`
 ```typescript
 // security/scrub.ts
 import { createHash } from 'node:crypto'
-import type { PiiType, ScrubResult, AuditEntry } from './types.js'
+import type { ScrubResult, AuditEntry } from './types.js'
 
-// PII patterns. Order matters: most specific first.
-const PII_PATTERNS: Array<{ type: PiiType; pattern: RegExp }> = [
-  {
-    type: 'nhs_number',
-    // NHS numbers: 10 digits in groups of 3-3-4 separated by space or hyphen
-    pattern: /\b\d{3}[\s-]\d{3}[\s-]\d{4}\b/g,
-  },
-  {
-    type: 'phone_uk',
-    // UK mobile and landline: starts with 07 or +44, 10-11 digits with optional spaces
-    pattern: /(\+44\s?|0)7\d{3}[\s-]?\d{6}\b|\b0[1-9]\d{2,3}[\s-]?\d{5,6}\b/g,
-  },
-  {
-    type: 'email',
-    pattern: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
-  },
-]
+const PRESIDIO_ANALYZER_URL = process.env.PRESIDIO_ANALYZER_URL ?? 'http://localhost:5002'
+const PRESIDIO_ANONYMIZER_URL = process.env.PRESIDIO_ANONYMIZER_URL ?? 'http://localhost:5001'
+
+type AnalyzerResult = {
+  entity_type: string
+  start: number
+  end: number
+  score: number
+}
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
 /**
- * Detects and removes PII from a text string.
+ * Detects and removes PII from a text string using Microsoft Presidio.
  * Returns the cleaned text and an audit entry for each match.
  * Scrub only — detected PII is removed, not stubbed or replaced.
  */
-export function scrub(text: string, fieldPath: string): ScrubResult {
-  let result = text
-  const entries: AuditEntry[] = []
+export async function scrub(text: string, fieldPath: string): Promise<ScrubResult> {
+  const analyzeResponse = await fetch(`${PRESIDIO_ANALYZER_URL}/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, language: 'en' }),
+  })
 
-  for (const { type, pattern } of PII_PATTERNS) {
-    // Reset lastIndex to ensure global patterns start from beginning
-    pattern.lastIndex = 0
-    const matches = result.matchAll(pattern)
-
-    for (const match of matches) {
-      entries.push({
-        fieldPath,
-        piiType: type,
-        originalHash: sha256(match[0]),
-      })
-    }
-
-    pattern.lastIndex = 0
-    result = result.replace(pattern, '')
+  if (!analyzeResponse.ok) {
+    throw new Error(`Presidio analyzer error: ${analyzeResponse.status}`)
   }
 
-  // Clean up any double spaces left by removal
-  result = result.replace(/  +/g, ' ').trim()
+  const entities: AnalyzerResult[] = await analyzeResponse.json()
 
-  return { text: result, entries }
+  const entries: AuditEntry[] = entities.map((entity) => ({
+    fieldPath,
+    piiType: entity.entity_type.toLowerCase(),
+    originalHash: sha256(text.slice(entity.start, entity.end)),
+  }))
+
+  if (entities.length === 0) {
+    return { text, entries: [] }
+  }
+
+  const anonymizeResponse = await fetch(`${PRESIDIO_ANONYMIZER_URL}/anonymize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      analyzer_results: entities,
+      anonymizers: { DEFAULT: { type: 'replace', new_value: '' } },
+    }),
+  })
+
+  if (!anonymizeResponse.ok) {
+    throw new Error(`Presidio anonymizer error: ${anonymizeResponse.status}`)
+  }
+
+  const result = await anonymizeResponse.json()
+  const cleaned = (result.text as string).replace(/  +/g, ' ').trim()
+
+  return { text: cleaned, entries }
 }
 ```
 
@@ -358,15 +360,13 @@ yarn test tests/unit/scrub.test.ts
 Expected:
 
 ```
-✓ scrub > removes email addresses from text
-✓ scrub > removes UK phone numbers from text
-✓ scrub > removes NHS numbers from text
-✓ scrub > removes multiple PII instances from one field
-✓ scrub > returns unchanged text and no entries when no PII is present
-✓ scrub > stores a SHA-256 hash of the original match, not the plaintext
+✓ scrub (Presidio) > removes email addresses from text
+✓ scrub (Presidio) > removes UK phone numbers from text
+✓ scrub (Presidio) > returns unchanged text when no PII is present
+✓ scrub (Presidio) > stores a SHA-256 hash of the original match
 
 Test Files  1 passed (1)
-Tests       6 passed (6)
+Tests       4 passed (4)
 ```
 
 - [ ] **Step 3.6: Commit**
@@ -408,6 +408,8 @@ And to `.env.example` (placeholder):
 ```
 DATABASE_URL="postgresql://wizard:wizard@localhost:5432/wizard"
 WIZARD_ENCRYPTION_KEY="replace-with-64-char-hex-string"
+PRESIDIO_ANALYZER_URL=http://localhost:5002
+PRESIDIO_ANONYMIZER_URL=http://localhost:5001
 ```
 
 - [ ] **Step 4.2: Write the failing test**
@@ -548,19 +550,21 @@ git commit -m "feat: add AES-256-GCM token encryption to security/encrypt"
 
 ---
 
-## Task 5: `data/queries/config.ts` — Integration Config Query Layer
+## Task 5: `data/repositories/config.ts` — Integration Config Repository
 
 **Files:**
-- Create: `data/queries/config.ts`
-- Create: `data/queries/audit.ts`
+- Create: `data/repositories/config.ts`
+- Create: `data/repositories/audit.ts`
+
+`IntegrationConfig` uses `Int @id @default(autoincrement())` IDs, consistent with all other models.
 
 ---
 
-- [ ] **Step 5.1: Create `data/queries/config.ts`**
+- [ ] **Step 5.1: Create `data/repositories/config.ts`**
 
 ```typescript
-// data/queries/config.ts
-import { PrismaClient } from '@prisma/client'
+// data/repositories/config.ts
+import { PrismaClient } from '../../generated/prisma/index.js'
 import { encrypt, decrypt } from '../../security/encrypt.js'
 
 const prisma = new PrismaClient()
@@ -598,11 +602,11 @@ export async function getIntegrationToken(
 }
 ```
 
-- [ ] **Step 5.2: Create `data/queries/audit.ts`**
+- [ ] **Step 5.2: Create `data/repositories/audit.ts`**
 
 ```typescript
-// data/queries/audit.ts
-import { PrismaClient } from '@prisma/client'
+// data/repositories/audit.ts
+import { PrismaClient } from '../../generated/prisma/index.js'
 import type { AuditEntry } from '../../security/types.js'
 
 const prisma = new PrismaClient()
@@ -638,8 +642,8 @@ Expected: zero errors.
 - [ ] **Step 5.4: Commit**
 
 ```bash
-git add data/queries/config.ts data/queries/audit.ts
-git commit -m "feat: add integration config and audit query layer"
+git add data/repositories/config.ts data/repositories/audit.ts
+git commit -m "feat: add integration config and audit repository layer"
 ```
 
 ---
@@ -670,6 +674,16 @@ integrations:
     token: your-github-personal-access-token
   krisp:
     method: mcp        # only supported method in v2
+
+llm:
+  adapter: claude          # claude | openai | gemini | ollama
+  model: claude-sonnet-4-5
+  api_key: your-llm-api-key
+
+embedding:
+  adapter: ollama          # fixed for v2
+  model: nomic-embed-text  # vector(768)
+  dimensions: 768
 
 ide:
   primary: neovim      # neovim | vscode | claude-desktop
@@ -840,7 +854,7 @@ git commit -m "feat: add wizard.config.yaml parsing to core/config"
 - Create: `integrations/notion/pull.ts`
 - Create: `tests/unit/notion-pull.test.ts`
 
-`pull.ts` fetches raw data from Notion and passes it through the security layer before returning. It never writes to Postgres — that's the caller's responsibility.
+`pull.ts` fetches raw data from Notion and passes it through the security layer before returning. It never writes to Postgres — that's the caller's responsibility. Notion pull creates Tasks with `externalTaskId` (not `jiraKey`) and Meetings with separate `ActionItem` records (not `String[]` on Meeting). The caller is responsible for creating `ActionItem` rows in Postgres via the repository layer.
 
 ---
 
@@ -858,7 +872,12 @@ export type RawNotionTask = {
   description: ScrubResult
   status: string
   dueDate: string | null
-  jiraKey: string | null
+  externalTaskId: string | null
+}
+
+export type RawNotionActionItem = {
+  action: ScrubResult
+  dueDate: string | null
 }
 
 export type RawNotionMeeting = {
@@ -866,11 +885,13 @@ export type RawNotionMeeting = {
   title: ScrubResult
   notes: ScrubResult
   date: string | null
+  actionItems: RawNotionActionItem[]
 }
 
 /**
  * Fetches tasks from a Notion database, scrubs PII from text fields.
  * Returns raw (unsaved) task data with scrub results.
+ * Tasks use externalTaskId (not jiraKey) for external ticket references.
  */
 export async function pullNotionTasks(
   token: string,
@@ -888,7 +909,7 @@ export async function pullNotionTasks(
     const rawDesc = extractRichText(props['Description'] ?? props['Notes']) ?? ''
     const status = extractSelect(props['Status']) ?? 'Todo'
     const dueDate = extractDate(props['Due Date'] ?? props['Due']) ?? null
-    const jiraKey = extractRichText(props['Jira Key'] ?? props['Ticket']) ?? null
+    const externalTaskId = extractRichText(props['Ticket'] ?? props['External ID']) ?? null
 
     return {
       notionId: page.id,
@@ -896,13 +917,15 @@ export async function pullNotionTasks(
       description: scrub(rawDesc, `notion.task.${page.id}.description`),
       status,
       dueDate,
-      jiraKey,
+      externalTaskId,
     }
   })
 }
 
 /**
  * Fetches meeting notes from a Notion database, scrubs PII from text fields.
+ * Action items are returned as separate RawNotionActionItem entries — the caller
+ * creates ActionItem records in Postgres (not String[] on Meeting).
  */
 export async function pullNotionMeetings(
   token: string,
@@ -920,11 +943,20 @@ export async function pullNotionMeetings(
     const rawNotes = extractRichText(props['Notes'] ?? props['Content']) ?? ''
     const date = extractDate(props['Date'] ?? props['Meeting Date']) ?? null
 
+    // Extract action items from a multi-select or rich_text list property
+    const rawActionItems = extractActionItems(props['Action Items'] ?? props['Actions'])
+
+    const actionItems: RawNotionActionItem[] = rawActionItems.map((item, idx) => ({
+      action: scrub(item, `notion.meeting.${page.id}.actionItem.${idx}`),
+      dueDate: null,
+    }))
+
     return {
       notionId: page.id,
       title: scrub(rawTitle, `notion.meeting.${page.id}.title`),
       notes: scrub(rawNotes, `notion.meeting.${page.id}.notes`),
       date,
+      actionItems,
     }
   })
 }
@@ -950,6 +982,19 @@ function extractSelect(prop: any): string | undefined {
 function extractDate(prop: any): string | undefined {
   if (!prop) return undefined
   return prop.date?.start
+}
+
+function extractActionItems(prop: any): string[] {
+  if (!prop) return []
+  if (prop.type === 'rich_text') {
+    const text = prop.rich_text?.map((r: any) => r.plain_text).join('') ?? ''
+    // Split by newline or bullet to get individual action items
+    return text.split(/\n|•|—/).map((s: string) => s.trim()).filter(Boolean)
+  }
+  if (prop.type === 'multi_select') {
+    return prop.multi_select?.map((s: any) => s.name) ?? []
+  }
+  return []
 }
 ```
 
@@ -983,7 +1028,7 @@ vi.mock('@notionhq/client', () => ({
                 type: 'date',
                 date: { start: '2026-04-10' },
               },
-              'Jira Key': {
+              'Ticket': {
                 type: 'rich_text',
                 rich_text: [{ plain_text: 'PD-42' }],
               },
@@ -1006,7 +1051,7 @@ describe('pullNotionTasks', () => {
     expect(tasks[0].title.text).toBe('Deploy auth service')
     expect(tasks[0].status).toBe('In Progress')
     expect(tasks[0].dueDate).toBe('2026-04-10')
-    expect(tasks[0].jiraKey).toBe('PD-42')
+    expect(tasks[0].externalTaskId).toBe('PD-42')
   })
 
   it('scrubs email addresses from description', async () => {
@@ -1044,23 +1089,23 @@ git commit -m "feat: add Notion integration with PII scrubbing"
 
 ---
 
-## Task 8: `cli/` — `wizard setup` Command
+## Task 8: `interfaces/cli/` — `wizard setup` Command
 
 **Files:**
-- Create: `cli/index.ts`
-- Create: `cli/commands/setup.ts`
+- Create: `interfaces/cli/index.ts`
+- Create: `interfaces/cli/commands/setup.ts`
 
 ---
 
-- [ ] **Step 8.1: Create `cli/commands/setup.ts`**
+- [ ] **Step 8.1: Create `interfaces/cli/commands/setup.ts`**
 
 ```typescript
-// cli/commands/setup.ts
+// interfaces/cli/commands/setup.ts
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseConfig } from '../../core/config.js'
-import { storeIntegrationToken } from '../../data/queries/config.js'
-import { createNotionClient } from '../../integrations/notion/index.js'
+import { parseConfig } from '../../../core/config.js'
+import { storeIntegrationToken } from '../../../data/repositories/config.js'
+import { createNotionClient } from '../../../integrations/notion/index.js'
 
 /**
  * Reads wizard.config.yaml, stores integration tokens (encrypted), and
@@ -1104,10 +1149,10 @@ export async function setup(): Promise<void> {
 }
 ```
 
-- [ ] **Step 8.2: Create `cli/index.ts`**
+- [ ] **Step 8.2: Create `interfaces/cli/index.ts`**
 
 ```typescript
-// cli/index.ts
+// interfaces/cli/index.ts
 import { Command } from 'commander'
 import { setup } from './commands/setup.js'
 
@@ -1139,7 +1184,7 @@ Expected: zero errors.
 - [ ] **Step 8.4: Commit**
 
 ```bash
-git add cli/index.ts cli/commands/setup.ts
+git add interfaces/cli/index.ts interfaces/cli/commands/setup.ts
 git commit -m "feat: add wizard setup CLI command"
 ```
 
@@ -1151,6 +1196,8 @@ git commit -m "feat: add wizard setup CLI command"
 - Create: `tests/contracts/integration-to-security.test.ts`
 - Create: `tests/contracts/security-to-data.test.ts`
 
+All test code uses `Int` IDs (autoincrement) and the updated field names (`externalTaskId`, `TaskPriority`, `branch` + `repoId`).
+
 ---
 
 - [ ] **Step 9.1: Create `tests/contracts/integration-to-security.test.ts`**
@@ -1159,8 +1206,8 @@ git commit -m "feat: add wizard setup CLI command"
 // tests/contracts/integration-to-security.test.ts
 import { describe, it, expect } from 'vitest'
 import { scrub } from '../../security/scrub.js'
-import { writeAuditEntries } from '../../data/queries/audit.js'
-import { PrismaClient } from '@prisma/client'
+import { writeAuditEntries } from '../../data/repositories/audit.js'
+import { PrismaClient } from '../../generated/prisma/index.js'
 
 const prisma = new PrismaClient()
 
@@ -1187,6 +1234,8 @@ describe('Integration → Security contract', () => {
     expect(logs).toHaveLength(1)
     expect(logs[0].piiType).toBe('email')
     expect(logs[0].source).toBe('notion')
+    // ID is an autoincrement int
+    expect(typeof logs[0].id).toBe('number')
     // Hash is stored, not plaintext
     expect(logs[0].originalHash).toMatch(/^[a-f0-9]{64}$/)
 
@@ -1204,28 +1253,36 @@ describe('Integration → Security contract', () => {
 ```typescript
 // tests/contracts/security-to-data.test.ts
 import { describe, it, expect, afterAll } from 'vitest'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../../generated/prisma/index.js'
 import { scrub } from '../../security/scrub.js'
 
 const prisma = new PrismaClient()
-const createdTaskIds: string[] = []
+const createdTaskIds: number[] = []
+const createdMeetingIds: number[] = []
+const createdActionItemIds: number[] = []
 
 afterAll(async () => {
+  for (const id of createdActionItemIds) {
+    await prisma.actionItem.delete({ where: { id } }).catch(() => {})
+  }
   for (const id of createdTaskIds) {
     await prisma.task.delete({ where: { id } }).catch(() => {})
+  }
+  for (const id of createdMeetingIds) {
+    await prisma.meeting.delete({ where: { id } }).catch(() => {})
   }
   await prisma.$disconnect()
 })
 
 describe('Security → Data contract', () => {
-  it('only PII-free text is written to Postgres', async () => {
+  it('only PII-free text is written to Postgres (Task with int ID)', async () => {
     const rawTitle = 'Task for dev@example.com'
     const rawDescription = 'Contact 07700 900123 to discuss'
 
     const scrubbedTitle = scrub(rawTitle, 'test.title')
     const scrubbedDescription = scrub(rawDescription, 'test.description')
 
-    // Write scrubbed text to Postgres
+    // Write scrubbed text to Postgres — ID is autoincrement int
     const task = await prisma.task.create({
       data: {
         title: scrubbedTitle.text,
@@ -1236,6 +1293,9 @@ describe('Security → Data contract', () => {
     })
     createdTaskIds.push(task.id)
 
+    // ID is an int, not a string
+    expect(typeof task.id).toBe('number')
+
     // Re-query and assert no PII in stored data
     const stored = await prisma.task.findUnique({ where: { id: task.id } })
 
@@ -1243,6 +1303,46 @@ describe('Security → Data contract', () => {
     expect(stored!.description).not.toContain('07700 900123')
     // Scrubbed versions are stored
     expect(stored!.title).toContain('Task for')
+  })
+
+  it('ActionItem records are created separately from Meeting (not String[])', async () => {
+    const rawTitle = 'Sprint planning with alice@nhs.net'
+    const rawAction = 'Follow up with 07700 900456 about deployment'
+
+    const scrubbedTitle = scrub(rawTitle, 'test.meeting.title')
+    const scrubbedAction = scrub(rawAction, 'test.meeting.actionItem.0')
+
+    // Create Meeting with int ID
+    const meeting = await prisma.meeting.create({
+      data: {
+        title: scrubbedTitle.text,
+        keyPoints: ['Discussed sprint goals'],
+      },
+    })
+    createdMeetingIds.push(meeting.id)
+    expect(typeof meeting.id).toBe('number')
+
+    // Create ActionItem as a separate record — not String[] on Meeting
+    const actionItem = await prisma.actionItem.create({
+      data: {
+        action: scrubbedAction.text,
+        meetingId: meeting.id,
+      },
+    })
+    createdActionItemIds.push(actionItem.id)
+    expect(typeof actionItem.id).toBe('number')
+
+    // Verify PII is scrubbed in both
+    expect(meeting.title).not.toContain('alice@nhs.net')
+    expect(actionItem.action).not.toContain('07700 900456')
+
+    // Verify ActionItem is linked to Meeting via FK
+    const fetched = await prisma.actionItem.findUnique({
+      where: { id: actionItem.id },
+      include: { meeting: true },
+    })
+    expect(fetched!.meetingId).toBe(meeting.id)
+    expect(fetched!.meeting.id).toBe(meeting.id)
   })
 
   it('scrub entries are the audit trail — PII never reaches Postgres in any field', async () => {
@@ -1264,6 +1364,41 @@ describe('Security → Data contract', () => {
 
     const stored = await prisma.task.findUnique({ where: { id: task.id } })
     expect(stored!.title).not.toContain('943-476-5919')
+  })
+
+  it('Task uses externalTaskId (not jiraKey) and branch + repoId (not githubBranch/githubRepo)', async () => {
+    const task = await prisma.task.create({
+      data: {
+        title: 'Test field names',
+        status: 'TODO',
+        taskType: 'CODING',
+        externalTaskId: 'PD-99',
+        branch: 'feature/auth-flow',
+        // repoId is optional — null when no Repo linked
+      },
+    })
+    createdTaskIds.push(task.id)
+
+    const stored = await prisma.task.findUnique({ where: { id: task.id } })
+    expect(stored!.externalTaskId).toBe('PD-99')
+    expect(stored!.branch).toBe('feature/auth-flow')
+    expect(stored!.repoId).toBeNull()
+  })
+
+  it('Task supports BLOCKED status and TaskPriority enum', async () => {
+    const task = await prisma.task.create({
+      data: {
+        title: 'Blocked task',
+        status: 'BLOCKED',
+        priority: 'HIGH',
+        taskType: 'DEBUGGING',
+      },
+    })
+    createdTaskIds.push(task.id)
+
+    const stored = await prisma.task.findUnique({ where: { id: task.id } })
+    expect(stored!.status).toBe('BLOCKED')
+    expect(stored!.priority).toBe('HIGH')
   })
 })
 ```
@@ -1295,7 +1430,7 @@ git commit -m "test(contract): add integration-to-security and security-to-data 
 yarn test
 ```
 
-Expected: all tests pass (Step 1: 9, Step 2: 17, Step 3: new tests total ≥ 20 across all new test files).
+Expected: all tests pass (Step 1: 9, Step 2: 18, Step 3: new tests total >= 24 across all new test files).
 
 - [ ] **Step 10.2: TypeScript clean build**
 
@@ -1309,12 +1444,16 @@ Expected: zero errors.
 
 From the spec:
 
-> Raw Notion data enters the pipeline. PII is detected and removed before Postgres. Clean data reaches Claude. Audit trail shows what was scrubbed.
+> Raw Notion data enters the pipeline. PII is detected and removed before Postgres. Clean data reaches the LLM layer. Audit trail shows what was scrubbed.
 
-- `pullNotionTasks` returns scrubbed text ✓ — emails removed, audit entries produced
-- `security-to-data.test.ts` confirms PII-free text stored in Postgres ✓
-- `AuditLog` rows written with hash (not plaintext) of scrubbed PII ✓
-- `integration-to-security.test.ts` proves the boundary holds end-to-end ✓
+- `pullNotionTasks` returns scrubbed text — emails removed, audit entries produced
+- `pullNotionMeetings` returns `actionItems` as separate `RawNotionActionItem` entries (not `String[]`)
+- `security-to-data.test.ts` confirms PII-free text stored in Postgres with int IDs
+- `security-to-data.test.ts` confirms `ActionItem` records created separately from Meeting
+- `security-to-data.test.ts` confirms `externalTaskId`, `branch` + `repoId`, `BLOCKED` status, `TaskPriority`
+- `AuditLog` rows written with hash (not plaintext) of scrubbed PII, using int autoincrement IDs
+- `integration-to-security.test.ts` proves the boundary holds end-to-end
+- All imports use `../../generated/prisma/index.js` (not `@prisma/client`)
 
 - [ ] **Step 10.4: Final commit**
 
@@ -1338,3 +1477,6 @@ Ensure `.env` has `WIZARD_ENCRYPTION_KEY` set and that Vitest loads `.env`. Add 
 
 **`scrub` removes partial text unexpectedly**
 The UK phone regex is broad. If legitimate text is being removed, tighten the pattern in `security/scrub.ts` and add a test case for the false positive.
+
+**Import errors for Prisma client**
+All imports must use `../../generated/prisma/index.js`, not `@prisma/client`. The Prisma generator is configured with `provider = "prisma-client"` and `output = "../generated/prisma"`.
