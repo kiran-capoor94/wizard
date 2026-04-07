@@ -268,27 +268,27 @@ model SemanticConfig {
 }
 
 model TaskEmbedding {
-  id        Int                          @id @default(autoincrement())
-  taskId    Int                          @unique
-  task      Task                         @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  embedding Unsupported("vector(1536)")?
-  updatedAt DateTime                     @updatedAt
+  id        Int                         @id @default(autoincrement())
+  taskId    Int                         @unique
+  task      Task                        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  embedding Unsupported("vector(768)")?
+  updatedAt DateTime                    @updatedAt
 }
 
 model MeetingEmbedding {
-  id        Int                          @id @default(autoincrement())
-  meetingId Int                          @unique
-  meeting   Meeting                      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  embedding Unsupported("vector(1536)")?
-  updatedAt DateTime                     @updatedAt
+  id        Int                         @id @default(autoincrement())
+  meetingId Int                         @unique
+  meeting   Meeting                     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  embedding Unsupported("vector(768)")?
+  updatedAt DateTime                    @updatedAt
 }
 
 model NoteEmbedding {
-  id        Int                          @id @default(autoincrement())
-  noteId    Int                          @unique
-  note      Note                         @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  embedding Unsupported("vector(1536)")?
-  updatedAt DateTime                     @updatedAt
+  id        Int                         @id @default(autoincrement())
+  noteId    Int                         @unique
+  note      Note                        @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  embedding Unsupported("vector(768)")?
+  updatedAt DateTime                    @updatedAt
 }
 
 // CodeChunkEmbedding — semantic retrieval for code context across sessions.
@@ -297,16 +297,16 @@ model NoteEmbedding {
 // contentHash enables incremental invalidation on commit.
 
 model CodeChunkEmbedding {
-  id          Int                          @id @default(autoincrement())
+  id          Int                         @id @default(autoincrement())
   repoId      Int
-  repo        Repo                         @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  repo        Repo                        @relation(fields: [repoId], references: [id], onDelete: Cascade)
   filePath    String
   startLine   Int
   endLine     Int
   content     String
   contentHash String
-  embedding   Unsupported("vector(1536)")?
-  updatedAt   DateTime                     @updatedAt
+  embedding   Unsupported("vector(768)")?
+  updatedAt   DateTime                    @updatedAt
 
   @@unique([repoId, filePath, startLine, endLine])
 }
