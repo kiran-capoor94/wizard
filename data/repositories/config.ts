@@ -1,4 +1,5 @@
 import { prisma } from '../db.js'
+import { Prisma } from '../../generated/prisma/client.js'
 import { encrypt, decrypt } from '../../security/encrypt.js'
 
 export type IntegrationSource = 'notion' | 'jira' | 'github' | 'krisp'
@@ -11,15 +12,15 @@ export type IntegrationSource = 'notion' | 'jira' | 'github' | 'krisp'
 export async function storeIntegrationToken(
   source: IntegrationSource,
   token: string,
-  metadata?: any
+  metadata?: Record<string, unknown>
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const encrypted = encrypt(token)
   if (!encrypted.ok) return encrypted
 
   await prisma.integrationConfig.upsert({
     where: { source },
-    update: { token: encrypted.value, metadata: metadata ?? {} },
-    create: { source, token: encrypted.value, metadata: metadata ?? {} },
+    update: { token: encrypted.value, metadata: (metadata ?? {}) as Prisma.InputJsonObject },
+    create: { source, token: encrypted.value, metadata: (metadata ?? {}) as Prisma.InputJsonObject },
   })
   return { ok: true }
 }

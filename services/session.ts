@@ -6,8 +6,8 @@ import {
 } from "../data/repositories/session.js";
 
 export type CreateSessionOptions = {
-  meetingId?: number | null;
-  createdById?: number | null;
+  meetingId?: number;
+  createdById?: number;
 };
 
 export async function createSession(

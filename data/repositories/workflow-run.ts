@@ -2,8 +2,8 @@ import { prisma } from "../db.js";
 
 export type CreateWorkflowRunInput = {
   workflowId: string;
-  sessionId?: number | null;
-  taskId?: number | null;
+  sessionId?: number;
+  taskId?: number;
 };
 
 export async function createWorkflowRun(

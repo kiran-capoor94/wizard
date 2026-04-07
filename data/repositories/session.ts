@@ -1,8 +1,8 @@
 import { prisma } from "../db.js";
 
 export type CreateSessionInput = {
-  meetingId?: number | null;
-  createdById?: number | null;
+  meetingId?: number;
+  createdById?: number;
 };
 
 export async function createSessionRecord(
