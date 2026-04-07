@@ -1,4 +1,4 @@
-# Wizard v2 — Step 1 Design: Data → Claude
+# Wizard v2 — Step 1 Design: Data → LLM Layer
 
 | Field | Value |
 |---|---|
@@ -13,11 +13,11 @@
 
 Wizard v2 is built in five sequential steps, each proving a contract before the next layer adds complexity. This document covers Step 1 only.
 
-**Step 1 goal**: Establish the data foundation and prove that Claude receives exactly what Postgres contains — type-checked and complete.
+**Step 1 goal**: Establish the data foundation and prove that the LLM layer receives exactly what Postgres contains — type-checked and complete.
 
 **What this step does not include**: Orchestration, integrations, security/PII scrubbing, CLI, or the full session flow. Those are Steps 2–5.
 
-**Proof criteria**: A contract test asserting Claude receives exactly what Postgres contains for a given query — type-checked and complete. Not just that something is returned.
+**Proof criteria**: A contract test asserting the LLM layer receives exactly what Postgres contains for a given query — type-checked and complete. Not just that something is returned.
 
 ---
 
@@ -31,18 +31,26 @@ wizard/
 │   ├── prisma/
 │   │   ├── schema.prisma
 │   │   └── migrations/
-│   └── queries/
-│       └── index.ts          # typed query functions
-├── mcp/
-│   └── index.ts              # MCP server (migrated from src/index.ts)
-├── plugin/
-│   └── skills/
-│       └── task_start.md     # first skill template
+│   └── repositories/
+│       └── task.ts            # typed repository functions
+├── interfaces/
+│   ├── mcp/
+│   │   └── index.ts           # MCP server (migrated from src/index.ts)
+│   ├── cli/                   # Placeholder — Step 3
+│   └── plugin/                # Placeholder — Step 5
+├── llm/
+│   ├── adapters/              # LLM + Embedding adapters (model-specific clients)
+│   ├── prompts/
+│   │   └── task_start.md      # first skill template
+│   ├── schemas/               # I/O contracts and validators
+│   └── packaging/             # Renders templates to model-specific install formats
+├── services/
+│   └── index.ts               # Context assembly (calls repositories, builds LLM context)
 ├── shared/
-│   └── types.ts              # shared types and enums
+│   └── types.ts               # shared types and enums
 ├── integrations/
 │   └── notion/
-│       └── index.ts          # moved from src/notion/ (untouched, Step 3 concern)
+│       └── index.ts           # moved from src/notion/ (untouched, Step 3 concern)
 ├── tests/
 │   └── contracts/
 │       └── data-to-mcp.test.ts
@@ -54,14 +62,30 @@ wizard/
 **Files deleted**: `src/middleware.ts`, `src/tools/attention-list.ts` (empty stubs with no content).
 
 **tsconfig.json changes**:
+
 - `rootDir`: `.` (was `./src`)
-- `include`: explicit list — `data/**/*.ts`, `mcp/**/*.ts`, `plugin/**/*.ts`, `shared/**/*.ts`, `integrations/**/*.ts` (excludes `tests/` from the production build; tests use a separate config or Vitest's own resolution)
+- `include`: explicit list — `data/**/*.ts`, `interfaces/**/*.ts`, `llm/**/*.ts`, `services/**/*.ts`, `shared/**/*.ts`, `integrations/**/*.ts` (excludes `tests/` from the production build; tests use a separate config or Vitest's own resolution)
 
 ---
 
 ## Prisma Schema
 
-Full schema covering all entities named in the spec. pgvector extension enabled. Embedding table present but unpopulated — vector ops are a later-step concern.
+Full schema covering all entities named in the spec. pgvector extension enabled. Embedding tables present but unpopulated — vector ops are a later-step concern. Generator uses `prisma-client` with output `../generated/prisma`.
+
+### Generator & Datasource
+
+```prisma
+generator client {
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [vector]
+}
+```
 
 ### Enums
 
@@ -70,6 +94,7 @@ enum TaskStatus {
   TODO
   IN_PROGRESS
   DONE
+  BLOCKED
 }
 
 enum TaskType {
@@ -81,7 +106,7 @@ enum TaskType {
   MEETING_REVIEW
 }
 
-enum Priority {
+enum TaskPriority {
   LOW
   MEDIUM
   HIGH
@@ -98,77 +123,193 @@ enum WorkflowStatus {
   COMPLETED
   FAILED
 }
+
+enum NoteType {
+  dump
+  investigation
+  review
+  docs
+  guide
+  learning
+  decision
+}
+
+enum NoteParent {
+  MEETING
+  TASK
+  SESSION
+  REPO
+}
+
+enum RepoProvider {
+  GITHUB
+  GITLAB
+  BITBUCKET
+}
 ```
 
 ### Models
 
 ```prisma
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  createdAt DateTime  @default(now())
+  tasks     Task[]
+  sessions  Session[]
+  notes     Note[]
+}
+
+model Repo {
+  id                  Int                  @id @default(autoincrement())
+  name                String
+  url                 String               @unique
+  platform            RepoProvider         @default(GITHUB)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  tasks               Task[]
+  meetings            Meeting[]
+  notes               Note[]
+  codeChunkEmbeddings CodeChunkEmbedding[]
+}
+
+model Meeting {
+  id                  Int                  @id @default(autoincrement())
+  title               String
+  outline             String?
+  keyPoints           String[]
+  krispUrl            String?
+  notionUrl           String?
+  repoId              Int?
+  repo                Repo?                @relation(fields: [repoId], references: [id], onDelete: SetNull)
+  tasks               Task[]
+  actionItems         ActionItem[]
+  sessions            Session[]
+  notes               Note[]
+  embedding           MeetingEmbedding?
+  calibrationExamples CalibrationExample[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([repoId])
+}
+
+model ActionItem {
+  id        Int       @id @default(autoincrement())
+  action    String
+  dueDate   DateTime?
+  meetingId Int
+  meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  taskId    Int?
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  createdAt DateTime  @default(now())
+
+  @@index([meetingId])
+  @@index([taskId])
+}
+
 model Task {
-  id           String        @id @default(cuid())
-  title        String
-  description  String?
-  status       TaskStatus    @default(TODO)
-  priority     Priority?
-  dueDate      DateTime?
-  taskType     TaskType
-  jiraKey      String?
-  githubBranch String?
-  githubRepo   String?
-  meetingId    String?
-  meeting      Meeting?      @relation(fields: [meetingId], references: [id])
-  sessions     SessionTask[]
-  embedding    TaskEmbedding?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                  Int                  @id @default(autoincrement())
+  title               String
+  description         String?
+  status              TaskStatus           @default(TODO)
+  priority            TaskPriority?
+  dueDate             DateTime?
+  taskType            TaskType
+  externalTaskId      String?
+  branch              String?
+  repoId              Int?
+  repo                Repo?                @relation(fields: [repoId], references: [id], onDelete: SetNull)
+  meetingId           Int?
+  meeting             Meeting?             @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  createdById         Int?
+  createdBy           User?                @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  sessions            SessionTask[]
+  actionItems         ActionItem[]
+  notes               Note[]
+  embedding           TaskEmbedding?
+  workflowRuns        WorkflowRun[]
+  calibrationExamples CalibrationExample[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([repoId])
+  @@index([meetingId])
+  @@index([createdById])
 }
 
 model Session {
-  id            String        @id @default(cuid())
+  id            Int           @id @default(autoincrement())
   status        SessionStatus @default(ACTIVE)
   workflowState Json?
+  meetingId     Int?
+  meeting       Meeting?      @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  createdById   Int?
+  createdBy     User?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
   startedAt     DateTime      @default(now())
   endedAt       DateTime?
   tasks         SessionTask[]
+  workflowRuns  WorkflowRun[]
+  notes         Note[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+
+  @@index([meetingId])
+  @@index([createdById])
 }
 
 model SessionTask {
-  sessionId String
-  taskId    String
-  session   Session @relation(fields: [sessionId], references: [id])
-  task      Task    @relation(fields: [taskId], references: [id])
+  sessionId Int
+  taskId    Int
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  task      Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@id([sessionId, taskId])
 }
 
-model Meeting {
-  id          String   @id @default(cuid())
+model Note {
+  id          Int            @id @default(autoincrement())
   title       String
-  outline     String?
-  keyPoints   String[]
-  actionItems String[]
-  krispUrl    String?
-  notionUrl   String?
-  tasks       Task[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  content     String
+  type        NoteType
+  parentType  NoteParent
+  meetingId   Int?
+  meeting     Meeting?       @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  taskId      Int?
+  task        Task?          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  sessionId   Int?
+  session     Session?       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  repoId      Int?
+  repo        Repo?          @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  createdById Int?
+  createdBy   User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  embedding   NoteEmbedding?
+  createdAt   DateTime       @default(now())
+
+  @@index([parentType])
+  @@index([meetingId])
+  @@index([taskId])
+  @@index([sessionId])
+  @@index([repoId])
+  @@index([createdById])
 }
 
 model IntegrationConfig {
-  id        String   @id @default(cuid())
+  id        Int      @id @default(autoincrement())
   source    String   @unique
-  token     String   // ciphertext only — encryption/decryption in query layer
+  token     String   // ciphertext only — encryption/decryption in repository layer
   metadata  Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model WorkflowRun {
-  id          String         @id @default(cuid())
+  id          Int            @id @default(autoincrement())
   workflowId  String
-  sessionId   String?
-  taskId      String?
+  sessionId   Int?
+  session     Session?       @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  taskId      Int?
+  task        Task?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
   status      WorkflowStatus @default(PENDING)
   input       Json?
   output      Json?
@@ -176,30 +317,70 @@ model WorkflowRun {
   completedAt DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
+
+  @@index([workflowId])
+  @@index([sessionId])
+  @@index([taskId])
 }
 
 model CalibrationExample {
-  id         String   @id @default(cuid())
-  taskId     String?
-  meetingId  String?
-  label      Boolean  // true = correct link, false = wrong link
-  similarity Float?   // populated after calibration run
+  id         Int      @id @default(autoincrement())
+  taskId     Int?
+  task       Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  meetingId  Int?
+  meeting    Meeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  label      Boolean
+  similarity Float?
   createdAt  DateTime @default(now())
+
+  @@index([taskId])
+  @@index([meetingId])
 }
 
 model SemanticConfig {
-  id        String   @id @default(cuid())
+  id        Int      @id @default(autoincrement())
   key       String   @unique
   value     Float
   updatedAt DateTime @updatedAt
 }
 
-// pgvector — embedding table, populated in later steps
+// Embedding tables — separate per entity, populated in later steps
 model TaskEmbedding {
-  id        String                      @id @default(cuid())
-  taskId    String                      @unique
+  id        Int                         @id @default(autoincrement())
+  taskId    Int                         @unique
   task      Task                        @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  embedding Unsupported("vector(1536)")?
+  embedding Unsupported("vector(768)")?
+  updatedAt DateTime                    @updatedAt
+}
+
+model MeetingEmbedding {
+  id        Int                         @id @default(autoincrement())
+  meetingId Int                         @unique
+  meeting   Meeting                     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  embedding Unsupported("vector(768)")?
+  updatedAt DateTime                    @updatedAt
+}
+
+model NoteEmbedding {
+  id        Int                         @id @default(autoincrement())
+  noteId    Int                         @unique
+  note      Note                        @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  embedding Unsupported("vector(768)")?
+  updatedAt DateTime                    @updatedAt
+}
+
+model CodeChunkEmbedding {
+  id          Int                         @id @default(autoincrement())
+  repoId      Int
+  repo        Repo                        @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  filePath    String
+  chunkIndex  Int
+  content     String
+  contentHash String
+  embedding   Unsupported("vector(768)")?
+  updatedAt   DateTime                    @updatedAt
+
+  @@unique([repoId, filePath, chunkIndex])
 }
 ```
 
@@ -212,60 +393,72 @@ model TaskEmbedding {
 One tool registered in Step 1: **`get_task_context`**.
 
 ```
-Input:  { task_id: string }
+Input:  { task_id: number }
 Output: TaskContext (see shared/types.ts)
 ```
 
 **Call chain**:
+
 ```
-mcp/index.ts
-  → data/queries/index.ts :: getTaskContext(taskId)
+interfaces/mcp/index.ts
+  → data/repositories/task.ts :: getTaskContext(taskId)
   → Prisma Client
   → Postgres
 ```
 
-`getTaskContext` returns a `TaskContext` — the typed contract between the data layer and Claude. It includes the full task with its linked meeting (if any), Jira key, GitHub branch/repo, and status.
+`getTaskContext` returns a `TaskContext` — the typed contract between the data layer and the LLM layer. It includes the full task with its linked meeting (if any), meeting action items, external task ID, branch, repo relation, and status.
 
 ### shared/types.ts — TaskContext
 
 ```typescript
 // Re-export Prisma enums — single source of truth, stays in sync with schema
-export { TaskStatus, Priority, TaskType } from '@prisma/client'
+export { TaskStatus, TaskPriority, TaskType, RepoProvider } from '../generated/prisma'
 
 export type TaskContext = {
-  id: string
+  id: number
   title: string
   description: string | null
   status: TaskStatus
-  priority: Priority | null
+  priority: TaskPriority | null
   dueDate: Date | null
   taskType: TaskType
-  jiraKey: string | null
-  githubBranch: string | null
-  githubRepo: string | null
+  externalTaskId: string | null
+  branch: string | null
+  repo: {
+    id: number
+    name: string
+    url: string
+    platform: RepoProvider
+  } | null
   meeting: {
-    id: string
+    id: number
     title: string
     outline: string | null
     keyPoints: string[]
-    actionItems: string[]
     krispUrl: string | null
+    actionItems: {
+      id: number
+      action: string
+      dueDate: Date | null
+    }[]
   } | null
 }
 ```
 
-`TaskContext` is the canonical type for what Claude receives. Enums are re-exported from `@prisma/client` — never re-declared. This keeps `shared/types.ts` in sync with the schema automatically. It is imported by both `data/queries/` (to type the return) and `mcp/` (to type the tool response). Any schema change that affects what Claude sees must change `TaskContext` first.
+`TaskContext` is the canonical type for what the LLM layer receives. Enums are re-exported from the generated Prisma client — never re-declared. This keeps `shared/types.ts` in sync with the schema automatically. It is imported by both `data/repositories/` (to type the return) and `mcp/` (to type the tool response). Any schema change that affects what the LLM layer sees must change `TaskContext` first.
 
 ---
 
 ## Skill Template
 
-`plugin/skills/task_start.md` — plain text with `{{variable}}` placeholders. No templating engine. Orchestration (Step 2) does a direct string substitution pass. Unresolved placeholders are a hard error, not silent pass-through.
+`llm/prompts/task_start.md` — plain text with `{{variable}}` placeholders. No templating engine. Services layer (Step 2) does a direct string substitution pass. Unresolved placeholders are a hard error, not silent pass-through.
 
 ```
 Task: {{title}} ({{task_id}})
 Type: {{task_type}} | Status: {{status}}
-Jira: {{jira_key}}
+External ID: {{external_task_id}}
+Branch: {{branch}}
+Repo: {{repo_name}}
 Due: {{due_date}}
 
 Context:
@@ -276,11 +469,13 @@ Context:
 
 | Variable | Source | Type |
 |---|---|---|
-| `{{task_id}}` | TaskContext.id | string |
+| `{{task_id}}` | TaskContext.id | number |
 | `{{title}}` | TaskContext.title | string |
 | `{{task_type}}` | TaskContext.taskType | TaskType enum |
 | `{{status}}` | TaskContext.status | TaskStatus enum |
-| `{{jira_key}}` | TaskContext.jiraKey | string \| null |
+| `{{external_task_id}}` | TaskContext.externalTaskId | string \| null |
+| `{{branch}}` | TaskContext.branch | string \| null |
+| `{{repo_name}}` | TaskContext.repo.name | string \| null |
 | `{{due_date}}` | TaskContext.dueDate | Date \| null |
 | `{{context}}` | Serialised TaskContext | JSON string |
 
@@ -295,20 +490,31 @@ Unit test: given a valid `TaskContext`, every `{{variable}}` in the template is 
 **Requires**: Postgres running (docker-compose)
 
 ```
-1. Seed: insert a Meeting + Task to Postgres via Prisma
+1. Seed: insert a Repo, Meeting with ActionItems, and Task (with repo + meeting FKs) to Postgres via Prisma
 2. Call: getTaskContext(task.id) directly
 3. Assert: every field in the returned TaskContext matches the seed
          — correct types, no missing fields, no extra fields
+         — id is a number (autoincrement), not a string
+         — repo is non-null with matching id, name, url, platform
+         — meeting is non-null with matching fields
+         — meeting.actionItems is an array with matching id, action, dueDate
+         — externalTaskId is null when not set (not undefined, not "")
+         — branch is null when not set
 4. Teardown: delete seeded records (in reverse FK order)
 ```
 
-The test does not go through the MCP wire protocol — it calls the query function directly. The MCP tool is a thin wrapper; the contract is at the query layer.
+The test does not go through the MCP wire protocol — it calls the repository function directly. The MCP tool is a thin wrapper; the contract is at the repository layer.
 
 **What "type-checked and complete" means in practice**:
+
+- `id` is a number (int autoincrement)
 - `title` is a string matching the seeded string exactly
 - `dueDate` is a `Date` object (not a string)
 - `meeting` is non-null and its fields match the seeded meeting
-- `jiraKey` is `null` when not set (not `undefined`, not `""`)
+- `meeting.actionItems` is an array of objects with `id`, `action`, `dueDate`
+- `repo` is non-null with `id`, `name`, `url`, `platform` matching the seeded repo
+- `externalTaskId` is `null` when not set (not `undefined`, not `""`)
+- `branch` is `null` when not set (not `undefined`, not `""`)
 
 ---
 
@@ -350,18 +556,21 @@ volumes:
 ## Blast Radius
 
 **What this step touches**:
+
 - Deletes `src/` entirely (3 files, all stubs or near-stubs)
 - Rewrites `tsconfig.json` (rootDir + include)
-- Adds `docker-compose.yaml`, `data/`, `mcp/`, `plugin/`, `shared/`, `integrations/`, `tests/`
+- Adds `docker-compose.yaml`, `data/`, `mcp/`, `llm/`, `services/`, `shared/`, `integrations/`, `tests/`
 - Adds Prisma to `package.json`
 
 **What could break**:
-- The existing `bin` entry in `package.json` points to `./build/index.js` — this still holds after migration since `mcp/index.ts` compiles to `build/mcp/index.js`. The `bin` path needs updating to `./build/mcp/index.js`.
+
+- The existing `bin` entry in `package.json` points to `./build/index.js` — this still holds after migration since `interfaces/mcp/index.ts` compiles to `build/interfaces/mcp/index.js`. The `bin` path needs updating to `./build/interfaces/mcp/index.js`.
 - `.claude-plugin/plugin.json` has no path dependency — unaffected.
 
 **Irreversible decisions in this step**:
-- Committing to Prisma as the query layer. Migration away later would require rewriting `data/queries/` and all migrations.
-- Top-level directory structure. Changing this post-Step 2 would require Orchestration refactoring.
+
+- Committing to Prisma as the query layer. Migration away later would require rewriting `data/repositories/` and all migrations.
+- Top-level directory structure. Changing this post-Step 2 would require services refactoring.
 
 ---
 
