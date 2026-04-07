@@ -310,3 +310,13 @@ model CodeChunkEmbedding {
 
   @@unique([repoId, filePath, startLine, endLine])
 }
+
+// Audit trail for PII scrubbing — records what was detected and removed
+model AuditLog {
+  id           Int      @id @default(autoincrement())
+  source       String   // integration source: "notion", "jira", etc.
+  fieldPath    String   // which field in the source data was scrubbed
+  piiType      String   // "email", "phone", "nhs_number"
+  originalHash String   // SHA-256 hash of the original value (not stored in plaintext)
+  createdAt    DateTime @default(now())
+}
