@@ -15,6 +15,8 @@ import type {
   RepoProvider,
 } from "../generated/prisma/enums.js";
 
+export type Variables = Record<string, string>;
+
 export type TaskContext = {
   id: number;
   title: string;
