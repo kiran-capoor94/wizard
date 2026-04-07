@@ -1,128 +1,30 @@
-# Wizard v2 Step 2 — Orchestration → Data → Claude Implementation Plan
+# Wizard v2 Step 2 — Services Layer: Session Lifecycle & Workflow Execution
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the Orchestration layer — variable injection, pre-flight check, session lifecycle, and workflow execution — and prove that Claude is invoked with prepared context, pre-flight passes before invocation, and session state survives a simulated crash.
+**Goal:** Build the services layer — variable injection, pre-flight check, session lifecycle, and workflow execution as service functions — and prove that the LLM layer is invoked with prepared context, pre-flight passes before invocation, and session state survives a simulated crash.
 
-**Architecture:** Orchestration sits between Data and Claude. It reads context from Postgres, resolves skill template variables, runs a pre-flight check (Postgres reachable + pgvector installed), and produces a formatted prompt for Claude. Session state is written to Postgres before any Claude invocation — making it crash-durable by design. Workflow definitions live in `core/workflows/`; Orchestration executes them, never defines them.
+**Architecture:** Each workflow is a service function. No separate orchestration layer. Pre-flight is a shared utility called at the start of every service function — not an interface concern. Services read context from Postgres, resolve skill template variables, run pre-flight (Postgres reachable + pgvector installed), and produce a formatted prompt for the LLM adapter. Session state is written to Postgres before any LLM invocation — making it crash-durable by design. Workflow definitions live in `core/workflows/`; services execute them, never define them. WorkflowRun audit trail is written inside service functions, before and after execution. Session has `meetingId` and `createdById` FKs for traceability. All IDs are `Int @id @default(autoincrement())`. The Prisma generator uses `"prisma-client"` with `output = "../generated/prisma"` — all imports from `../../generated/prisma/index.js`, not `@prisma/client`.
 
-**Tech Stack:** TypeScript (ESM, Node16), Prisma, Vitest. No new dependencies beyond Step 1.
-
-> **PREREQUISITE — Serena Spike:** The spec requires Serena to be invoked deterministically by Orchestration (not by Claude at runtime). Before implementing Step 2, complete Task 0 below. Do not proceed past Task 0 until the spike is documented and the invocation pattern is confirmed.
-
----
+**Tech Stack:** TypeScript (ESM, bundler), Prisma (`prisma-client` generator, output `generated/prisma`), Vitest. No new dependencies beyond Step 1.
 
 ## File Map
 
 | Action | Path                                              | Responsibility                                                             |
 | ------ | ------------------------------------------------- | -------------------------------------------------------------------------- |
-| Create | `orchestrator/inject.ts`                          | Variable injection — replaces `{{key}}` placeholders; throws on unresolved |
-| Create | `orchestrator/preflight.ts`                       | Pre-flight check — Postgres reachable + pgvector installed                 |
-| Create | `orchestrator/session.ts`                         | Session lifecycle — create, attach task, end, re-query                     |
-| Create | `orchestrator/workflow.ts`                        | Workflow execution — runs task_start, returns formatted prompt             |
+| Create | `services/inject.ts`                              | Variable injection — replaces `{{key}}` placeholders; throws on unresolved |
+| Create | `services/preflight.ts`                           | Pre-flight check — Postgres reachable + pgvector installed                 |
+| Create | `services/session.ts`                             | Session lifecycle — create, attach task, end, re-query                     |
+| Create | `services/workflow.ts`                            | Workflow execution — runs task_start, returns formatted prompt             |
 | Create | `core/workflows/task-start.ts`                    | Hardcoded task_start workflow definition                                   |
-| Modify | `mcp/index.ts`                                    | Add `session_start` and `task_start` MCP tools                             |
-| Modify | `tsconfig.json`                                   | Add `orchestrator/**/*.ts` and `core/**/*.ts` to `include`                 |
+| Modify | `interfaces/mcp/index.ts`                         | Add `session_start` and `task_start` MCP tools                             |
+| Modify | `tsconfig.json`                                   | Add `core/**/*.ts` to `include` (`services/**/*.ts` already present)       |
 | Create | `tests/unit/inject.test.ts`                       | Unit test for `injectVariables` (migrated from inline test)                |
-| Create | `tests/contracts/orchestration-to-claude.test.ts` | Step 2 proof criteria                                                      |
+| Create | `tests/contracts/services-to-llm.test.ts`         | Step 2 proof criteria                                                      |
 
 ---
 
-## Task 0: Serena Spike (Prerequisite)
-
-**This task must be completed before any other task in this step.**
-
-The spec states: _"Serena deterministic invocation — spike needed before Step 2. Unresolved. Do not proceed to Step 2 without this."_
-
-Serena is an MCP server providing code intelligence (symbol lookup, file search, grep). In v1, Claude decides when to call it. In v2, Orchestration must call it programmatically — before Claude sees any context — so the result is deterministic and auditable.
-
----
-
-- [ ] **Step 0.1: Understand Serena's MCP interface**
-
-Run the following to list what tools Serena exposes:
-
-```bash
-# If Serena is configured as an MCP server in Claude Code, check its config:
-cat ~/.claude/settings.json | grep -A 20 serena
-
-# Also check the project-level Serena config:
-cat .serena/project.json 2>/dev/null || echo "(no project config)"
-```
-
-Expected: a list of Serena MCP tools (e.g., `find_symbol`, `get_symbols_overview`, `search_for_pattern`, `list_dir`).
-
-- [ ] **Step 0.2: Confirm programmatic MCP client invocation**
-
-Serena runs as an MCP server. To call it from TypeScript code, use `@modelcontextprotocol/sdk`'s client:
-
-```typescript
-// Prototype — do not commit, just confirm it works
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-
-const transport = new StdioClientTransport({
-  command: "serena", // adjust to actual Serena binary/command
-  args: [],
-});
-const client = new Client({ name: "wizard-spike", version: "0.0.1" });
-await client.connect(transport);
-
-const result = await client.callTool({
-  name: "find_symbol",
-  arguments: { name: "TaskContext" },
-});
-console.log(result);
-
-await client.close();
-```
-
-Run this prototype. If it works, the invocation pattern is confirmed.
-
-- [ ] **Step 0.3: Document the spike result**
-
-Create `docs/spikes/serena-invocation.md`:
-
-```markdown
-# Serena Deterministic Invocation — Spike Result
-
-## Serena command
-
-[exact command/binary used]
-
-## Working prototype
-
-[paste the working TypeScript snippet]
-
-## Tools used in Wizard
-
-| Tool                 | Purpose                                         |
-| -------------------- | ----------------------------------------------- |
-| find_symbol          | Locate a function/class by name in the codebase |
-| get_symbols_overview | List symbols in a file                          |
-| search_for_pattern   | Regex search across files                       |
-
-## Known constraints
-
-[any timeouts, errors, or limitations discovered]
-
-## Decision
-
-[confirmed approach for integrations/serena/invoke.ts in Step 5]
-```
-
-- [ ] **Step 0.4: Commit the spike doc**
-
-```bash
-git add docs/spikes/serena-invocation.md
-git commit -m "docs: serena invocation spike — step 2 prerequisite"
-```
-
-Only proceed past this point once the spike doc exists and the invocation pattern is confirmed.
-
----
-
-## Task 1: `tsconfig.json` — Add New Directories
+## Task 1: `tsconfig.json` — Add `core/` Directory
 
 **Files:**
 
@@ -130,14 +32,14 @@ Only proceed past this point once the spike doc exists and the invocation patter
 
 ---
 
-- [ ] **Step 1.1: Add `orchestrator` and `core` to `tsconfig.json` include**
+- [ ] **Step 1.1: Add `core` to `tsconfig.json` include**
 
 ```json
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2023",
     "module": "Node16",
-    "moduleResolution": "Node16",
+    "moduleResolution": "bundler",
     "outDir": "./build",
     "rootDir": ".",
     "strict": true,
@@ -147,10 +49,10 @@ Only proceed past this point once the spike doc exists and the invocation patter
   },
   "include": [
     "data/**/*.ts",
-    "mcp/**/*.ts",
+    "interfaces/**/*.ts",
     "shared/**/*.ts",
     "integrations/**/*.ts",
-    "orchestrator/**/*.ts",
+    "services/**/*.ts",
     "core/**/*.ts"
   ],
   "exclude": ["node_modules", "build", "tests"]
@@ -160,7 +62,7 @@ Only proceed past this point once the spike doc exists and the invocation patter
 - [ ] **Step 1.2: Create directory skeleton**
 
 ```bash
-mkdir -p orchestrator core/workflows docs/spikes
+mkdir -p core/workflows
 ```
 
 - [ ] **Step 1.3: Verify TypeScript compiles**
@@ -175,20 +77,20 @@ Expected: zero errors.
 
 ```bash
 git add tsconfig.json
-git commit -m "chore: add orchestrator/ and core/ to tsconfig"
+git commit -m "chore: add core/ to tsconfig"
 ```
 
 ---
 
-## Task 2: `orchestrator/inject.ts` — Variable Injection
+## Task 2: `services/inject.ts` — Variable Injection
 
 **Files:**
 
-- Create: `orchestrator/inject.ts`
+- Create: `services/inject.ts`
 - Create: `tests/unit/inject.test.ts`
 - Modify: `tests/unit/skill-injection.test.ts` (update import)
 
-The `injectVariables` function was inlined in the Step 1 unit test. It now moves to its permanent home in `orchestrator/`. The unit test is updated to import from there.
+The `injectVariables` function was inlined in the Step 1 unit test. It now moves to its permanent home in `services/`. The unit test is updated to import from there.
 
 ---
 
@@ -197,7 +99,7 @@ The `injectVariables` function was inlined in the Step 1 unit test. It now moves
 ```typescript
 // tests/unit/inject.test.ts
 import { describe, it, expect } from "vitest";
-import { injectVariables } from "../../orchestrator/inject.js";
+import { injectVariables } from "../../services/inject.js";
 
 describe("injectVariables", () => {
   it("replaces all placeholders with their values", () => {
@@ -238,12 +140,12 @@ describe("injectVariables", () => {
 yarn test tests/unit/inject.test.ts
 ```
 
-Expected: `Error: Failed to resolve import "../../orchestrator/inject.js"`
+Expected: `Error: Failed to resolve import "../../services/inject.js"`
 
-- [ ] **Step 2.3: Create `orchestrator/inject.ts`**
+- [ ] **Step 2.3: Create `services/inject.ts`**
 
 ```typescript
-// orchestrator/inject.ts
+// services/inject.ts
 
 export type Variables = Record<string, string>;
 
@@ -286,7 +188,7 @@ Test Files  1 passed (1)
 Tests       5 passed (5)
 ```
 
-- [ ] **Step 2.5: Update `tests/unit/skill-injection.test.ts` to import from orchestrator**
+- [ ] **Step 2.5: Update `tests/unit/skill-injection.test.ts` to import from services**
 
 Replace the inline `injectVariables` function at the top of the file with an import:
 
@@ -295,20 +197,20 @@ Replace the inline `injectVariables` function at the top of the file with an imp
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { injectVariables } from "../../orchestrator/inject.js";
+import { injectVariables } from "../../services/inject.js";
 
-// Remove the inline injectVariables function — it now lives in orchestrator/inject.ts
+// Remove the inline injectVariables function — it now lives in services/inject.ts
 
-const TASK_START_PATH = join(process.cwd(), "plugin/skills/task_start.md");
+const TASK_START_PATH = join(process.cwd(), "llm/prompts/task_start.md");
 
 const TASK_START_VARIABLES: Record<string, string> = {
-  task_id: "clxyz123",
+  task_id: "42",
   title: "Add authentication",
   task_type: "CODING",
   status: "IN_PROGRESS",
-  jira_key: "PD-42",
+  external_task_id: "PD-42",
   due_date: "2026-04-10T00:00:00.000Z",
-  context: JSON.stringify({ id: "clxyz123", title: "Add authentication" }),
+  context: JSON.stringify({ id: 42, title: "Add authentication" }),
 };
 
 describe("task_start skill variable injection", () => {
@@ -317,7 +219,7 @@ describe("task_start skill variable injection", () => {
     const result = injectVariables(template, TASK_START_VARIABLES);
 
     expect(result).not.toMatch(/\{\{[^}]+\}\}/);
-    expect(result).toContain("clxyz123");
+    expect(result).toContain("42");
     expect(result).toContain("Add authentication");
     expect(result).toContain("CODING");
     expect(result).toContain("IN_PROGRESS");
@@ -341,7 +243,7 @@ describe("task_start skill variable injection", () => {
 
   it("throws when variables are missing from a partial map", () => {
     const template = readFileSync(TASK_START_PATH, "utf-8");
-    const partial = { task_id: "clxyz123", title: "Add authentication" };
+    const partial = { task_id: "42", title: "Add authentication" };
 
     expect(() => injectVariables(template, partial)).toThrow(
       "Unresolved placeholders",
@@ -361,17 +263,17 @@ Expected: all tests pass (both `inject.test.ts` and `skill-injection.test.ts`).
 - [ ] **Step 2.7: Commit**
 
 ```bash
-git add orchestrator/inject.ts tests/unit/inject.test.ts tests/unit/skill-injection.test.ts
-git commit -m "feat: add injectVariables to orchestrator/inject"
+git add services/inject.ts tests/unit/inject.test.ts tests/unit/skill-injection.test.ts
+git commit -m "feat: add injectVariables to services/inject"
 ```
 
 ---
 
-## Task 3: `orchestrator/preflight.ts` — Pre-Flight Check
+## Task 3: `services/preflight.ts` — Pre-Flight Check
 
 **Files:**
 
-- Create: `orchestrator/preflight.ts`
+- Create: `services/preflight.ts`
 - Create: `tests/unit/preflight.test.ts`
 
 ---
@@ -381,7 +283,7 @@ git commit -m "feat: add injectVariables to orchestrator/inject"
 ```typescript
 // tests/unit/preflight.test.ts
 import { describe, it, expect } from "vitest";
-import { runPreflight } from "../../orchestrator/preflight.js";
+import { runPreflight } from "../../services/preflight.js";
 
 describe("runPreflight", () => {
   it("returns ok: true when Postgres is reachable and pgvector is installed", async () => {
@@ -398,13 +300,13 @@ describe("runPreflight", () => {
 yarn test tests/unit/preflight.test.ts
 ```
 
-Expected: `Error: Failed to resolve import "../../orchestrator/preflight.js"`
+Expected: `Error: Failed to resolve import "../../services/preflight.js"`
 
-- [ ] **Step 3.3: Create `orchestrator/preflight.ts`**
+- [ ] **Step 3.3: Create `services/preflight.ts`**
 
 ```typescript
-// orchestrator/preflight.ts
-import { PrismaClient } from "@prisma/client";
+// services/preflight.ts
+import { PrismaClient } from "../../generated/prisma/index.js";
 
 const prisma = new PrismaClient();
 
@@ -412,7 +314,7 @@ export type PreflightResult = { ok: true } | { ok: false; reason: string };
 
 /**
  * Checks that Postgres is reachable and the pgvector extension is installed.
- * Must pass before any Claude invocation.
+ * Must pass before any LLM invocation.
  */
 export async function runPreflight(): Promise<PreflightResult> {
   try {
@@ -452,18 +354,20 @@ Tests       1 passed (1)
 - [ ] **Step 3.5: Commit**
 
 ```bash
-git add orchestrator/preflight.ts tests/unit/preflight.test.ts
-git commit -m "feat: add runPreflight to orchestrator/preflight"
+git add services/preflight.ts tests/unit/preflight.test.ts
+git commit -m "feat: add runPreflight to services/preflight"
 ```
 
 ---
 
-## Task 4: `orchestrator/session.ts` — Session Lifecycle
+## Task 4: `services/session.ts` — Session Lifecycle
 
 **Files:**
 
-- Create: `orchestrator/session.ts`
+- Create: `services/session.ts`
 - Create: `tests/unit/session.test.ts`
+
+Session uses `Int @id @default(autoincrement())` IDs and has optional `meetingId` and `createdById` FK fields. All function signatures use `number` for IDs (sessionId: number, taskId: number).
 
 ---
 
@@ -472,17 +376,17 @@ git commit -m "feat: add runPreflight to orchestrator/preflight"
 ```typescript
 // tests/unit/session.test.ts
 import { describe, it, expect, afterEach } from "vitest";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../../generated/prisma/index.js";
 import {
   createSession,
   endSession,
   getSession,
   attachTaskToSession,
-} from "../../orchestrator/session.js";
+} from "../../services/session.js";
 
 const prisma = new PrismaClient();
-const createdSessionIds: string[] = [];
-const createdTaskIds: string[] = [];
+const createdSessionIds: number[] = [];
+const createdTaskIds: number[] = [];
 
 afterEach(async () => {
   // Clean up in FK order
@@ -501,9 +405,11 @@ afterEach(async () => {
 });
 
 describe("createSession", () => {
-  it("creates an ACTIVE session and returns its ID", async () => {
+  it("creates an ACTIVE session and returns its int ID", async () => {
     const id = await createSession();
     createdSessionIds.push(id);
+
+    expect(typeof id).toBe("number");
 
     // Re-query with a fresh client to prove it is in Postgres (not in-memory)
     const fresh = new PrismaClient();
@@ -514,6 +420,33 @@ describe("createSession", () => {
     expect(session!.status).toBe("ACTIVE");
     expect(session!.startedAt).toBeInstanceOf(Date);
     expect(session!.endedAt).toBeNull();
+  });
+
+  it("creates a session with optional meetingId FK", async () => {
+    const meeting = await prisma.meeting.create({
+      data: { title: "Sprint planning", keyPoints: [] },
+    });
+    const id = await createSession({ meetingId: meeting.id });
+    createdSessionIds.push(id);
+
+    const session = await prisma.session.findUnique({ where: { id } });
+    expect(session!.meetingId).toBe(meeting.id);
+
+    await prisma.meeting.delete({ where: { id: meeting.id } });
+  });
+
+  it("creates a session with optional createdById FK", async () => {
+    const user = await prisma.user.create({
+      data: { email: "test-session@wizard.dev" },
+    });
+    const id = await createSession({ createdById: user.id });
+    createdSessionIds.push(id);
+
+    const session = await prisma.session.findUnique({ where: { id } });
+    expect(session!.createdById).toBe(user.id);
+
+    await prisma.session.delete({ where: { id } });
+    await prisma.user.delete({ where: { id: user.id } });
   });
 });
 
@@ -534,7 +467,7 @@ describe("endSession", () => {
 });
 
 describe("attachTaskToSession", () => {
-  it("links a task to a session", async () => {
+  it("links a task to a session via SessionTask join table", async () => {
     const sessionId = await createSession();
     createdSessionIds.push(sessionId);
 
@@ -573,31 +506,42 @@ describe("crash durability", () => {
 yarn test tests/unit/session.test.ts
 ```
 
-Expected: `Error: Failed to resolve import "../../orchestrator/session.js"`
+Expected: `Error: Failed to resolve import "../../services/session.js"`
 
-- [ ] **Step 4.3: Create `orchestrator/session.ts`**
+- [ ] **Step 4.3: Create `services/session.ts`**
 
 ```typescript
-// orchestrator/session.ts
-import { PrismaClient } from "@prisma/client";
+// services/session.ts
+import { PrismaClient } from "../../generated/prisma/index.js";
 
 const prisma = new PrismaClient();
 
-export async function createSession(): Promise<string> {
+export type CreateSessionOptions = {
+  meetingId?: number;
+  createdById?: number;
+};
+
+export async function createSession(
+  options?: CreateSessionOptions,
+): Promise<number> {
   const session = await prisma.session.create({
-    data: { status: "ACTIVE" },
+    data: {
+      status: "ACTIVE",
+      meetingId: options?.meetingId ?? null,
+      createdById: options?.createdById ?? null,
+    },
   });
   return session.id;
 }
 
-export async function endSession(sessionId: string): Promise<void> {
+export async function endSession(sessionId: number): Promise<void> {
   await prisma.session.update({
     where: { id: sessionId },
     data: { status: "ENDED", endedAt: new Date() },
   });
 }
 
-export async function getSession(sessionId: string) {
+export async function getSession(sessionId: number) {
   return prisma.session.findUnique({
     where: { id: sessionId },
     include: {
@@ -609,8 +553,8 @@ export async function getSession(sessionId: string) {
 }
 
 export async function attachTaskToSession(
-  sessionId: string,
-  taskId: string,
+  sessionId: number,
+  taskId: number,
 ): Promise<void> {
   await prisma.sessionTask.create({
     data: { sessionId, taskId },
@@ -627,33 +571,35 @@ yarn test tests/unit/session.test.ts
 Expected:
 
 ```
-✓ createSession > creates an ACTIVE session and returns its ID
+✓ createSession > creates an ACTIVE session and returns its int ID
+✓ createSession > creates a session with optional meetingId FK
+✓ createSession > creates a session with optional createdById FK
 ✓ endSession > sets status to ENDED and stamps endedAt
-✓ attachTaskToSession > links a task to a session
+✓ attachTaskToSession > links a task to a session via SessionTask join table
 ✓ crash durability > session state is retrievable after simulated crash (new PrismaClient)
 
 Test Files  1 passed (1)
-Tests       4 passed (4)
+Tests       6 passed (6)
 ```
 
 - [ ] **Step 4.5: Commit**
 
 ```bash
-git add orchestrator/session.ts tests/unit/session.test.ts
-git commit -m "feat: add session lifecycle to orchestrator/session"
+git add services/session.ts tests/unit/session.test.ts
+git commit -m "feat: add session lifecycle to services/session"
 ```
 
 ---
 
-## Task 5: `core/workflows/task-start.ts` + `orchestrator/workflow.ts`
+## Task 5: `core/workflows/task-start.ts` + `services/workflow.ts`
 
 **Files:**
 
 - Create: `core/workflows/task-start.ts`
-- Create: `orchestrator/workflow.ts`
+- Create: `services/workflow.ts`
 - Create: `tests/unit/workflow.test.ts`
 
-`core/workflows/task-start.ts` is the hardcoded workflow definition. It defines what context is needed and how to build the variable map. `orchestrator/workflow.ts` executes it.
+`core/workflows/task-start.ts` is the hardcoded workflow definition. It defines what context is needed and how to build the variable map. `services/workflow.ts` executes it. The variable map uses the new schema field names: `external_task_id` (not `jira_key`), `branch` (not `github_branch`).
 
 ---
 
@@ -662,19 +608,22 @@ git commit -m "feat: add session lifecycle to orchestrator/session"
 ```typescript
 // core/workflows/task-start.ts
 import type { TaskContext } from "../../shared/types.js";
-import type { Variables } from "../../orchestrator/inject.js";
+import type { Variables } from "../../services/inject.js";
 
 /**
  * Builds the variable map for the task_start skill template from a TaskContext.
- * This is the hardcoded workflow definition — Orchestration executes it.
+ * This is the hardcoded workflow definition — services execute it.
+ *
+ * Variable map uses schema field names:
+ *   external_task_id (was jiraKey), branch (was githubBranch)
  */
 export function buildTaskStartVariables(context: TaskContext): Variables {
   return {
-    task_id: context.id,
+    task_id: String(context.id),
     title: context.title,
     task_type: context.taskType,
     status: context.status,
-    jira_key: context.jiraKey ?? "none",
+    external_task_id: context.externalTaskId ?? "none",
     due_date: context.dueDate
       ? context.dueDate.toISOString().split("T")[0]
       : "none",
@@ -688,19 +637,27 @@ export function buildTaskStartVariables(context: TaskContext): Variables {
 ```typescript
 // tests/unit/workflow.test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { PrismaClient } from "@prisma/client";
-import { runTaskStartWorkflow } from "../../orchestrator/workflow.js";
+import { PrismaClient } from "../../generated/prisma/index.js";
+import { runTaskStartWorkflow } from "../../services/workflow.js";
 
 const prisma = new PrismaClient();
-let taskId: string;
+let taskId: number;
+let repoId: number;
 
 beforeAll(async () => {
+  const repo = await prisma.repo.create({
+    data: { name: "wizard", url: "https://github.com/test/wizard-workflow" },
+  });
+  repoId = repo.id;
+
   const task = await prisma.task.create({
     data: {
       title: "Implement auth",
       status: "IN_PROGRESS",
       taskType: "CODING",
-      jiraKey: "PD-99",
+      externalTaskId: "PD-99",
+      branch: "feat/auth",
+      repoId: repoId,
       dueDate: new Date("2026-05-01T00:00:00.000Z"),
     },
   });
@@ -709,6 +666,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.task.delete({ where: { id: taskId } });
+  await prisma.repo.delete({ where: { id: repoId } });
   await prisma.$disconnect();
 });
 
@@ -727,20 +685,22 @@ describe("runTaskStartWorkflow", () => {
   });
 
   it("returns ok: false when task does not exist", async () => {
-    const result = await runTaskStartWorkflow("nonexistent-task-id");
+    const result = await runTaskStartWorkflow(999999);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("not found");
   });
 
-  it("prompt contains the full context as JSON", async () => {
+  it("prompt contains the full context as JSON with int ID", async () => {
     const result = await runTaskStartWorkflow(taskId);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
     const parsed = JSON.parse(result.prompt.split("Context:\n")[1] ?? "{}");
     expect(parsed.id).toBe(taskId);
+    expect(typeof parsed.id).toBe("number");
     expect(parsed.title).toBe("Implement auth");
+    expect(parsed.externalTaskId).toBe("PD-99");
   });
 });
 ```
@@ -751,17 +711,17 @@ describe("runTaskStartWorkflow", () => {
 yarn test tests/unit/workflow.test.ts
 ```
 
-Expected: `Error: Failed to resolve import "../../orchestrator/workflow.js"`
+Expected: `Error: Failed to resolve import "../../services/workflow.js"`
 
-- [ ] **Step 5.4: Create `orchestrator/workflow.ts`**
+- [ ] **Step 5.4: Create `services/workflow.ts`**
 
 ```typescript
-// orchestrator/workflow.ts
+// services/workflow.ts
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { injectVariables } from "./inject.js";
 import { runPreflight } from "./preflight.js";
-import { getTaskContext } from "../data/queries/index.js";
+import { getTaskContext } from "../data/repositories/task.js";
 import { buildTaskStartVariables } from "../core/workflows/task-start.js";
 
 export type WorkflowResult =
@@ -769,7 +729,7 @@ export type WorkflowResult =
   | { ok: false; reason: string };
 
 export async function runTaskStartWorkflow(
-  taskId: string,
+  taskId: number,
 ): Promise<WorkflowResult> {
   const preflight = await runPreflight();
   if (!preflight.ok) {
@@ -782,7 +742,7 @@ export async function runTaskStartWorkflow(
   }
 
   const template = readFileSync(
-    join(process.cwd(), "plugin/skills/task_start.md"),
+    join(process.cwd(), "llm/prompts/task_start.md"),
     "utf-8",
   );
 
@@ -804,7 +764,7 @@ Expected:
 ```
 ✓ runTaskStartWorkflow > returns a formatted prompt with no unresolved placeholders
 ✓ runTaskStartWorkflow > returns ok: false when task does not exist
-✓ runTaskStartWorkflow > prompt contains the full context as JSON
+✓ runTaskStartWorkflow > prompt contains the full context as JSON with int ID
 
 Test Files  1 passed (1)
 Tests       3 passed (3)
@@ -813,8 +773,8 @@ Tests       3 passed (3)
 - [ ] **Step 5.6: Commit**
 
 ```bash
-git add core/workflows/task-start.ts orchestrator/workflow.ts tests/unit/workflow.test.ts
-git commit -m "feat: add task-start workflow and orchestrator/workflow"
+git add core/workflows/task-start.ts services/workflow.ts tests/unit/workflow.test.ts
+git commit -m "feat: add task-start workflow and services/workflow"
 ```
 
 ---
@@ -823,26 +783,26 @@ git commit -m "feat: add task-start workflow and orchestrator/workflow"
 
 **Files:**
 
-- Modify: `mcp/index.ts`
+- Modify: `interfaces/mcp/index.ts`
 
 ---
 
-- [ ] **Step 6.1: Update `mcp/index.ts`**
+- [ ] **Step 6.1: Update `interfaces/mcp/index.ts`**
 
 Replace the full file content:
 
 ```typescript
-// mcp/index.ts
+// interfaces/mcp/index.ts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { getTaskContext } from "../data/queries/index.js";
+import { getTaskContext } from "../data/repositories/task.js";
 import {
   createSession,
   endSession,
   attachTaskToSession,
-} from "../orchestrator/session.js";
-import { runTaskStartWorkflow } from "../orchestrator/workflow.js";
+} from "../services/session.js";
+import { runTaskStartWorkflow } from "../services/workflow.js";
 
 const server = new McpServer({
   name: "wizard",
@@ -855,8 +815,8 @@ server.tool("health", "Get health of Wizard System", {}, async () => ({
 
 server.tool(
   "get_task_context",
-  "Get the full context for a task by ID. Returns task details, linked meeting, Jira key, and GitHub branch.",
-  { task_id: z.string().describe("The Wizard task ID (cuid)") },
+  "Get the full context for a task by int ID. Returns task details, linked meeting, externalTaskId, branch, and repoId.",
+  { task_id: z.number().describe("The Wizard task ID (int)") },
   async ({ task_id }) => {
     const context = await getTaskContext(task_id);
     if (!context) {
@@ -873,10 +833,16 @@ server.tool(
 
 server.tool(
   "session_start",
-  "Start a new Wizard session. Returns the session ID.",
-  {},
-  async () => {
-    const sessionId = await createSession();
+  "Start a new Wizard session. Returns the session ID (int).",
+  {
+    meeting_id: z.number().optional().describe("Optional meeting ID (int) to associate with the session"),
+    created_by_id: z.number().optional().describe("Optional user ID (int) of session creator"),
+  },
+  async ({ meeting_id, created_by_id }) => {
+    const sessionId = await createSession({
+      meetingId: meeting_id,
+      createdById: created_by_id,
+    });
     return {
       content: [{ type: "text", text: JSON.stringify({ sessionId }) }],
     };
@@ -887,8 +853,8 @@ server.tool(
   "task_start",
   "Start work on a task within the current session. Runs pre-flight, loads context, and returns the prepared prompt.",
   {
-    task_id: z.string().describe("The Wizard task ID (cuid)"),
-    session_id: z.string().describe("The current session ID"),
+    task_id: z.number().describe("The Wizard task ID (int)"),
+    session_id: z.number().describe("The current session ID (int)"),
   },
   async ({ task_id, session_id }) => {
     await attachTaskToSession(session_id, task_id);
@@ -910,7 +876,7 @@ server.tool(
 server.tool(
   "session_end",
   "End the current Wizard session.",
-  { session_id: z.string().describe("The session ID to end") },
+  { session_id: z.number().describe("The session ID to end (int)") },
   async ({ session_id }) => {
     await endSession(session_id);
     return {
@@ -934,7 +900,7 @@ Expected: zero errors.
 - [ ] **Step 6.3: Commit**
 
 ```bash
-git add mcp/index.ts
+git add interfaces/mcp/index.ts
 git commit -m "feat: add session_start, task_start, session_end MCP tools"
 ```
 
@@ -944,35 +910,43 @@ git commit -m "feat: add session_start, task_start, session_end MCP tools"
 
 **Files:**
 
-- Create: `tests/contracts/orchestration-to-claude.test.ts`
+- Create: `tests/contracts/services-to-llm.test.ts`
 
 ---
 
-- [ ] **Step 7.1: Create `tests/contracts/orchestration-to-claude.test.ts`**
+- [ ] **Step 7.1: Create `tests/contracts/services-to-llm.test.ts`**
 
 ```typescript
-// tests/contracts/orchestration-to-claude.test.ts
+// tests/contracts/services-to-llm.test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { PrismaClient } from "@prisma/client";
-import { runTaskStartWorkflow } from "../../orchestrator/workflow.js";
+import { PrismaClient } from "../../generated/prisma/index.js";
+import { runTaskStartWorkflow } from "../../services/workflow.js";
 import {
   createSession,
   endSession,
   getSession,
-} from "../../orchestrator/session.js";
-import { runPreflight } from "../../orchestrator/preflight.js";
+} from "../../services/session.js";
+import { runPreflight } from "../../services/preflight.js";
 
 const prisma = new PrismaClient();
-let taskId: string;
-let sessionId: string;
+let taskId: number;
+let repoId: number;
+let sessionId: number;
 
 beforeAll(async () => {
+  const repo = await prisma.repo.create({
+    data: { name: "wizard", url: "https://github.com/test/wizard-contract" },
+  });
+  repoId = repo.id;
+
   const task = await prisma.task.create({
     data: {
       title: "Contract test task",
       status: "IN_PROGRESS",
       taskType: "CODING",
-      jiraKey: "PD-CONTRACT",
+      externalTaskId: "PD-CONTRACT",
+      branch: "feat/contract-test",
+      repoId: repoId,
     },
   });
   taskId = task.id;
@@ -983,10 +957,11 @@ afterAll(async () => {
   await prisma.sessionTask.deleteMany({ where: { sessionId } });
   await prisma.session.delete({ where: { id: sessionId } });
   await prisma.task.delete({ where: { id: taskId } });
+  await prisma.repo.delete({ where: { id: repoId } });
   await prisma.$disconnect();
 });
 
-describe("Orchestration → Claude contract", () => {
+describe("Services → LLM layer contract", () => {
   it("pre-flight passes before workflow invocation", async () => {
     const result = await runPreflight();
     expect(result.ok).toBe(true);
@@ -1000,7 +975,7 @@ describe("Orchestration → Claude contract", () => {
 
     // No unresolved placeholders
     expect(result.prompt).not.toMatch(/\{\{[^}]+\}\}/);
-    // Task data is present
+    // Task data is present — uses new schema field names
     expect(result.prompt).toContain("Contract test task");
     expect(result.prompt).toContain("PD-CONTRACT");
   });
@@ -1015,6 +990,7 @@ describe("Orchestration → Claude contract", () => {
 
     expect(session).not.toBeNull();
     expect(session!.id).toBe(sessionId);
+    expect(typeof session!.id).toBe("number");
     expect(session!.status).toBe("ACTIVE");
   });
 
@@ -1040,16 +1016,16 @@ describe("Orchestration → Claude contract", () => {
 - [ ] **Step 7.2: Run the contract test — verify it passes**
 
 ```bash
-yarn test tests/contracts/orchestration-to-claude.test.ts
+yarn test tests/contracts/services-to-llm.test.ts
 ```
 
 Expected:
 
 ```
-✓ Orchestration → Claude contract > pre-flight passes before workflow invocation
-✓ Orchestration → Claude contract > workflow returns a formatted prompt — pre-flight runs internally
-✓ Orchestration → Claude contract > session state persists across a simulated crash
-✓ Orchestration → Claude contract > session transitions to ENDED after endSession
+✓ Services → LLM layer contract > pre-flight passes before workflow invocation
+✓ Services → LLM layer contract > workflow returns a formatted prompt — pre-flight runs internally
+✓ Services → LLM layer contract > session state persists across a simulated crash
+✓ Services → LLM layer contract > session transitions to ENDED after endSession
 
 Test Files  1 passed (1)
 Tests       4 passed (4)
@@ -1058,8 +1034,8 @@ Tests       4 passed (4)
 - [ ] **Step 7.3: Commit**
 
 ```bash
-git add tests/contracts/orchestration-to-claude.test.ts
-git commit -m "test(contract): add orchestration-to-claude contract test — step 2 proof passing"
+git add tests/contracts/services-to-llm.test.ts
+git commit -m "test(contract): add services-to-llm contract test — step 2 proof passing"
 ```
 
 ---
@@ -1077,11 +1053,11 @@ yarn test
 Expected:
 
 ```
-Test Files  4 passed (4)
-Tests       17 passed (17)
+Test Files  5 passed (5)
+Tests       19+ passed
 ```
 
-(Step 1 tests: 9. Step 2 new tests: inject × 5, preflight × 1, session × 4, workflow × 3, contract × 4 = 17 new. But some run together so count may vary slightly.)
+(Step 1 tests: 9. Step 2 new tests: inject x 5, preflight x 1, session x 6, workflow x 3, contract x 4 = 19 new. Total count may vary slightly depending on Step 1 suite.)
 
 - [ ] **Step 8.2: TypeScript clean build**
 
@@ -1095,17 +1071,21 @@ Expected: zero errors.
 
 From the spec:
 
-> Claude is invoked by Orchestration with prepared context. Pre-flight check passes before invocation. Session state persists across a simulated crash.
+> The LLM layer is invoked by services with prepared context. Pre-flight check passes before invocation. Session state persists across a simulated crash.
 
-- `runPreflight()` passes ✓ — verified in `orchestration-to-claude.test.ts`
-- `runTaskStartWorkflow()` returns prepared prompt ✓ — verified with no unresolved placeholders and task data present
-- Session state survives crash ✓ — re-queried via fresh PrismaClient in two separate tests
+- `runPreflight()` passes — verified in `services-to-llm.test.ts`
+- `runTaskStartWorkflow()` returns prepared prompt — verified with no unresolved placeholders and task data present
+- Session state survives crash — re-queried via fresh PrismaClient in two separate tests
+- All IDs are int (autoincrement), not string (cuid)
+- All imports use `../../generated/prisma/index.js`, not `@prisma/client`
+- `getTaskContext` imported from `data/repositories/task.js`
+- Seed data uses new schema shape: `externalTaskId`, `branch`, `repoId`
 
 - [ ] **Step 8.4: Final commit**
 
 ```bash
 git add .
-git commit -m "chore: step 2 complete — orchestration-to-claude contract passing"
+git commit -m "chore: step 2 complete — services-to-llm contract passing"
 ```
 
 ---
@@ -1121,5 +1101,5 @@ Confirm `DATABASE_URL` in `.env` matches the running Docker container. Run `dock
 **`tsc --noEmit` fails on `core/` imports**
 Confirm `core/**/*.ts` is in the `include` array in `tsconfig.json` (Task 1 of this step).
 
-**Serena spike fails — binary not found**
-Check how Serena is installed: `which serena` or look at `.claude/settings.json` for the configured MCP command. The binary name may differ (e.g., `serena-mcp`, `python -m serena`).
+**Import errors for `@prisma/client`**
+All Prisma imports must use `../../generated/prisma/index.js` (relative path to generated output), not `@prisma/client`. The generator is configured with `provider = "prisma-client"` and `output = "../generated/prisma"`.
