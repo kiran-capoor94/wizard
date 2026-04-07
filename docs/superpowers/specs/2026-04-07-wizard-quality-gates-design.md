@@ -187,7 +187,7 @@ Orchestrates the individual skills intelligently based on what changed. Provides
 | `prisma/` | types |
 | Any file | scope (always runs) |
 
-3. **Parallel execution** — Runs selected skills concurrently as subagents.
+3. **Parallel execution** — Invokes selected skills in parallel via the Skill tool. Each skill is the single source of truth for its check logic — the agent does not duplicate it.
 
 4. **Consolidation** — Collects results into a single report:
 
