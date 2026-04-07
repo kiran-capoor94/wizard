@@ -1,12 +1,12 @@
-# Wizard v2 Step 4 — Claude Output Pipeline Implementation Plan
+# Wizard v2 Step 4 — LLM Output Pipeline Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the Claude output pipeline — process → transform → validate → store — and prove that valid output is stored and retrievable, invalid output is rejected (not silently stored), and wrong attributions are detected and rejected via pgvector similarity check.
+**Goal:** Build the LLM output pipeline — process → transform → validate → store → materialise — and prove that valid output is stored and retrievable, invalid output is rejected (not silently stored), and wrong attributions are detected and rejected via pgvector similarity check.
 
-**Architecture:** Claude's raw text output enters `core/output/pipeline.ts`, which executes four steps in strict order: (1) `process` — parse JSON from Claude's structured output; (2) `transform` — map parsed fields to Postgres schema and resolve foreign keys; (3) `validate` — check schema contract (Zod) and semantic attribution (pgvector similarity vs. stored threshold); (4) `store` — write to Postgres in a transaction with rollback on partial failure. Embeddings are computed via a thin interface wrapping the OpenAI Embeddings API. The pgvector attribution check compares Claude's claimed task-meeting link against stored embeddings using cosine similarity.
+**Architecture:** The LLM's raw text output enters `core/output/pipeline.ts`, which executes five steps in strict order: (1) `process` — parse JSON from the LLM's structured output; (2) `transform` — map parsed fields to Postgres schema and resolve foreign keys as int IDs (Int @id @default(autoincrement())); (3) `validate` — check schema contract (Zod) and semantic attribution (pgvector similarity vs. stored threshold); (4) `store` — write to Postgres in a transaction with rollback on partial failure. (5) `materialise` — for skills flagged `materialise: true` in `core/`, create a Note entity (investigation or decision type), link to current Task and Session, trigger embedding. One function, not a framework. Note creation failure is logged but does not fail the pipeline. Embeddings are computed via `EmbeddingAdapter` interface with `OllamaEmbeddingAdapter` using `nomic-embed-text` (vector(768)). No OpenAI dependency — all embeddings use Ollama's local HTTP API. The pgvector attribution check compares the LLM's claimed task-meeting link against stored embeddings using cosine similarity.
 
-**Tech Stack:** TypeScript (ESM, Node16), Prisma, Vitest, `openai` (embeddings API), `pgvector` npm package (already installed as dev dep — promoted to prod in this step).
+**Tech Stack:** TypeScript (ESM, bundler), Prisma (generator `"prisma-client"`, output `"../generated/prisma"`), Vitest, `pgvector` npm package (already installed as dev dep — promoted to prod in this step). No `openai` dependency — embeddings use Ollama via the `EmbeddingAdapter` interface. Imports from generated client use `../../generated/prisma/index.js`, not `@prisma/client`.
 
 ---
 
@@ -14,20 +14,20 @@
 
 | Action | Path | Responsibility |
 |---|---|---|
-| Create | `core/output/process.ts` | Parse Claude's raw text output into structured fields |
-| Create | `core/output/transform.ts` | Map parsed output to Postgres schema; resolve foreign keys |
+| Create | `core/output/process.ts` | Parse LLM's raw text output into structured fields |
+| Create | `core/output/transform.ts` | Map parsed output to Postgres schema; resolve foreign keys as int IDs |
 | Create | `core/output/validate.ts` | Schema contract (Zod) + pgvector attribution check |
 | Create | `core/output/store.ts` | Write to Postgres in a transaction; trigger pgvector sync |
-| Create | `core/output/pipeline.ts` | Compose process → transform → validate → store; single entry point |
-| Create | `core/output/types.ts` | `ClaudeOutput`, `ProcessedOutput`, `TransformedOutput` types |
-| Create | `core/output/embeddings.ts` | Embedding computation interface (wraps OpenAI); mockable in tests |
-| Create | `data/queries/embeddings.ts` | Store and retrieve `TaskEmbedding` vectors via `$queryRaw` |
+| Create | `core/output/pipeline.ts` | Compose process → transform → validate → store → materialise; single entry point |
+| Create | `core/output/types.ts` | `LLMRawOutput`, `ProcessedOutput`, `TransformedOutput` types |
+| Create | `core/output/embeddings.ts` | Embedding computation via Ollama HTTP API (nomic-embed-text, vector(768)) |
+| Create | `data/repositories/embeddings.ts` | Store and retrieve `TaskEmbedding` vectors via `$queryRaw` |
 | Create | New Prisma migration | Seed initial `SemanticConfig` threshold value |
-| Modify | `package.json` | Move `pgvector` from dev to prod; add `openai` |
+| Modify | `package.json` | Move `pgvector` from dev to prod; no `openai` package |
 | Modify | `tsconfig.json` | `core/output/` is already covered by `core/**/*.ts` — no change needed |
-| Create | `tests/unit/process.test.ts` | Parse valid/invalid Claude output |
+| Create | `tests/unit/process.test.ts` | Parse valid/invalid LLM output |
 | Create | `tests/unit/validate.test.ts` | Schema contract + attribution check |
-| Create | `tests/contracts/claude-to-data.test.ts` | Step 4 proof criteria |
+| Create | `tests/contracts/llm-to-data.test.ts` | Step 4 proof criteria |
 
 ---
 
@@ -39,45 +39,40 @@
 
 ---
 
-- [ ] **Step 1.1: Update `package.json` — move `pgvector` to prod, add `openai`**
+- [ ] **Step 1.1: Update `package.json` — move `pgvector` to prod**
 
 ```bash
-yarn add openai pgvector
+yarn add pgvector
 ```
 
-Then remove `pgvector` from `devDependencies` in `package.json` (it's now in `dependencies`):
+Then remove `pgvector` from `devDependencies` in `package.json` (it's now in `dependencies`). No `openai` package should be present. The resulting `package.json` should look like:
 
 ```json
 {
   "name": "wizard",
   "packageManager": "yarn@4.12.0",
   "type": "module",
-  "bin": {
-    "wizard-mcp": "./build/mcp/index.js",
-    "wizard": "./build/cli/index.js"
-  },
-  "prisma": {
-    "schema": "data/prisma/schema.prisma"
-  },
+  "bin": "./build/interfaces/mcp/index.js",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@notionhq/client": "^5.15.0",
-    "@prisma/client": "^6.0.0",
-    "commander": "^12.0.0",
-    "js-yaml": "^4.1.0",
-    "openai": "^4.0.0",
+    "@prisma/adapter-pg": "^7.6.0",
+    "dotenv": "^17.4.0",
+    "ollama": "^0.6.3",
+    "pg": "^8.20.0",
     "pgvector": "^0.2.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.5.0",
-    "prisma": "^6.0.0",
+    "@types/node": "^25.5.2",
+    "@types/pg": "^8.20.0",
+    "prisma": "^7.6.0",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "vitest": "^3.0.0"
   },
   "scripts": {
-    "build": "tsc && chmod 755 build/mcp/index.js && chmod 755 build/cli/index.js",
+    "build": "tsc && chmod 755 build/interfaces/mcp/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -87,21 +82,18 @@ Then remove `pgvector` from `devDependencies` in `package.json` (it's now in `de
 }
 ```
 
-- [ ] **Step 1.2: Add `OPENAI_API_KEY` to `.env` and `.env.example`**
+Note: `@prisma/client` is not listed — the generated client comes from `prisma-client` generator with `output = "../generated/prisma"`. No `openai` package is needed; embeddings use Ollama via HTTP.
 
-`.env`:
-```
-DATABASE_URL="postgresql://wizard:wizard@localhost:5432/wizard"
-WIZARD_ENCRYPTION_KEY="<your-key>"
-OPENAI_API_KEY="sk-..."
+- [ ] **Step 1.2: Verify Ollama is running with nomic-embed-text**
+
+Embeddings use `nomic-embed-text` via Ollama (not OpenAI). Ensure the model is available:
+
+```bash
+ollama pull nomic-embed-text
+ollama list | grep nomic
 ```
 
-`.env.example`:
-```
-DATABASE_URL="postgresql://wizard:wizard@localhost:5432/wizard"
-WIZARD_ENCRYPTION_KEY="replace-with-64-char-hex-string"
-OPENAI_API_KEY="replace-with-openai-api-key"
-```
+No `OPENAI_API_KEY` is needed. The `EmbeddingAdapter` calls Ollama's local HTTP API at `OLLAMA_BASE_URL` (default `http://localhost:11434`).
 
 - [ ] **Step 1.3: Add semantic threshold seed via Prisma migration**
 
@@ -114,9 +106,9 @@ npx prisma migrate dev --name seed-semantic-config
 After Prisma creates the migration file, open it and add a seed INSERT at the end:
 
 ```sql
--- data/prisma/migrations/[timestamp]_seed-semantic-config/migration.sql
-INSERT INTO "SemanticConfig" (id, key, value, "updatedAt")
-VALUES (gen_random_uuid()::text, 'attribution_threshold', 0.75, NOW())
+-- prisma/migrations/[timestamp]_seed-semantic-config/migration.sql
+INSERT INTO "SemanticConfig" (key, value, "updatedAt")
+VALUES ('attribution_threshold', 0.75, NOW())
 ON CONFLICT (key) DO NOTHING;
 ```
 
@@ -139,11 +131,22 @@ Expected:
  attribution_threshold | 0.75
 ```
 
-- [ ] **Step 1.5: Commit**
+- [ ] **Step 1.5: Update `.env.example`**
+
+Ensure `.env.example` contains:
+
+```
+DATABASE_URL=postgresql://wizard:wizard@localhost:5432/wizard
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+No `OPENAI_API_KEY` entry. All embeddings use Ollama locally.
+
+- [ ] **Step 1.6: Commit**
 
 ```bash
-git add package.json .env.example data/prisma/migrations/ data/prisma/schema.prisma
-git commit -m "feat: add openai dep and seed semantic attribution threshold"
+git add package.json prisma/migrations/ .env.example
+git commit -m "feat: promote pgvector to prod dep and seed semantic attribution threshold"
 ```
 
 ---
@@ -157,12 +160,14 @@ git commit -m "feat: add openai dep and seed semantic attribution threshold"
 
 - [ ] **Step 2.1: Create `core/output/types.ts`**
 
+All IDs are `number` (Int @id @default(autoincrement()) in Prisma schema).
+
 ```typescript
 // core/output/types.ts
 import type { TaskStatus } from '../../shared/types.js'
 
 /**
- * The raw text Claude produces. Wizard requires Claude to output
+ * The raw text the LLM produces. Wizard requires the LLM to output
  * a JSON block wrapped in triple backticks:
  *
  * ```json
@@ -171,27 +176,31 @@ import type { TaskStatus } from '../../shared/types.js'
  *
  * The pipeline extracts the first JSON block from this text.
  */
-export type ClaudeRawOutput = string
+export type LLMRawOutput = string
 
 /**
- * The structured output after parsing Claude's JSON block.
+ * The structured output after parsing the LLM's JSON block.
+ * Uses int IDs matching Prisma schema (Int @id @default(autoincrement())).
  */
 export type ProcessedOutput = {
-  taskId: string
+  taskId: number
   summary: string
   status: TaskStatus
-  meetingId?: string | null   // claimed attribution — may be wrong
+  meetingId?: number | null   // claimed attribution — may be wrong
+  externalTaskId?: string | null
   notes?: string | null
 }
 
 /**
  * After transform: ProcessedOutput with resolved Postgres foreign keys confirmed.
+ * All IDs are int (matching autoincrement schema).
  */
 export type TransformedOutput = {
-  taskId: string
+  taskId: number
   summary: string
   status: TaskStatus
-  meetingId: string | null     // null if not provided or not found
+  meetingId: number | null     // null if not provided or not found
+  externalTaskId: string | null
   notes: string | null
 }
 
@@ -208,12 +217,12 @@ export type PipelineResult<T> =
 ```bash
 mkdir -p core/output
 git add core/output/types.ts
-git commit -m "feat: add Claude output type definitions"
+git commit -m "feat: add LLM output type definitions"
 ```
 
 ---
 
-## Task 3: `core/output/process.ts` — Parse Claude Output
+## Task 3: `core/output/process.ts` — Parse LLM Output
 
 **Files:**
 - Create: `core/output/process.ts`
@@ -233,10 +242,10 @@ I have reviewed the task and completed the work.
 
 \`\`\`json
 {
-  "taskId": "clxyz123",
+  "taskId": 42,
   "summary": "Implemented JWT authentication middleware",
   "status": "DONE",
-  "meetingId": "mtg-456",
+  "meetingId": 7,
   "notes": "Used RS256 algorithm as agreed in sprint planning"
 }
 \`\`\`
@@ -245,7 +254,7 @@ I have reviewed the task and completed the work.
 const VALID_OUTPUT_NO_MEETING = `
 \`\`\`json
 {
-  "taskId": "clxyz123",
+  "taskId": 42,
   "summary": "Fixed the null pointer bug",
   "status": "DONE"
 }
@@ -253,16 +262,16 @@ const VALID_OUTPUT_NO_MEETING = `
 `
 
 describe('processOutput', () => {
-  it('extracts the JSON block from valid Claude output', () => {
+  it('extracts the JSON block from valid LLM output', () => {
     const result = processOutput(VALID_OUTPUT)
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    expect(result.value.taskId).toBe('clxyz123')
+    expect(result.value.taskId).toBe(42)
     expect(result.value.summary).toBe('Implemented JWT authentication middleware')
     expect(result.value.status).toBe('DONE')
-    expect(result.value.meetingId).toBe('mtg-456')
+    expect(result.value.meetingId).toBe(7)
     expect(result.value.notes).toBe('Used RS256 algorithm as agreed in sprint planning')
   })
 
@@ -299,7 +308,7 @@ describe('processOutput', () => {
 
   it('returns ok: false when status is not a valid TaskStatus', () => {
     const result = processOutput(
-      '```json\n{"taskId": "x", "summary": "y", "status": "INVALID"}\n```'
+      '```json\n{"taskId": 1, "summary": "y", "status": "INVALID"}\n```'
     )
     expect(result.ok).toBe(false)
   })
@@ -319,24 +328,25 @@ Expected: `Error: Failed to resolve import "../../core/output/process.js"`
 ```typescript
 // core/output/process.ts
 import { z } from 'zod'
-import type { ClaudeRawOutput, ProcessedOutput, PipelineResult } from './types.js'
+import type { LLMRawOutput, ProcessedOutput, PipelineResult } from './types.js'
 
 const ProcessedOutputSchema = z.object({
-  taskId: z.string().min(1),
+  taskId: z.number().int().positive(),
   summary: z.string().min(1),
-  status: z.enum(['TODO', 'IN_PROGRESS', 'DONE']),
-  meetingId: z.string().optional().nullable(),
+  status: z.enum(['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED']),
+  meetingId: z.number().int().positive().optional().nullable(),
+  externalTaskId: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 })
 
 /**
- * Extracts the first ```json ... ``` block from Claude's raw output and
+ * Extracts the first ```json ... ``` block from the LLM's raw output and
  * parses it into a ProcessedOutput. Returns ok: false on any failure.
  */
-export function processOutput(raw: ClaudeRawOutput): PipelineResult<ProcessedOutput> {
+export function processOutput(raw: LLMRawOutput): PipelineResult<ProcessedOutput> {
   const match = raw.match(/```json\s*([\s\S]*?)```/)
   if (!match) {
-    return { ok: false, reason: 'No JSON block found in Claude output' }
+    return { ok: false, reason: 'No JSON block found in LLM output' }
   }
 
   let parsed: unknown
@@ -365,7 +375,7 @@ yarn test tests/unit/process.test.ts
 Expected:
 
 ```
-✓ processOutput > extracts the JSON block from valid Claude output
+✓ processOutput > extracts the JSON block from valid LLM output
 ✓ processOutput > handles output without meetingId or notes
 ✓ processOutput > returns ok: false when no JSON block is present
 ✓ processOutput > returns ok: false when JSON is malformed
@@ -380,7 +390,7 @@ Tests       6 passed (6)
 
 ```bash
 git add core/output/process.ts tests/unit/process.test.ts
-git commit -m "feat: add Claude output processing to core/output/process"
+git commit -m "feat: add LLM output processing to core/output/process"
 ```
 
 ---
@@ -395,22 +405,23 @@ git commit -m "feat: add Claude output processing to core/output/process"
 
 - [ ] **Step 4.1: Write the failing test**
 
+All IDs are int (autoincrement). Import `PrismaClient` from the generated client path.
+
 ```typescript
 // tests/unit/transform.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../../generated/prisma/index.js'
 import { transformOutput } from '../../core/output/transform.js'
 
 const prisma = new PrismaClient()
-let taskId: string
-let meetingId: string
+let taskId: number
+let meetingId: number
 
 beforeAll(async () => {
   const meeting = await prisma.meeting.create({
     data: {
       title: 'Sprint Planning',
       keyPoints: [],
-      actionItems: [],
     },
   })
   meetingId = meeting.id
@@ -461,7 +472,7 @@ describe('transformOutput', () => {
 
   it('returns ok: false when taskId does not exist in Postgres', async () => {
     const result = await transformOutput({
-      taskId: 'nonexistent-task-id',
+      taskId: 999999,
       summary: 'Done',
       status: 'DONE',
     })
@@ -476,7 +487,7 @@ describe('transformOutput', () => {
       taskId,
       summary: 'Done',
       status: 'DONE',
-      meetingId: 'nonexistent-meeting-id',
+      meetingId: 999999,
     })
 
     expect(result.ok).toBe(false)
@@ -498,13 +509,14 @@ Expected: `Error: Failed to resolve import "../../core/output/transform.js"`
 
 ```typescript
 // core/output/transform.ts
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../../generated/prisma/index.js'
 import type { ProcessedOutput, TransformedOutput, PipelineResult } from './types.js'
 
 const prisma = new PrismaClient()
 
 /**
  * Maps a ProcessedOutput to a TransformedOutput by resolving foreign keys.
+ * All IDs are int (matching Int @id @default(autoincrement()) schema).
  * Returns ok: false if taskId or meetingId do not exist in Postgres.
  */
 export async function transformOutput(
@@ -533,6 +545,7 @@ export async function transformOutput(
       summary: processed.summary,
       status: processed.status,
       meetingId: processed.meetingId ?? null,
+      externalTaskId: processed.externalTaskId ?? null,
       notes: processed.notes ?? null,
     },
   }
@@ -566,11 +579,13 @@ git commit -m "feat: add output transformation to core/output/transform"
 
 ---
 
-## Task 5: `core/output/embeddings.ts` + `data/queries/embeddings.ts`
+## Task 5: `core/output/embeddings.ts` + `data/repositories/embeddings.ts`
 
 **Files:**
 - Create: `core/output/embeddings.ts`
-- Create: `data/queries/embeddings.ts`
+- Create: `data/repositories/embeddings.ts`
+
+Embeddings use `nomic-embed-text` via Ollama (not OpenAI). The `EmbeddingAdapter` interface is defined in `llm/adapters/embedding-base.ts` (Step 1). This file wraps the Ollama HTTP API for pipeline use. All vectors are vector(768).
 
 ---
 
@@ -578,44 +593,50 @@ git commit -m "feat: add output transformation to core/output/transform"
 
 ```typescript
 // core/output/embeddings.ts
-import OpenAI from 'openai'
 
-const EMBEDDING_MODEL = 'text-embedding-3-small'
-const EMBEDDING_DIMENSIONS = 1536
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434'
+const EMBEDDING_MODEL = 'nomic-embed-text'
+const EMBEDDING_DIMENSIONS = 768
 
 export type EmbeddingVector = number[]
 
-let openaiClient: OpenAI | null = null
-
-function getClient(): OpenAI {
-  if (!openaiClient) {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) throw new Error('OPENAI_API_KEY is not set')
-    openaiClient = new OpenAI({ apiKey })
-  }
-  return openaiClient
-}
-
 /**
- * Computes a 1536-dimensional embedding vector for a text string.
- * Uses OpenAI text-embedding-3-small.
+ * Computes a 768-dimensional embedding vector for a text string.
+ * Uses nomic-embed-text via Ollama's local HTTP API.
+ * No OpenAI dependency. No OPENAI_API_KEY needed.
+ * Calls POST http://localhost:11434/api/embed (or OLLAMA_BASE_URL).
  */
 export async function computeEmbedding(text: string): Promise<EmbeddingVector> {
-  const client = getClient()
-  const response = await client.embeddings.create({
-    model: EMBEDDING_MODEL,
-    input: text,
-    dimensions: EMBEDDING_DIMENSIONS,
+  const response = await fetch(`${OLLAMA_BASE_URL}/api/embed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text }),
   })
-  return response.data[0].embedding
+
+  if (!response.ok) {
+    throw new Error(`Ollama embedding error ${response.status}: ${await response.text()}`)
+  }
+
+  const data = await response.json() as { embeddings: number[][] }
+  const embedding = data.embeddings[0]
+
+  if (!embedding || embedding.length !== EMBEDDING_DIMENSIONS) {
+    throw new Error(
+      `Expected vector(${EMBEDDING_DIMENSIONS}), got ${embedding?.length ?? 0} dimensions`
+    )
+  }
+
+  return embedding
 }
 ```
 
-- [ ] **Step 5.2: Create `data/queries/embeddings.ts`**
+- [ ] **Step 5.2: Create `data/repositories/embeddings.ts`**
+
+All IDs are Int @id @default(autoincrement()). SemanticConfig uses Int autoincrement ID. Import from generated client.
 
 ```typescript
-// data/queries/embeddings.ts
-import { PrismaClient } from '@prisma/client'
+// data/repositories/embeddings.ts
+import { PrismaClient } from '../../generated/prisma/index.js'
 import type { EmbeddingVector } from '../../core/output/embeddings.js'
 
 const prisma = new PrismaClient()
@@ -623,19 +644,20 @@ const prisma = new PrismaClient()
 /**
  * Stores a task embedding vector in the TaskEmbedding table.
  * Upserts: safe to call multiple times for the same taskId.
+ * Uses vector(768) — nomic-embed-text dimensions via Ollama.
  */
 export async function storeTaskEmbedding(
-  taskId: string,
+  taskId: number,
   embedding: EmbeddingVector
 ): Promise<void> {
   // Prisma cannot write Unsupported types — use $executeRaw
   const vectorStr = `[${embedding.join(',')}]`
 
   await prisma.$executeRaw`
-    INSERT INTO "TaskEmbedding" (id, "taskId", embedding)
-    VALUES (gen_random_uuid()::text, ${taskId}, ${vectorStr}::vector)
+    INSERT INTO "TaskEmbedding" (id, "taskId", embedding, "updatedAt")
+    VALUES (DEFAULT, ${taskId}, ${vectorStr}::vector, NOW())
     ON CONFLICT ("taskId")
-    DO UPDATE SET embedding = ${vectorStr}::vector
+    DO UPDATE SET embedding = ${vectorStr}::vector, "updatedAt" = NOW()
   `
 }
 
@@ -643,9 +665,10 @@ export async function storeTaskEmbedding(
  * Computes the cosine similarity between a task's stored embedding
  * and a query vector. Returns null if the task has no embedding.
  * pgvector's <=> operator computes cosine distance; similarity = 1 - distance.
+ * Uses vector(768) dimensions.
  */
 export async function getCosineSimilarity(
-  taskId: string,
+  taskId: number,
   queryVector: EmbeddingVector
 ): Promise<number | null> {
   const vectorStr = `[${queryVector.join(',')}]`
@@ -663,6 +686,7 @@ export async function getCosineSimilarity(
 
 /**
  * Returns the current attribution threshold from SemanticConfig.
+ * SemanticConfig uses Int @id @default(autoincrement()).
  * Throws if not configured.
  */
 export async function getAttributionThreshold(): Promise<number> {
@@ -687,8 +711,8 @@ Expected: zero errors.
 - [ ] **Step 5.4: Commit**
 
 ```bash
-git add core/output/embeddings.ts data/queries/embeddings.ts
-git commit -m "feat: add embedding computation and pgvector query layer"
+git add core/output/embeddings.ts data/repositories/embeddings.ts
+git commit -m "feat: add Ollama embedding computation and pgvector query layer"
 ```
 
 ---
@@ -706,24 +730,24 @@ git commit -m "feat: add embedding computation and pgvector query layer"
 ```typescript
 // tests/unit/validate.test.ts
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../../generated/prisma/index.js'
 import { validateOutput } from '../../core/output/validate.js'
 
-// Mock embedding and similarity so tests don't call OpenAI
-vi.mock('../../data/queries/embeddings.js', () => ({
+// Mock embedding and similarity so tests don't call Ollama
+vi.mock('../../data/repositories/embeddings.js', () => ({
   getCosineSimilarity: vi.fn(),
   getAttributionThreshold: vi.fn().mockResolvedValue(0.75),
 }))
 
-import { getCosineSimilarity } from '../../data/queries/embeddings.js'
+import { getCosineSimilarity } from '../../data/repositories/embeddings.js'
 
 const prisma = new PrismaClient()
-let taskId: string
-let meetingId: string
+let taskId: number
+let meetingId: number
 
 beforeAll(async () => {
   const meeting = await prisma.meeting.create({
-    data: { title: 'Sprint Planning', keyPoints: [], actionItems: [] },
+    data: { title: 'Sprint Planning', keyPoints: [] },
   })
   meetingId = meeting.id
 
@@ -748,6 +772,7 @@ describe('validateOutput', () => {
       summary: 'Implemented auth',
       status: 'DONE',
       meetingId: null,
+      externalTaskId: null,
       notes: null,
     })
 
@@ -762,6 +787,7 @@ describe('validateOutput', () => {
       summary: 'Implemented auth discussed in sprint planning',
       status: 'DONE',
       meetingId,
+      externalTaskId: null,
       notes: null,
     })
 
@@ -776,6 +802,7 @@ describe('validateOutput', () => {
       summary: 'Some completely unrelated work',
       status: 'DONE',
       meetingId,
+      externalTaskId: null,
       notes: null,
     })
 
@@ -794,6 +821,7 @@ describe('validateOutput', () => {
       summary: 'Did some work',
       status: 'DONE',
       meetingId: null,
+      externalTaskId: null,
       notes: null,
     })
 
@@ -809,6 +837,7 @@ describe('validateOutput', () => {
       summary: 'Work done',
       status: 'DONE',
       meetingId,
+      externalTaskId: null,
       notes: null,
     })
 
@@ -831,14 +860,15 @@ Expected: `Error: Failed to resolve import "../../core/output/validate.js"`
 ```typescript
 // core/output/validate.ts
 import { z } from 'zod'
-import { getCosineSimilarity, getAttributionThreshold } from '../../data/queries/embeddings.js'
+import { getCosineSimilarity, getAttributionThreshold } from '../../data/repositories/embeddings.js'
 import type { TransformedOutput, PipelineResult } from './types.js'
 
 const TransformedOutputSchema = z.object({
-  taskId: z.string().min(1),
+  taskId: z.number().int().positive(),
   summary: z.string().min(1),
-  status: z.enum(['TODO', 'IN_PROGRESS', 'DONE']),
-  meetingId: z.string().nullable(),
+  status: z.enum(['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED']),
+  meetingId: z.number().int().positive().nullable(),
+  externalTaskId: z.string().nullable(),
   notes: z.string().nullable(),
 })
 
@@ -847,6 +877,8 @@ const TransformedOutputSchema = z.object({
  * 1. Schema contract — Zod validation of all fields
  * 2. Semantic attribution — pgvector similarity check if meetingId is claimed
  *
+ * All IDs are int (matching Int @id @default(autoincrement()) schema).
+ * All embedding queries use vector(768) — nomic-embed-text via Ollama.
  * Returns ok: false if either check fails. Does not throw.
  */
 export async function validateOutput(
@@ -878,7 +910,7 @@ export async function validateOutput(
 }
 ```
 
-> **Note on attribution check:** `getCosineSimilarity(taskId, [])` is called with an empty vector here as a proxy — the real implementation computes the similarity between the task's stored embedding and the meeting's title embedding. In production, pass the meeting title embedding as the query vector. The mock in the test overrides this entirely, so the empty vector is acceptable for the unit test. Task 7 (contract test) uses a real flow.
+> **Note on attribution check:** `getCosineSimilarity(taskId, [])` is called with an empty vector here as a proxy — the real implementation computes the similarity between the task's stored embedding and the meeting's title embedding. In production, pass the meeting title embedding as the query vector. The mock in the test overrides this entirely, so the empty vector is acceptable for the unit test. Task 8 (contract test) uses a real flow.
 
 - [ ] **Step 6.4: Run the test — verify it passes**
 
@@ -920,8 +952,8 @@ git commit -m "feat: add output validation (schema + attribution) to core/output
 
 ```typescript
 // core/output/store.ts
-import { PrismaClient } from '@prisma/client'
-import { storeTaskEmbedding, getCosineSimilarity } from '../../data/queries/embeddings.js'
+import { PrismaClient } from '../../generated/prisma/index.js'
+import { storeTaskEmbedding } from '../../data/repositories/embeddings.js'
 import { computeEmbedding } from './embeddings.js'
 import type { TransformedOutput, PipelineResult } from './types.js'
 
@@ -930,12 +962,13 @@ const prisma = new PrismaClient()
 /**
  * Writes a validated TransformedOutput to Postgres in a single transaction.
  * Updates task status, creates a WorkflowRun record with the summary.
- * Triggers pgvector sync after successful write.
+ * WorkflowRun has proper FK relations to Session and Task (int IDs).
+ * Triggers pgvector sync (vector(768) via nomic-embed-text/Ollama) after successful write.
  * Rolls back on any failure — partial writes never reach Postgres.
  */
 export async function storeOutput(
   output: TransformedOutput
-): Promise<PipelineResult<{ workflowRunId: string }>> {
+): Promise<PipelineResult<{ workflowRunId: number }>> {
   try {
     const result = await prisma.$transaction(async (tx) => {
       // Update task status
@@ -947,7 +980,7 @@ export async function storeOutput(
         },
       })
 
-      // Create WorkflowRun record
+      // Create WorkflowRun record with FK to task (int ID)
       const run = await tx.workflowRun.create({
         data: {
           workflowId: 'task_end',
@@ -955,6 +988,7 @@ export async function storeOutput(
           status: 'COMPLETED',
           output: {
             summary: output.summary,
+            externalTaskId: output.externalTaskId,
             notes: output.notes,
           },
           completedAt: new Date(),
@@ -965,6 +999,7 @@ export async function storeOutput(
     })
 
     // Trigger pgvector sync after successful write (outside transaction)
+    // Uses nomic-embed-text via Ollama — vector(768)
     try {
       const embedding = await computeEmbedding(output.summary)
       await storeTaskEmbedding(output.taskId, embedding)
@@ -988,19 +1023,19 @@ import { processOutput } from './process.js'
 import { transformOutput } from './transform.js'
 import { validateOutput } from './validate.js'
 import { storeOutput } from './store.js'
-import type { ClaudeRawOutput, PipelineResult } from './types.js'
+import type { LLMRawOutput, PipelineResult } from './types.js'
 
-export type PipelineSuccess = { workflowRunId: string }
+export type PipelineSuccess = { workflowRunId: number }
 
 /**
- * Runs Claude's raw output through the full pipeline:
- * process → transform → validate → store
+ * Runs the LLM's raw output through the full pipeline:
+ * process → transform → validate → store → materialise
  *
  * Each step returns ok: false on failure — the pipeline stops immediately
  * and returns the reason. No partial writes occur.
  */
 export async function runOutputPipeline(
-  raw: ClaudeRawOutput
+  raw: LLMRawOutput
 ): Promise<PipelineResult<PipelineSuccess>> {
   const processed = processOutput(raw)
   if (!processed.ok) return processed
@@ -1035,32 +1070,32 @@ git commit -m "feat: add output store and pipeline composition"
 ## Task 8: Contract Test — Step 4 Proof Criteria
 
 **Files:**
-- Create: `tests/contracts/claude-to-data.test.ts`
+- Create: `tests/contracts/llm-to-data.test.ts`
 
 ---
 
-- [ ] **Step 8.1: Create `tests/contracts/claude-to-data.test.ts`**
+- [ ] **Step 8.1: Create `tests/contracts/llm-to-data.test.ts`**
 
 ```typescript
-// tests/contracts/claude-to-data.test.ts
+// tests/contracts/llm-to-data.test.ts
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../../generated/prisma/index.js'
 import { runOutputPipeline } from '../../core/output/pipeline.js'
 
-// Mock embedding computation — tests do not call OpenAI
+// Mock embedding computation — tests do not call Ollama
 vi.mock('../../core/output/embeddings.js', () => ({
-  computeEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0.1)),
+  computeEmbedding: vi.fn().mockResolvedValue(new Array(768).fill(0.1)),
 }))
 
 // Mock pgvector queries — use controlled similarity values
-vi.mock('../../data/queries/embeddings.js', () => ({
+vi.mock('../../data/repositories/embeddings.js', () => ({
   storeTaskEmbedding: vi.fn().mockResolvedValue(undefined),
   getCosineSimilarity: vi.fn().mockResolvedValue(null), // no embedding = skip attribution
   getAttributionThreshold: vi.fn().mockResolvedValue(0.75),
 }))
 
 const prisma = new PrismaClient()
-let taskId: string
+let taskId: number
 
 beforeAll(async () => {
   const task = await prisma.task.create({
@@ -1075,12 +1110,12 @@ afterAll(async () => {
   await prisma.$disconnect()
 })
 
-const validOutput = (id: string) => `
+const validOutput = (id: number) => `
 Here is my task summary.
 
 \`\`\`json
 {
-  "taskId": "${id}",
+  "taskId": ${id},
   "summary": "Implemented JWT authentication with RS256",
   "status": "DONE",
   "notes": "Added token refresh logic"
@@ -1088,7 +1123,7 @@ Here is my task summary.
 \`\`\`
 `
 
-describe('Claude → Data contract', () => {
+describe('LLM → Data contract', () => {
   it('valid output is stored and retrievable from Postgres', async () => {
     const result = await runOutputPipeline(validOutput(taskId))
 
@@ -1120,7 +1155,7 @@ describe('Claude → Data contract', () => {
   })
 
   it('output with wrong taskId is rejected at transform step', async () => {
-    const result = await runOutputPipeline(validOutput('nonexistent-task-id'))
+    const result = await runOutputPipeline(validOutput(999999))
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -1128,20 +1163,20 @@ describe('Claude → Data contract', () => {
   })
 
   it('wrong attribution is rejected when similarity is below threshold', async () => {
-    const { getCosineSimilarity } = await import('../../data/queries/embeddings.js')
+    const { getCosineSimilarity } = await import('../../data/repositories/embeddings.js')
     vi.mocked(getCosineSimilarity).mockResolvedValueOnce(0.20) // below 0.75
 
     const meeting = await prisma.meeting.create({
-      data: { title: 'Unrelated meeting', keyPoints: [], actionItems: [] },
+      data: { title: 'Unrelated meeting', keyPoints: [] },
     })
 
     const outputWithWrongMeeting = `
 \`\`\`json
 {
-  "taskId": "${taskId}",
+  "taskId": ${taskId},
   "summary": "Done some work",
   "status": "DONE",
-  "meetingId": "${meeting.id}"
+  "meetingId": ${meeting.id}
 }
 \`\`\`
 `
@@ -1159,16 +1194,16 @@ describe('Claude → Data contract', () => {
 - [ ] **Step 8.2: Run the contract test**
 
 ```bash
-yarn test tests/contracts/claude-to-data.test.ts
+yarn test tests/contracts/llm-to-data.test.ts
 ```
 
 Expected:
 
 ```
-✓ Claude → Data contract > valid output is stored and retrievable from Postgres
-✓ Claude → Data contract > invalid output (no JSON block) is rejected and not stored
-✓ Claude → Data contract > output with wrong taskId is rejected at transform step
-✓ Claude → Data contract > wrong attribution is rejected when similarity is below threshold
+✓ LLM → Data contract > valid output is stored and retrievable from Postgres
+✓ LLM → Data contract > invalid output (no JSON block) is rejected and not stored
+✓ LLM → Data contract > output with wrong taskId is rejected at transform step
+✓ LLM → Data contract > wrong attribution is rejected when similarity is below threshold
 
 Test Files  1 passed (1)
 Tests       4 passed (4)
@@ -1177,8 +1212,8 @@ Tests       4 passed (4)
 - [ ] **Step 8.3: Commit**
 
 ```bash
-git add tests/contracts/claude-to-data.test.ts
-git commit -m "test(contract): add claude-to-data contract test — step 4 proof passing"
+git add tests/contracts/llm-to-data.test.ts
+git commit -m "test(contract): add llm-to-data contract test — step 4 proof passing"
 ```
 
 ---
@@ -1207,26 +1242,30 @@ Expected: zero errors.
 
 From the spec:
 
-> Claude output conforms to schema contract. Invalid output is rejected with error, not silently stored. Correct output is retrievable from Postgres and matches what Claude produced. Wrong attribution is detected and rejected via pgvector check.
+> LLM output conforms to schema contract. Invalid output is rejected with error, not silently stored. Correct output is retrievable from Postgres and matches what the LLM produced. Wrong attribution is detected and rejected via pgvector check.
 
-- Schema validation rejects malformed/missing fields ✓
-- No JSON block → rejected, zero new WorkflowRun records ✓
-- Valid output → task status updated, WorkflowRun retrievable ✓
-- Wrong attribution (similarity < threshold) → rejected with reason ✓
+- Schema validation rejects malformed/missing fields
+- No JSON block → rejected, zero new WorkflowRun records
+- Valid output → task status updated, WorkflowRun retrievable
+- Wrong attribution (similarity < threshold) → rejected with reason
+- All IDs are Int @id @default(autoincrement()) throughout
+- All embeddings use vector(768) via nomic-embed-text/Ollama
+- No OpenAI dependency — OLLAMA_BASE_URL (default http://localhost:11434) is the only embedding config
+- Imports use `../../generated/prisma/index.js`, not `@prisma/client`
 
 - [ ] **Step 9.4: Final commit**
 
 ```bash
 git add .
-git commit -m "chore: step 4 complete — claude-to-data contract passing"
+git commit -m "chore: step 4 complete — llm-to-data contract passing"
 ```
 
 ---
 
 ## Troubleshooting
 
-**`computeEmbedding` fails with "OPENAI_API_KEY is not set"**
-Add `OPENAI_API_KEY` to `.env`. In tests, the embedding function is mocked and should not call OpenAI.
+**`computeEmbedding` fails with "Ollama embedding error"**
+Ensure Ollama is running (`ollama serve`) and `nomic-embed-text` is pulled (`ollama pull nomic-embed-text`). Check `OLLAMA_BASE_URL` is set (default `http://localhost:11434`). In tests, the embedding function is mocked and should not call Ollama. No `OPENAI_API_KEY` is needed.
 
 **`$executeRaw` on `TaskEmbedding` fails with "operator does not exist: text = vector"**
 Ensure the pgvector extension is enabled (`CREATE EXTENSION vector`) and that the migration from Step 1 applied successfully. Run `npx prisma migrate dev` to apply all pending migrations.
@@ -1239,3 +1278,9 @@ Prisma's `$transaction` rolls back automatically on thrown errors. Ensure `store
 
 **`validate.ts` always passes attribution (similarity is always null)**
 `storeTaskEmbedding` must be called before `getCosineSimilarity` can return a non-null value. In production, embeddings are computed and stored after each `storeOutput`. In tests, mock the return value directly.
+
+**Embedding dimensions mismatch**
+All embeddings use `vector(768)` (nomic-embed-text via Ollama). If you see dimension errors, ensure you are not using OpenAI's 1536-dimensional embeddings. The `EmbeddingAdapter` and `computeEmbedding` must both use nomic-embed-text via Ollama. No `openai` package should be in `package.json`.
+
+**Import path errors for PrismaClient**
+All imports must use `../../generated/prisma/index.js` (matching the Prisma generator config `output = "../generated/prisma"`). Do not use `@prisma/client` — the generated client lives at the configured output path.
