@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Wizard
 
-Wizard is a local-first, AI-powered engineering workflow system. It orchestrates LLM-driven skills (meeting review, code investigation, etc.) over a Postgres + pgvector backend. Currently in early build — Step 3 of 5 is in progress.
+Wizard is a local-first, AI-powered engineering workflow system. It orchestrates LLM-driven skills (meeting review, code investigation, etc.) over a Postgres + pgvector backend. Currently in early build — Step 4 of 5 is in progress.
 
 ## Commands
 

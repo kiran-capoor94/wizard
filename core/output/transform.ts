@@ -1,5 +1,6 @@
 // core/output/transform.ts
-import { prisma } from '../../data/db.js'
+import { getTaskContext } from '../../data/repositories/task.js'
+import { meetingExists } from '../../data/repositories/meeting.js'
 import type { ProcessedOutput, TransformedOutput, PipelineResult } from './types.js'
 
 /**
@@ -10,16 +11,14 @@ import type { ProcessedOutput, TransformedOutput, PipelineResult } from './types
 export async function transformOutput(
   processed: ProcessedOutput
 ): Promise<PipelineResult<TransformedOutput>> {
-  const task = await prisma.task.findUnique({ where: { id: processed.taskId } })
+  const task = await getTaskContext(processed.taskId)
   if (!task) {
     return { ok: false, reason: `Task not found: ${processed.taskId}` }
   }
 
   if (processed.meetingId !== null) {
-    const meeting = await prisma.meeting.findUnique({
-      where: { id: processed.meetingId },
-    })
-    if (!meeting) {
+    const exists = await meetingExists(processed.meetingId)
+    if (!exists) {
       return { ok: false, reason: `Meeting not found: ${processed.meetingId}` }
     }
   }
