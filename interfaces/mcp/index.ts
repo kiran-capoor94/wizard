@@ -2,7 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { getTaskContext } from "../../data/repositories/task.js";
+import { lookupTask } from "../../services/task.js";
 import {
   createSession,
   endSession,
@@ -24,7 +24,7 @@ server.tool(
   "Get the full context for a task by ID. Returns task details, linked meeting with action items, repo, external task ID, and branch.",
   { task_id: z.number().int().describe("The Wizard task ID (integer)") },
   async ({ task_id }) => {
-    const context = await getTaskContext(task_id);
+    const context = await lookupTask(task_id);
 
     if (!context) {
       return {
