@@ -2,7 +2,10 @@
   "name": "wizard",
   "packageManager": "yarn@4.12.0",
   "type": "module",
-  "bin": "./build/mcp/index.js",
+  "bin": "./build/interfaces/mcp/index.js",
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@notionhq/client": "^5.15.0",
@@ -19,11 +22,12 @@
     "pgvector": "^0.2.0",
     "prisma": "^7.6.0",
     "tsx": "^4.21.0",
+    "vite": "^7.3.1",
     "typescript": "^6.0.2",
     "vitest": "^3.0.0"
   },
   "scripts": {
-    "build": "tsc && chmod 755 build/mcp/index.js",
+    "build": "tsc && chmod 755 build/interfaces/mcp/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
