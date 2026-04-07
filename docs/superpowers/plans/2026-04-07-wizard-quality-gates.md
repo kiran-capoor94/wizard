@@ -4,7 +4,7 @@
 
 **Goal:** Create six Claude Code quality-gate skills and one orchestrating agent that catch Wizard architecture violations before they land.
 
-**Architecture:** Each skill is a standalone `SKILL.md` file in `~/.claude/skills/<name>/`. The agent is a standalone `.md` in `~/.claude/agents/`. Skills contain natural-language check instructions with concrete patterns to grep for. The agent reads `git diff`, selects relevant skills, dispatches subagents in parallel, and consolidates a pass/fail report.
+**Architecture:** Each skill is a standalone `SKILL.md` file in `.claude/skills/<name>/` (project-local). The agent is a standalone `.md` in `.claude/agents/`. Skills contain natural-language check instructions with concrete patterns to grep for. The agent reads `git diff`, selects relevant skills, dispatches subagents in parallel, and consolidates a pass/fail report. All files are version-controlled in the repo.
 
 **Tech Stack:** Claude Code skills (markdown), Claude Code agents (markdown). No runtime code — these are prompt-based quality gates executed by Claude Code itself.
 
@@ -14,30 +14,30 @@
 
 | Action | Path | Responsibility |
 |--------|------|----------------|
-| Create | `~/.claude/skills/wizard-check-pii/SKILL.md` | PII bypass and PII-in-tests detection |
-| Create | `~/.claude/skills/wizard-check-boundaries/SKILL.md` | Layer boundary violation detection |
-| Create | `~/.claude/skills/wizard-check-types/SKILL.md` | Type contract drift detection |
-| Create | `~/.claude/skills/wizard-check-scope/SKILL.md` | Out-of-scope and removed component detection |
-| Create | `~/.claude/skills/wizard-check-tests/SKILL.md` | Empty/placeholder test detection |
-| Create | `~/.claude/skills/wizard-check-step/SKILL.md` | Build sequence violation detection |
-| Create | `~/.claude/agents/wizard-review.md` | Orchestrating agent — runs relevant skills, consolidates report |
+| Create | `.claude/skills/wizard-check-pii/SKILL.md` | PII bypass and PII-in-tests detection |
+| Create | `.claude/skills/wizard-check-boundaries/SKILL.md` | Layer boundary violation detection |
+| Create | `.claude/skills/wizard-check-types/SKILL.md` | Type contract drift detection |
+| Create | `.claude/skills/wizard-check-scope/SKILL.md` | Out-of-scope and removed component detection |
+| Create | `.claude/skills/wizard-check-tests/SKILL.md` | Empty/placeholder test detection |
+| Create | `.claude/skills/wizard-check-step/SKILL.md` | Build sequence violation detection |
+| Create | `.claude/agents/wizard-review.md` | Orchestrating agent — runs relevant skills, consolidates report |
 
 ---
 
 ## Task 1: `/wizard-check-pii` Skill
 
 **Files:**
-- Create: `~/.claude/skills/wizard-check-pii/SKILL.md`
+- Create: `.claude/skills/wizard-check-pii/SKILL.md`
 
 - [ ] **Step 1: Create the skill directory**
 
 ```bash
-mkdir -p ~/.claude/skills/wizard-check-pii
+mkdir -p .claude/skills/wizard-check-pii
 ```
 
 - [ ] **Step 2: Write the skill file**
 
-Create `~/.claude/skills/wizard-check-pii/SKILL.md` with the following content:
+Create `.claude/skills/wizard-check-pii/SKILL.md` with the following content:
 
 ```markdown
 ---
@@ -107,7 +107,7 @@ If all checks pass, report `Result: PASS`. If any check fails, report `Result: F
 - [ ] **Step 3: Verify the skill is discoverable**
 
 ```bash
-ls ~/.claude/skills/wizard-check-pii/SKILL.md
+ls .claude/skills/wizard-check-pii/SKILL.md
 ```
 
 Expected: file exists.
@@ -115,27 +115,26 @@ Expected: file exists.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/.claude && git init 2>/dev/null; cd -
+git add .claude/skills/wizard-check-pii/SKILL.md
+git commit -m "feat: add wizard-check-pii skill"
 ```
-
-No git commit needed — `~/.claude` is not a tracked repo. Skill is live immediately.
 
 ---
 
 ## Task 2: `/wizard-check-boundaries` Skill
 
 **Files:**
-- Create: `~/.claude/skills/wizard-check-boundaries/SKILL.md`
+- Create: `.claude/skills/wizard-check-boundaries/SKILL.md`
 
 - [ ] **Step 1: Create the skill directory**
 
 ```bash
-mkdir -p ~/.claude/skills/wizard-check-boundaries
+mkdir -p .claude/skills/wizard-check-boundaries
 ```
 
 - [ ] **Step 2: Write the skill file**
 
-Create `~/.claude/skills/wizard-check-boundaries/SKILL.md` with the following content:
+Create `.claude/skills/wizard-check-boundaries/SKILL.md` with the following content:
 
 ```markdown
 ---
@@ -237,7 +236,7 @@ Result: PASS / FAIL
 - [ ] **Step 3: Verify the skill is discoverable**
 
 ```bash
-ls ~/.claude/skills/wizard-check-boundaries/SKILL.md
+ls .claude/skills/wizard-check-boundaries/SKILL.md
 ```
 
 - [ ] **Step 4: Smoke test**
@@ -249,17 +248,17 @@ Start a new Claude Code session in the Wizard project directory and invoke `/wiz
 ## Task 3: `/wizard-check-types` Skill
 
 **Files:**
-- Create: `~/.claude/skills/wizard-check-types/SKILL.md`
+- Create: `.claude/skills/wizard-check-types/SKILL.md`
 
 - [ ] **Step 1: Create the skill directory**
 
 ```bash
-mkdir -p ~/.claude/skills/wizard-check-types
+mkdir -p .claude/skills/wizard-check-types
 ```
 
 - [ ] **Step 2: Write the skill file**
 
-Create `~/.claude/skills/wizard-check-types/SKILL.md` with the following content:
+Create `.claude/skills/wizard-check-types/SKILL.md` with the following content:
 
 ```markdown
 ---
@@ -344,7 +343,7 @@ Result: PASS / FAIL
 - [ ] **Step 3: Verify the skill is discoverable**
 
 ```bash
-ls ~/.claude/skills/wizard-check-types/SKILL.md
+ls .claude/skills/wizard-check-types/SKILL.md
 ```
 
 ---
@@ -352,17 +351,17 @@ ls ~/.claude/skills/wizard-check-types/SKILL.md
 ## Task 4: `/wizard-check-scope` Skill
 
 **Files:**
-- Create: `~/.claude/skills/wizard-check-scope/SKILL.md`
+- Create: `.claude/skills/wizard-check-scope/SKILL.md`
 
 - [ ] **Step 1: Create the skill directory**
 
 ```bash
-mkdir -p ~/.claude/skills/wizard-check-scope
+mkdir -p .claude/skills/wizard-check-scope
 ```
 
 - [ ] **Step 2: Write the skill file**
 
-Create `~/.claude/skills/wizard-check-scope/SKILL.md` with the following content:
+Create `.claude/skills/wizard-check-scope/SKILL.md` with the following content:
 
 ```markdown
 ---
@@ -447,7 +446,7 @@ Result: PASS / FAIL
 - [ ] **Step 3: Verify the skill is discoverable**
 
 ```bash
-ls ~/.claude/skills/wizard-check-scope/SKILL.md
+ls .claude/skills/wizard-check-scope/SKILL.md
 ```
 
 ---
@@ -455,17 +454,17 @@ ls ~/.claude/skills/wizard-check-scope/SKILL.md
 ## Task 5: `/wizard-check-tests` Skill
 
 **Files:**
-- Create: `~/.claude/skills/wizard-check-tests/SKILL.md`
+- Create: `.claude/skills/wizard-check-tests/SKILL.md`
 
 - [ ] **Step 1: Create the skill directory**
 
 ```bash
-mkdir -p ~/.claude/skills/wizard-check-tests
+mkdir -p .claude/skills/wizard-check-tests
 ```
 
 - [ ] **Step 2: Write the skill file**
 
-Create `~/.claude/skills/wizard-check-tests/SKILL.md` with the following content:
+Create `.claude/skills/wizard-check-tests/SKILL.md` with the following content:
 
 ```markdown
 ---
@@ -551,7 +550,7 @@ Result: PASS / FAIL
 - [ ] **Step 3: Verify the skill is discoverable**
 
 ```bash
-ls ~/.claude/skills/wizard-check-tests/SKILL.md
+ls .claude/skills/wizard-check-tests/SKILL.md
 ```
 
 ---
@@ -559,17 +558,17 @@ ls ~/.claude/skills/wizard-check-tests/SKILL.md
 ## Task 6: `/wizard-check-step` Skill
 
 **Files:**
-- Create: `~/.claude/skills/wizard-check-step/SKILL.md`
+- Create: `.claude/skills/wizard-check-step/SKILL.md`
 
 - [ ] **Step 1: Create the skill directory**
 
 ```bash
-mkdir -p ~/.claude/skills/wizard-check-step
+mkdir -p .claude/skills/wizard-check-step
 ```
 
 - [ ] **Step 2: Write the skill file**
 
-Create `~/.claude/skills/wizard-check-step/SKILL.md` with the following content:
+Create `.claude/skills/wizard-check-step/SKILL.md` with the following content:
 
 ```markdown
 ---
@@ -648,7 +647,7 @@ Result: PASS / FAIL
 - [ ] **Step 3: Verify the skill is discoverable**
 
 ```bash
-ls ~/.claude/skills/wizard-check-step/SKILL.md
+ls .claude/skills/wizard-check-step/SKILL.md
 ```
 
 ---
@@ -656,17 +655,17 @@ ls ~/.claude/skills/wizard-check-step/SKILL.md
 ## Task 7: `wizard-review` Agent
 
 **Files:**
-- Create: `~/.claude/agents/wizard-review.md`
+- Create: `.claude/agents/wizard-review.md`
 
 - [ ] **Step 1: Create the agents directory**
 
 ```bash
-mkdir -p ~/.claude/agents
+mkdir -p .claude/agents
 ```
 
 - [ ] **Step 2: Write the agent file**
 
-Create `~/.claude/agents/wizard-review.md` with the following content:
+Create `.claude/agents/wizard-review.md` with the following content:
 
 ```markdown
 ---
@@ -775,7 +774,7 @@ Return the report. Do NOT auto-fix issues. Do NOT modify any files. The develope
 - [ ] **Step 3: Verify the agent is discoverable**
 
 ```bash
-ls ~/.claude/agents/wizard-review.md
+ls .claude/agents/wizard-review.md
 ```
 
 ---

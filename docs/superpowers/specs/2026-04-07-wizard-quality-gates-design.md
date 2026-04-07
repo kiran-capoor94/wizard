@@ -28,17 +28,19 @@ Six individual Claude Code skills for on-demand spot checks, plus one orchestrat
 ### Structure
 
 ```
-~/.claude/skills/
-├── wizard-check-pii.md           # PII leak detection
-├── wizard-check-boundaries.md    # Layer boundary violations
-├── wizard-check-types.md         # Type contract drift
-├── wizard-check-scope.md         # Out-of-scope & removed components
-├── wizard-check-tests.md         # Empty/placeholder test detection
-├── wizard-check-step.md          # Build sequence violations
+.claude/skills/
+├── wizard-check-pii/SKILL.md           # PII leak detection
+├── wizard-check-boundaries/SKILL.md    # Layer boundary violations
+├── wizard-check-types/SKILL.md         # Type contract drift
+├── wizard-check-scope/SKILL.md         # Out-of-scope & removed components
+├── wizard-check-tests/SKILL.md         # Empty/placeholder test detection
+├── wizard-check-step/SKILL.md          # Build sequence violations
 
-~/.claude/agents/
-├── wizard-review.md              # Runs relevant skills, consolidates report
+.claude/agents/
+├── wizard-review.md                    # Runs relevant skills, consolidates report
 ```
+
+Skills and agent are project-local (`.claude/` in repo root), not global (`~/.claude/`). This means they are version-controlled, portable across machines, and scoped to the Wizard project.
 
 ---
 
