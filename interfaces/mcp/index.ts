@@ -15,14 +15,23 @@ const server = new McpServer({
   version: "0.2.0",
 });
 
-server.tool("health", "Get health of Wizard System", {}, async () => ({
-  content: [{ type: "text", text: "OK" }],
-}));
+server.registerTool(
+  "health",
+  { description: "Get health of Wizard System", inputSchema: z.object({}) },
+  async () => ({
+    content: [{ type: "text", text: "OK" }],
+  }),
+);
 
-server.tool(
+server.registerTool(
   "get_task_context",
-  "Get the full context for a task by ID. Returns task details, linked meeting with action items, repo, external task ID, and branch.",
-  { task_id: z.number().int().describe("The Wizard task ID (integer)") },
+  {
+    description:
+      "Get the full context for a task by ID. Returns task details, linked meeting with action items, repo, external task ID, and branch.",
+    inputSchema: z.object({
+      task_id: z.number().int().describe("The Wizard task ID (integer)"),
+    }),
+  },
   async ({ task_id }) => {
     const context = await lookupTask(task_id);
 
@@ -39,20 +48,22 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   "session_start",
-  "Start a new Wizard session. Returns the session ID (int).",
   {
-    meeting_id: z
-      .number()
-      .int()
-      .optional()
-      .describe("Optional meeting ID (int) to associate with the session"),
-    created_by_id: z
-      .number()
-      .int()
-      .optional()
-      .describe("Optional user ID (int) of session creator"),
+    description: "Start a new Wizard session. Returns the session ID (int).",
+    inputSchema: z.object({
+      meeting_id: z
+        .number()
+        .int()
+        .optional()
+        .describe("Optional meeting ID (int) to associate with the session"),
+      created_by_id: z
+        .number()
+        .int()
+        .optional()
+        .describe("Optional user ID (int) of session creator"),
+    }),
   },
   async ({ meeting_id, created_by_id }) => {
     const sessionId = await createSession({
@@ -65,12 +76,15 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   "task_start",
-  "Start work on a task within the current session. Runs pre-flight, loads context, and returns the prepared prompt.",
   {
-    task_id: z.number().int().describe("The Wizard task ID (int)"),
-    session_id: z.number().int().describe("The current session ID (int)"),
+    description:
+      "Start work on a task within the current session. Runs pre-flight, loads context, and returns the prepared prompt.",
+    inputSchema: z.object({
+      task_id: z.number().int().describe("The Wizard task ID (int)"),
+      session_id: z.number().int().describe("The current session ID (int)"),
+    }),
   },
   async ({ task_id, session_id }) => {
     await attachTaskToSession(session_id, task_id);
@@ -89,10 +103,14 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   "session_end",
-  "End the current Wizard session.",
-  { session_id: z.number().int().describe("The session ID to end (int)") },
+  {
+    description: "End the current Wizard session.",
+    inputSchema: z.object({
+      session_id: z.number().int().describe("The session ID to end (int)"),
+    }),
+  },
   async ({ session_id }) => {
     await endSession(session_id);
     return {
