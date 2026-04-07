@@ -27,6 +27,8 @@ export type AuditEntry = {
   originalHash: string;  // SHA-256 hex of the original match
 };
 
+export type EmbeddingVector = number[];
+
 export type TaskContext = {
   id: number;
   title: string;
