@@ -15,32 +15,20 @@ const ConfigSchema = z.object({
   ide: z.object({
     primary: z.enum(['neovim', 'vscode', 'claude-desktop']),
   }),
-  security: z.object({
-    pii_scrubbing: z.boolean(),
-    encryption_at_rest: z.boolean(),
-  }),
+  security: z
+    .object({
+      pii_scrubbing: z.boolean(),
+      encryption_at_rest: z.boolean(),
+    })
+    .transform((s) => ({
+      piiScrubbing: s.pii_scrubbing,
+      encryptionAtRest: s.encryption_at_rest,
+    })),
 })
 
-export type WizardConfig = {
-  integrations: {
-    notion: { token: string }
-    jira: { token: string; project: string }
-    github: { token: string }
-    krisp: { method: 'mcp' }
-  }
-  ide: { primary: 'neovim' | 'vscode' | 'claude-desktop' }
-  security: { piiScrubbing: boolean; encryptionAtRest: boolean }
-}
+export type WizardConfig = z.infer<typeof ConfigSchema>
 
 export function parseConfig(yaml: string): WizardConfig {
   const raw = parseYaml(yaml)
-  const parsed = ConfigSchema.parse(raw)
-  return {
-    integrations: parsed.integrations,
-    ide: parsed.ide,
-    security: {
-      piiScrubbing: parsed.security.pii_scrubbing,
-      encryptionAtRest: parsed.security.encryption_at_rest,
-    },
-  }
+  return ConfigSchema.parse(raw)
 }
