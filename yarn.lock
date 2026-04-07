@@ -2520,7 +2520,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pgvector@npm:^0.2.0":
+"pgvector@npm:^0.2.1":
   version: 0.2.1
   resolution: "pgvector@npm:0.2.1"
   checksum: 10c0/d48d0ac08e17efbb362dd257e1a511372753818eb70a0a2bc4d67794772c61314b5ab172814e7bdb580a0eb0c8b0b441166515f0fa99913d031d92d43fcd5898
@@ -3425,7 +3425,7 @@ __metadata:
     js-yaml: "npm:^4.1.1"
     ollama: "npm:^0.6.3"
     pg: "npm:^8.20.0"
-    pgvector: "npm:^0.2.0"
+    pgvector: "npm:^0.2.1"
     prisma: "npm:^7.6.0"
     tsx: "npm:^4.21.0"
     typescript: "npm:^6.0.2"
@@ -3433,7 +3433,8 @@ __metadata:
     vitest: "npm:^3.0.0"
     zod: "npm:^4.3.6"
   bin:
-    wizard: ./build/interfaces/mcp/index.js
+    wizard: ./build/interfaces/cli/index.js
+    wizard-mcp: ./build/interfaces/mcp/index.js
   languageName: unknown
   linkType: soft
 
