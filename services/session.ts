@@ -1,4 +1,9 @@
-import { prisma } from "../data/db.js";
+import {
+  createSessionRecord,
+  endSessionRecord,
+  findSessionById,
+  attachTask,
+} from "../data/repositories/session.js";
 
 export type CreateSessionOptions = {
   meetingId?: number;
@@ -8,39 +13,23 @@ export type CreateSessionOptions = {
 export async function createSession(
   options?: CreateSessionOptions,
 ): Promise<number> {
-  const session = await prisma.session.create({
-    data: {
-      status: "ACTIVE",
-      meetingId: options?.meetingId ?? null,
-      createdById: options?.createdById ?? null,
-    },
+  return createSessionRecord({
+    meetingId: options?.meetingId,
+    createdById: options?.createdById,
   });
-  return session.id;
 }
 
 export async function endSession(sessionId: number): Promise<void> {
-  await prisma.session.update({
-    where: { id: sessionId },
-    data: { status: "ENDED", endedAt: new Date() },
-  });
+  await endSessionRecord(sessionId);
 }
 
 export async function getSession(sessionId: number) {
-  return prisma.session.findUnique({
-    where: { id: sessionId },
-    include: {
-      tasks: {
-        include: { task: true },
-      },
-    },
-  });
+  return findSessionById(sessionId);
 }
 
 export async function attachTaskToSession(
   sessionId: number,
   taskId: number,
 ): Promise<void> {
-  await prisma.sessionTask.create({
-    data: { sessionId, taskId },
-  });
+  await attachTask(sessionId, taskId);
 }
