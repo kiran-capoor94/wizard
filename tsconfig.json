@@ -4,11 +4,20 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "outDir": "./build",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules"]
+  "include": [
+    "data/**/*.ts",
+    "interfaces/**/*.ts",
+    "shared/**/*.ts",
+    "llm/**/*.ts",
+    "services/**/*.ts",
+    "integrations/**/*.ts"
+  ],
+  "exclude": ["node_modules", "build", "generated", "tests"]
 }
