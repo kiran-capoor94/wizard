@@ -18,7 +18,8 @@
     "llm/**/*.ts",
     "services/**/*.ts",
     "integrations/**/*.ts",
-    "core/**/*.ts"
+    "core/**/*.ts",
+    "security/**/*.ts"
   ],
   "exclude": ["node_modules", "build", "generated", "tests"]
 }
