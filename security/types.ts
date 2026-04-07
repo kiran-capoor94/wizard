@@ -1,9 +1,7 @@
 // security/types.ts
-export type AuditEntry = {
-  fieldPath: string
-  piiType: string        // Presidio entity_type, lowercased
-  originalHash: string   // SHA-256 hex of the original match
-}
+import type { AuditEntry } from '../shared/types.js'
+
+export type { AuditEntry }
 
 export type ScrubResult = {
   text: string           // cleaned text with PII removed

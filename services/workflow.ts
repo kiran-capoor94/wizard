@@ -16,7 +16,7 @@ export type WorkflowResult =
 
 export async function runTaskStartWorkflow(
   taskId: number,
-  sessionId?: number,
+  sessionId?: number | null,
 ): Promise<WorkflowResult> {
   const preflight = await runPreflight();
   if (!preflight.ok) {

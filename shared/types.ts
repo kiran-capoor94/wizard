@@ -17,6 +17,12 @@ import type {
 
 export type Variables = Record<string, string>;
 
+export type AuditEntry = {
+  fieldPath: string;
+  piiType: string;       // Presidio entity_type, lowercased
+  originalHash: string;  // SHA-256 hex of the original match
+};
+
 export type TaskContext = {
   id: number;
   title: string;

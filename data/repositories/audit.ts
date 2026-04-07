@@ -1,5 +1,5 @@
 import { prisma } from '../db.js'
-import type { AuditEntry } from '../../security/types.js'
+import type { AuditEntry } from '../../shared/types.js'
 
 /**
  * Persists audit entries from the security layer to the AuditLog table.
