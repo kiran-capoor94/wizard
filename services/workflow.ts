@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { injectVariables } from "./inject.js";
 import { runPreflight } from "./preflight.js";
-import { getTaskContext } from "../data/repositories/task.js";
+import { lookupTask } from "./task.js";
 import { buildTaskStartVariables } from "../core/workflows/task-start.js";
 
 export type WorkflowResult =
@@ -17,7 +17,7 @@ export async function runTaskStartWorkflow(
     return { ok: false, reason: `Pre-flight failed: ${preflight.reason}` };
   }
 
-  const context = await getTaskContext(taskId);
+  const context = await lookupTask(taskId);
   if (!context) {
     return { ok: false, reason: `Task not found: ${taskId}` };
   }
