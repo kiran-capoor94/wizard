@@ -901,7 +901,7 @@ export async function pullNotionTasks(
 
   const response = await notion.databases.query({ database_id: databaseId })
 
-  return response.results.map((page) => {
+  return Promise.all(response.results.map(async (page) => {
     // @ts-expect-error — Notion SDK types for properties are complex; cast to any
     const props = (page as any).properties ?? {}
 
@@ -911,15 +911,20 @@ export async function pullNotionTasks(
     const dueDate = extractDate(props['Due Date'] ?? props['Due']) ?? null
     const externalTaskId = extractRichText(props['Ticket'] ?? props['External ID']) ?? null
 
+    const [title, description] = await Promise.all([
+      scrub(rawTitle, `notion.task.${page.id}.title`),
+      scrub(rawDesc, `notion.task.${page.id}.description`),
+    ])
+
     return {
       notionId: page.id,
-      title: scrub(rawTitle, `notion.task.${page.id}.title`),
-      description: scrub(rawDesc, `notion.task.${page.id}.description`),
+      title,
+      description,
       status,
       dueDate,
       externalTaskId,
     }
-  })
+  }))
 }
 
 /**
@@ -935,7 +940,7 @@ export async function pullNotionMeetings(
 
   const response = await notion.databases.query({ database_id: databaseId })
 
-  return response.results.map((page) => {
+  return Promise.all(response.results.map(async (page) => {
     // @ts-expect-error
     const props = (page as any).properties ?? {}
 
@@ -946,19 +951,26 @@ export async function pullNotionMeetings(
     // Extract action items from a multi-select or rich_text list property
     const rawActionItems = extractActionItems(props['Action Items'] ?? props['Actions'])
 
-    const actionItems: RawNotionActionItem[] = rawActionItems.map((item, idx) => ({
-      action: scrub(item, `notion.meeting.${page.id}.actionItem.${idx}`),
-      dueDate: null,
-    }))
+    const actionItems: RawNotionActionItem[] = await Promise.all(
+      rawActionItems.map(async (item, idx) => ({
+        action: await scrub(item, `notion.meeting.${page.id}.actionItem.${idx}`),
+        dueDate: null,
+      }))
+    )
+
+    const [title, notes] = await Promise.all([
+      scrub(rawTitle, `notion.meeting.${page.id}.title`),
+      scrub(rawNotes, `notion.meeting.${page.id}.notes`),
+    ])
 
     return {
       notionId: page.id,
-      title: scrub(rawTitle, `notion.meeting.${page.id}.title`),
-      notes: scrub(rawNotes, `notion.meeting.${page.id}.notes`),
+      title,
+      notes,
       date,
       actionItems,
     }
-  })
+  }))
 }
 
 // --- Notion property extractors ---
@@ -1003,6 +1015,16 @@ function extractActionItems(prop: any): string[] {
 ```typescript
 // tests/unit/notion-pull.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// Mock security/scrub so the test does not call Presidio
+vi.mock('../../security/scrub.js', () => ({
+  scrub: vi.fn().mockImplementation(async (text: string, fieldPath: string) => ({
+    text: text.replace(/[\w.+-]+@[\w.-]+\.\w+/g, '').trim(),
+    entries: /[\w.+-]+@[\w.-]+\.\w+/.test(text)
+      ? [{ fieldPath, piiType: 'email', originalHash: 'a'.repeat(64) }]
+      : [],
+  })),
+}))
 
 // Mock the Notion client before importing the module under test
 vi.mock('@notionhq/client', () => ({
@@ -1212,9 +1234,9 @@ import { PrismaClient } from '../../generated/prisma/index.js'
 const prisma = new PrismaClient()
 
 describe('Integration → Security contract', () => {
-  it('raw text containing PII exits the security layer with PII removed', () => {
+  it('raw text containing PII exits the security layer with PII removed', async () => {
     const raw = 'Discuss with alice@nhs.net about 943-476-5919 care plan'
-    const result = scrub(raw, 'notion.meeting.test.notes')
+    const result = await scrub(raw, 'notion.meeting.test.notes')
 
     expect(result.text).not.toContain('alice@nhs.net')
     expect(result.text).not.toContain('943-476-5919')
@@ -1223,7 +1245,7 @@ describe('Integration → Security contract', () => {
 
   it('audit entries are written to Postgres after scrubbing', async () => {
     const raw = 'Contact dev@example.com for access'
-    const result = scrub(raw, 'notion.task.contract-test.description')
+    const result = await scrub(raw, 'notion.task.contract-test.description')
 
     await writeAuditEntries('notion', result.entries)
 
@@ -1279,8 +1301,10 @@ describe('Security → Data contract', () => {
     const rawTitle = 'Task for dev@example.com'
     const rawDescription = 'Contact 07700 900123 to discuss'
 
-    const scrubbedTitle = scrub(rawTitle, 'test.title')
-    const scrubbedDescription = scrub(rawDescription, 'test.description')
+    const [scrubbedTitle, scrubbedDescription] = await Promise.all([
+      scrub(rawTitle, 'test.title'),
+      scrub(rawDescription, 'test.description'),
+    ])
 
     // Write scrubbed text to Postgres — ID is autoincrement int
     const task = await prisma.task.create({
@@ -1309,8 +1333,10 @@ describe('Security → Data contract', () => {
     const rawTitle = 'Sprint planning with alice@nhs.net'
     const rawAction = 'Follow up with 07700 900456 about deployment'
 
-    const scrubbedTitle = scrub(rawTitle, 'test.meeting.title')
-    const scrubbedAction = scrub(rawAction, 'test.meeting.actionItem.0')
+    const [scrubbedTitle, scrubbedAction] = await Promise.all([
+      scrub(rawTitle, 'test.meeting.title'),
+      scrub(rawAction, 'test.meeting.actionItem.0'),
+    ])
 
     // Create Meeting with int ID
     const meeting = await prisma.meeting.create({
@@ -1347,7 +1373,7 @@ describe('Security → Data contract', () => {
 
   it('scrub entries are the audit trail — PII never reaches Postgres in any field', async () => {
     const piiText = 'NHS: 943-476-5919'
-    const result = scrub(piiText, 'test.notes')
+    const result = await scrub(piiText, 'test.notes')
 
     // The entry has a hash, not the original value
     expect(result.entries[0].originalHash).toMatch(/^[a-f0-9]{64}$/)

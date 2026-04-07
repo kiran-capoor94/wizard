@@ -1334,6 +1334,146 @@ git commit -m "feat: add full CLI command suite (session, task, doctor, integrat
 
 ---
 
+## Task 5b: `services/code-chunker.ts` — CodeChunkEmbedding Strategy
+
+**Files:**
+- Create: `services/code-chunker.ts`
+- Create: `tests/unit/code-chunker.test.ts`
+
+---
+
+- [ ] **Step 5b.1: Write the failing test**
+
+```typescript
+// tests/unit/code-chunker.test.ts
+import { describe, it, expect } from 'vitest'
+import { chunkCode } from '../../services/code-chunker.js'
+
+// Repeat to ensure chunking fires
+const SAMPLE_CODE = `
+function add(a: number, b: number): number { return a + b }
+function subtract(a: number, b: number): number { return a - b }
+function multiply(a: number, b: number): number { return a * b }
+`.repeat(5)
+
+describe('chunkCode', () => {
+  it('returns at least one chunk for non-empty input', async () => {
+    const chunks = await chunkCode(SAMPLE_CODE, 'test.ts')
+    expect(chunks.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('each chunk has a chunkIndex starting at 0 and incrementing', async () => {
+    const chunks = await chunkCode(SAMPLE_CODE, 'test.ts')
+    const indices = chunks.map((c) => c.chunkIndex)
+    expect(indices[0]).toBe(0)
+    expect(indices).toEqual([...Array(chunks.length).keys()])
+  })
+
+  it('each chunk has a SHA-256 contentHash', async () => {
+    const chunks = await chunkCode(SAMPLE_CODE, 'test.ts')
+    for (const chunk of chunks) {
+      expect(chunk.contentHash).toMatch(/^[a-f0-9]{64}$/)
+    }
+  })
+
+  it('contentHash differs between chunks with different content', async () => {
+    const chunks = await chunkCode(SAMPLE_CODE, 'test.ts')
+    if (chunks.length > 1) {
+      expect(chunks[0].contentHash).not.toBe(chunks[1].contentHash)
+    }
+  })
+
+  it('each chunk has a filePath matching the input', async () => {
+    const chunks = await chunkCode(SAMPLE_CODE, 'services/foo.ts')
+    for (const chunk of chunks) {
+      expect(chunk.filePath).toBe('services/foo.ts')
+    }
+  })
+
+  it('returns one chunk for very short input (below chunk size)', async () => {
+    const chunks = await chunkCode('const x = 1', 'tiny.ts')
+    expect(chunks).toHaveLength(1)
+  })
+})
+```
+
+- [ ] **Step 5b.2: Run the test — verify it fails**
+
+```bash
+yarn test tests/unit/code-chunker.test.ts
+```
+
+Expected: `Error: Failed to resolve import "../../services/code-chunker.js"`
+
+- [ ] **Step 5b.3: Create `services/code-chunker.ts`**
+
+```typescript
+// services/code-chunker.ts
+import { createHash } from 'node:crypto'
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters'
+
+const CHUNK_SIZE = 512
+const CHUNK_OVERLAP = 256
+
+export type CodeChunk = {
+  filePath: string
+  chunkIndex: number
+  content: string
+  contentHash: string  // SHA-256 hex of the chunk content
+}
+
+/**
+ * Splits a code file into overlapping chunks for embedding.
+ * Uses LangChain's RecursiveCharacterTextSplitter (512 chars, 256 overlap).
+ * Each chunk gets a stable SHA-256 contentHash for deduplication.
+ * Chunks are stored as CodeChunkEmbedding records (vector(768) via nomic-embed-text/Ollama).
+ */
+export async function chunkCode(content: string, filePath: string): Promise<CodeChunk[]> {
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: CHUNK_SIZE,
+    chunkOverlap: CHUNK_OVERLAP,
+  })
+
+  const docs = await splitter.createDocuments([content])
+
+  return docs.map((doc, index) => ({
+    filePath,
+    chunkIndex: index,
+    content: doc.pageContent,
+    contentHash: createHash('sha256').update(doc.pageContent).digest('hex'),
+  }))
+}
+```
+
+- [ ] **Step 5b.4: Run the test — verify it passes**
+
+```bash
+yarn test tests/unit/code-chunker.test.ts
+```
+
+Expected:
+
+```
+✓ chunkCode > returns at least one chunk for non-empty input
+✓ chunkCode > each chunk has a chunkIndex starting at 0 and incrementing
+✓ chunkCode > each chunk has a SHA-256 contentHash
+✓ chunkCode > contentHash differs between chunks with different content
+✓ chunkCode > each chunk has a filePath matching the input
+✓ chunkCode > returns one chunk for very short input (below chunk size)
+
+Test Files  1 passed (1)
+Tests       6 passed (6)
+```
+
+- [ ] **Step 5b.5: Commit**
+
+```bash
+git add services/code-chunker.ts tests/unit/code-chunker.test.ts
+git commit -m "feat: add CodeChunkEmbedding chunking strategy to services/code-chunker"
+```
+
+---
+
 ## Task 6: Evaluation Scaffolding
 
 **Files:**
