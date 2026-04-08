@@ -1,0 +1,18 @@
+[project]
+name = "wizard"
+version = "1.2.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastmcp[tasks]>=3.2.0",
+    "pydantic-settings>=2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
