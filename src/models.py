@@ -12,6 +12,8 @@ class TimestampMixin(SQLModel):
     created_at: datetime.datetime = Field(
         default_factory=datetime.datetime.now, index=True
     )
+    # onupdate fires via SQLAlchemy ORM only — not a DB-level trigger.
+    # Raw SQL updates will not refresh this field.
     updated_at: datetime.datetime = Field(
         default_factory=datetime.datetime.now,
         sa_column_kwargs={"onupdate": datetime.datetime.now},
