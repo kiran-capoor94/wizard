@@ -13,7 +13,6 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-from src.config import settings  # noqa: E402
 from src.database import engine  # noqa: E402
 import src.models  # noqa: F401, E402 — registers Task, Meeting, MeetingTasks with SQLModel.metadata
 
