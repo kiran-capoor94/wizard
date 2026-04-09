@@ -8,16 +8,16 @@ from sqlmodel import SQLModel
 # Ensure project root is on sys.path so src/ is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.config import settings
-from src.database import _db_url, engine
-import src.models  # noqa: F401 — registers Task, Meeting, MeetingTasks with SQLModel.metadata
-
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", _db_url(settings.db))
+from src.config import settings  # noqa: E402
+from src.database import engine  # noqa: E402
+import src.models  # noqa: F401, E402 — registers Task, Meeting, MeetingTasks with SQLModel.metadata
+
+config.set_main_option("sqlalchemy.url", str(engine.url))
 
 target_metadata = SQLModel.metadata
 
