@@ -1,33 +1,6 @@
-import json
 import time
-from typing import Generator
 
 import pytest
-from sqlmodel import Session, SQLModel
-
-
-@pytest.fixture(autouse=True)
-def db_session(monkeypatch, tmp_path) -> Generator[Session, None, None]:
-    import sys
-
-    # Point settings at an in-memory DB so tests never touch wizard.db
-    config_file = tmp_path / "config.json"
-    config_file.write_text(json.dumps({"db": ":memory:"}))
-    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(config_file))
-    # Force re-import so the engine is built with the in-memory URL
-    monkeypatch.delitem(sys.modules, "src.config", raising=False)
-    monkeypatch.delitem(sys.modules, "src.database", raising=False)
-    monkeypatch.delitem(sys.modules, "src.models", raising=False)
-    SQLModel.metadata.clear()
-    SQLModel._sa_registry.dispose(cascade=True)
-
-    from src.database import engine
-    import src.models  # noqa: F401 — registers all table models with SQLModel.metadata
-
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
-    SQLModel.metadata.drop_all(engine)
 
 
 def test_created_at_is_not_frozen_at_module_load(db_session):
@@ -92,7 +65,7 @@ def test_task_can_be_created_without_due_date(db_session):
 def test_meeting_tasks_relationship(db_session):
     from src.models import Meeting, MeetingTasks, Task
 
-    meeting = Meeting(content="standup notes")
+    meeting = Meeting(title="standup", content="standup notes")
     task = Task(name="action item")
     db_session.add(meeting)
     db_session.add(task)
@@ -112,7 +85,7 @@ def test_meeting_tasks_relationship(db_session):
 def test_task_meetings_relationship(db_session):
     from src.models import Meeting, MeetingTasks, Task
 
-    meeting = Meeting(content="planning notes")
+    meeting = Meeting(title="planning", content="planning notes")
     task = Task(name="action item")
     db_session.add(meeting)
     db_session.add(task)
@@ -136,3 +109,62 @@ def test_invalid_enum_value_rejected():
 
     with pytest.raises(ValidationError):
         Task(name="test", priority="invalid_value")
+
+
+def test_task_has_notion_id(db_session):
+    from src.models import Task
+    task = Task(name="test")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.notion_id is None
+
+
+def test_meeting_has_title_and_notion_id(db_session):
+    from src.models import Meeting
+    meeting = Meeting(title="standup", content="notes")
+    db_session.add(meeting)
+    db_session.commit()
+    db_session.refresh(meeting)
+    assert meeting.title == "standup"
+    assert meeting.notion_id is None
+
+
+def test_note_has_meeting_id(db_session):
+    from src.models import Note, NoteType
+    note = Note(note_type=NoteType.INVESTIGATION, content="investigating")
+    db_session.add(note)
+    db_session.commit()
+    db_session.refresh(note)
+    assert note.meeting_id is None
+
+
+def test_note_has_session_summary_type(db_session):
+    from src.models import Note, NoteType, WizardSession
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    note = Note(note_type=NoteType.SESSION_SUMMARY, content="session wrap", session_id=session.id)
+    db_session.add(note)
+    db_session.commit()
+    db_session.refresh(note)
+    assert note.note_type == NoteType.SESSION_SUMMARY
+
+
+def test_wizard_session_table_name(db_session):
+    from sqlalchemy import inspect
+    from src.database import engine
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    assert "wizardsession" in tables
+    assert "wizardsessions" not in tables
+
+
+def test_meeting_category_has_general(db_session):
+    from src.models import Meeting, MeetingCategory
+    meeting = Meeting(title="misc", content="...", category=MeetingCategory.GENERAL)
+    db_session.add(meeting)
+    db_session.commit()
+    db_session.refresh(meeting)
+    assert meeting.category == MeetingCategory.GENERAL
