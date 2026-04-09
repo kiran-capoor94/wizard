@@ -1,8 +1,6 @@
 from fastmcp import FastMCP
 
-from src.config import Settings
-
-settings = Settings()
+from src.config import settings
 
 mcp = FastMCP(
     name=settings.name,
