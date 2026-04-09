@@ -2,7 +2,12 @@ import os
 from pathlib import Path
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, JsonConfigSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    JsonConfigSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 
 def _config_path() -> Path:
@@ -18,6 +23,20 @@ class Settings(BaseSettings):
     version: str = Field(default="1.2.0")
     log_level: str = Field(default="INFO")
 
+    db: str = Field(default="wizard.db")
+
+    model_config = SettingsConfigDict(json_file=_config_path())
+
     @classmethod
-    def settings_customise_sources(cls, settings_cls, **kwargs):
-        return (JsonConfigSettingsSource(settings_cls, json_file=_config_path()),)
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (JsonConfigSettingsSource(settings_cls),)
+
+
+settings = Settings()
