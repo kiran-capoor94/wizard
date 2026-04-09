@@ -12,7 +12,11 @@ class TimestampMixin(SQLModel):
     created_at: datetime.datetime = Field(
         default_factory=datetime.datetime.now, index=True
     )
-    updated_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
+    updated_at: datetime.datetime = Field(
+        default_factory=datetime.datetime.now,
+        sa_column_kwargs={"onupdate": datetime.datetime.now},
+        nullable=False,
+    )
 
 
 class TaskPriority(str, Enum):

@@ -17,6 +17,9 @@ def db_session(monkeypatch, tmp_path) -> Generator[Session, None, None]:
     # Force re-import so the engine is built with the in-memory URL
     monkeypatch.delitem(sys.modules, "src.config", raising=False)
     monkeypatch.delitem(sys.modules, "src.database", raising=False)
+    monkeypatch.delitem(sys.modules, "src.models", raising=False)
+    SQLModel.metadata.clear()
+    SQLModel._sa_registry.dispose(cascade=True)
 
     from src.database import engine
     import src.models  # noqa: F401 — registers all table models with SQLModel.metadata
@@ -54,6 +57,25 @@ def test_task_has_updated_at_field(db_session):
     db_session.refresh(task)
 
     assert task.updated_at is not None
+
+
+def test_updated_at_changes_on_update(db_session):
+    from src.models import Task
+
+    task = Task(name="foo")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    original_updated_at = task.updated_at
+
+    time.sleep(0.05)
+
+    task.name = "bar"
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+
+    assert task.updated_at > original_updated_at
 
 
 def test_task_can_be_created_without_due_date(db_session):
