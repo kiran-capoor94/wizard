@@ -48,6 +48,15 @@ class MeetingCategory(str, Enum):
     RETRO = "retro"
     ONE_ON_ONE = "one_on_one"
     TRAINING = "training"
+    GENERAL = "general"
+
+
+class NoteType(str, Enum):
+    INVESTIGATION = "investigation"
+    DECISION = "decision"
+    DOCS = "docs"
+    LEARNINGS = "learnings"
+    SESSION_SUMMARY = "session_summary"
 
 
 class MeetingTasks(SQLModel, table=True):
@@ -62,16 +71,58 @@ class Task(TimestampMixin, table=True):
     priority: TaskPriority = TaskPriority.MEDIUM
     category: TaskCategory = TaskCategory.ISSUE
     status: TaskStatus = TaskStatus.TODO
+    notion_id: Optional[str] = Field(default=None, index=True)
     meetings: list["Meeting"] = Relationship(
         back_populates="tasks", link_model=MeetingTasks
     )
+    source_id: Optional[str] = Field(
+        default=None,
+        index=True,
+        unique=True,
+        description="identifier of the external entity this task originated from",
+    )
+    source_type: Optional[str] = Field(default=None, index=True)
+    source_url: Optional[str] = Field(default=None)
 
 
 class Meeting(TimestampMixin, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
     content: str
+    notion_id: Optional[str] = Field(default=None, index=True)
     category: MeetingCategory = MeetingCategory.STANDUP
     summary: Optional[str] = None
-    tasks: list[Task] = Relationship(
-        back_populates="meetings", link_model=MeetingTasks
+    tasks: list[Task] = Relationship(back_populates="meetings", link_model=MeetingTasks)
+    source_id: Optional[str] = Field(
+        default=None,
+        index=True,
+        unique=True,
+        description="identifier of the external entity this meeting relates to",
     )
+    source_type: Optional[str] = Field(default=None, index=True)
+    source_url: Optional[str] = Field(default=None)
+
+
+class WizardSession(TimestampMixin, table=True):
+    __tablename__ = "wizardsession"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    summary: Optional[str] = None
+    notes: list["Note"] = Relationship(back_populates="session")
+
+
+class Note(TimestampMixin, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    note_type: NoteType = Field(index=True)
+    content: str
+    source_id: Optional[str] = Field(
+        default=None,
+        index=True,
+        description="identifier of the external entity this note is about",
+    )
+    source_type: Optional[str] = Field(default=None, index=True)
+    session_id: Optional[int] = Field(default=None, foreign_key="wizardsession.id")
+    source_url: Optional[str] = Field(default=None)
+    task_id: Optional[int] = Field(default=None, foreign_key="task.id")
+    meeting_id: Optional[int] = Field(default=None, foreign_key="meeting.id")
+    session: Optional[WizardSession] = Relationship(back_populates="notes")
