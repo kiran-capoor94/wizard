@@ -1,6 +1,4 @@
 import json
-import os
-import pytest
 from pathlib import Path
 
 
@@ -38,15 +36,16 @@ def test_config_path_override_takes_precedence(monkeypatch, tmp_path):
 
 
 def test_settings_loads_values_from_json(monkeypatch, tmp_path):
+    import sys
+
     config = {"name": "My Server", "version": "2.0.0", "log_level": "DEBUG"}
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps(config))
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(config_file))
+    # Settings.model_config bakes in the json_file path at class definition time,
+    # so we must force a re-import after setting the env var.
+    monkeypatch.delitem(sys.modules, "src.config", raising=False)
 
-    # Force reimport so settings_customise_sources picks up the new env var
-    import importlib
-    import src.config
-    importlib.reload(src.config)
     from src.config import Settings
 
     settings = Settings()
@@ -60,9 +59,6 @@ def test_settings_uses_defaults_when_config_file_missing(monkeypatch, tmp_path):
     missing = tmp_path / "nonexistent.json"
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(missing))
 
-    import importlib
-    import src.config
-    importlib.reload(src.config)
     from src.config import Settings
 
     settings = Settings()
@@ -70,3 +66,4 @@ def test_settings_uses_defaults_when_config_file_missing(monkeypatch, tmp_path):
     assert settings.name == "Wizard MCP Server"
     assert settings.version == "1.2.0"
     assert settings.log_level == "INFO"
+    assert settings.db == "wizard.db"
