@@ -1,5 +1,7 @@
 import logging
 
+from fastmcp import Context
+from fastmcp.server.dependencies import CurrentContext
 from sqlmodel import select
 
 from .database import get_session
@@ -130,19 +132,24 @@ def _note_repo():
 # ---------------------------------------------------------------------------
 
 
-def session_start() -> SessionStartResponse:
+def session_start(ctx: Context = CurrentContext()) -> SessionStartResponse:
     """Creates a session, syncs Jira and Notion, returns open and blocked tasks + unsummarised meetings."""
     from .models import WizardSession
 
     with get_session() as db:
+        ctx.info("Creating new session")
         session = WizardSession()
         db.add(session)
         db.flush()
         db.refresh(session)
         assert session.id is not None
 
+        ctx.report_progress(1, 3)
+        ctx.info("Syncing integrations")
         sync_results = _sync_service().sync_all(db)
+        ctx.report_progress(2, 3)
 
+        ctx.report_progress(3, 3)
         return SessionStartResponse(
             session_id=session.id,
             open_tasks=_task_repo().get_open_task_contexts(db),
@@ -299,7 +306,7 @@ def save_meeting_summary(
         )
 
 
-def session_end(session_id: int, summary: str) -> SessionEndResponse:
+def session_end(session_id: int, summary: str, ctx: Context = CurrentContext()) -> SessionEndResponse:
     """Persists session summary note and attempts Notion daily page write-back."""
     from .models import WizardSession, Note, NoteType
 
@@ -308,6 +315,7 @@ def session_end(session_id: int, summary: str) -> SessionEndResponse:
         if session is None:
             raise ValueError(f"Session {session_id} not found")
 
+        ctx.info("Saving session summary")
         clean_summary = _security().scrub(summary).clean
         session.summary = clean_summary
         db.add(session)
@@ -323,6 +331,7 @@ def session_end(session_id: int, summary: str) -> SessionEndResponse:
         saved = _note_repo().save(db, note)
         assert saved.id is not None
 
+        ctx.info("Writing back to Notion")
         wb_result = _writeback().push_session_summary(session)
 
         return SessionEndResponse(
@@ -337,6 +346,7 @@ def ingest_meeting(
     source_id: str | None = None,
     source_url: str | None = None,
     category: str = "general",
+    ctx: Context = CurrentContext(),
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
     from .models import Meeting, MeetingCategory
@@ -346,6 +356,7 @@ def ingest_meeting(
         raise ValueError(f"Invalid category '{category}'. Valid: {valid_categories}")
 
     with get_session() as db:
+        ctx.info("Scrubbing and storing meeting")
         clean_title = _security().scrub(title).clean
         clean_content = _security().scrub(content).clean
 
@@ -375,6 +386,7 @@ def ingest_meeting(
         db.refresh(meeting)
         assert meeting.id is not None
 
+        ctx.info("Writing back to Notion")
         wb_result = _writeback().push_meeting_to_notion(meeting)
         if wb_result.page_id:
             meeting.notion_id = wb_result.page_id
@@ -394,6 +406,7 @@ def create_task(
     source_id: str | None = None,
     source_url: str | None = None,
     meeting_id: int | None = None,
+    ctx: Context = CurrentContext(),
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
     from .models import Task, TaskPriority, TaskCategory, TaskStatus, MeetingTasks
@@ -406,6 +419,7 @@ def create_task(
         raise ValueError(f"Invalid category '{category}'. Valid: {valid_categories}")
 
     with get_session() as db:
+        ctx.info("Creating task")
         clean_name = _security().scrub(name).clean
         task = Task(
             name=clean_name,
@@ -423,6 +437,7 @@ def create_task(
         if meeting_id:
             db.add(MeetingTasks(meeting_id=meeting_id, task_id=task.id))
 
+        ctx.info("Writing back to Notion")
         wb_result = _writeback().push_task_to_notion(task)
         if wb_result.page_id:
             task.notion_id = wb_result.page_id
