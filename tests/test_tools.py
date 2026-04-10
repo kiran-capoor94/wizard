@@ -1,18 +1,8 @@
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tests.helpers import mock_session
-
-
-def _mock_context():
-    """Create a mock Context for testing tools that accept ctx parameter."""
-    ctx = MagicMock()
-    ctx.info = AsyncMock()
-    ctx.warning = AsyncMock()
-    ctx.report_progress = AsyncMock()
-    return ctx
 
 
 def _patch_tools(db_session, sync=None, wb=None):
@@ -38,7 +28,7 @@ def test_session_start_creates_session(db_session):
     sync_mock.sync_all = MagicMock(return_value=[])
 
     with patch.multiple("src.tools", **patches):
-        result = asyncio.run(session_start(ctx=_mock_context()))
+        result = session_start()
 
     assert result.session_id is not None
     assert result.open_tasks is not None
@@ -53,7 +43,7 @@ def test_session_start_calls_sync(db_session):
     sync_mock.sync_all = MagicMock(return_value=[])
 
     with patch.multiple("src.tools", **patches):
-        asyncio.run(session_start(ctx=_mock_context()))
+        session_start()
 
     sync_mock.sync_all.assert_called_once()
 
@@ -69,7 +59,7 @@ def test_session_start_surfaces_sync_errors(db_session):
     ])
 
     with patch.multiple("src.tools", **patches):
-        result = asyncio.run(session_start(ctx=_mock_context()))
+        result = session_start()
 
     assert len(result.sync_results) == 3
     jira_sync = result.sync_results[0]
@@ -307,11 +297,10 @@ def test_session_end_saves_summary_note(db_session):
 
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
-        result = asyncio.run(session_end(
+        result = session_end(
             session_id=session_id,
             summary="wrapped up today's work",
-            ctx=_mock_context(),
-        ))
+        )
 
     assert result.note_id is not None
 
@@ -336,14 +325,13 @@ def test_ingest_meeting_creates_meeting(db_session):
 
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
-        result = asyncio.run(ingest_meeting(
+        result = ingest_meeting(
             title="Sprint Planning",
             content="john@example.com reported a bug",
             source_id="krisp-abc",
             source_url="https://krisp.ai/m/abc",
             category=MeetingCategory.PLANNING,
-            ctx=_mock_context(),
-        ))
+        )
 
     assert result.meeting_id is not None
     assert result.already_existed is False
@@ -369,7 +357,7 @@ def test_ingest_meeting_dedup_by_source_id(db_session):
 
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
-        result = asyncio.run(ingest_meeting(title="New", content="new", source_id="krisp-abc", ctx=_mock_context()))
+        result = ingest_meeting(title="New", content="new", source_id="krisp-abc")
 
     assert result.already_existed is True
     assert result.meeting_id == existing.id
@@ -398,12 +386,11 @@ def test_create_task_creates_and_links(db_session):
 
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
-        result = asyncio.run(create_task(
+        result = create_task(
             name="Fix john@example.com auth bug",
             priority=TaskPriority.HIGH,
             meeting_id=meeting_id,
-            ctx=_mock_context(),
-        ))
+        )
 
     assert result.task_id is not None
     assert result.notion_write_back.ok is True
@@ -457,7 +444,7 @@ def test_compounding_loop_across_two_sessions(db_session):
     patches, _, _ = _patch_tools(db_session, sync=sync_mock, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
         # --- Session 1 ---
-        s1 = asyncio.run(session_start(ctx=_mock_context()))
+        s1 = session_start()
         session_id = s1.session_id
 
         # task_start -- no prior notes yet
@@ -471,10 +458,10 @@ def test_compounding_loop_across_two_sessions(db_session):
         update_task_status(task_id=task_id, new_status=TaskStatus.IN_PROGRESS)
 
         # session_end
-        asyncio.run(session_end(session_id=session_id, summary="Investigated auth bug", ctx=_mock_context()))
+        session_end(session_id=session_id, summary="Investigated auth bug")
 
         # --- Session 2 ---
-        s2 = asyncio.run(session_start(ctx=_mock_context()))
+        s2 = session_start()
         assert s2.session_id != session_id
 
         # task_start -- should see prior notes now
