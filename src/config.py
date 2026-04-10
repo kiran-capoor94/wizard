@@ -1,41 +1,60 @@
+import json
 import os
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field
-from pydantic_settings import (
-    BaseSettings,
-    JsonConfigSettingsSource,
-    PydanticBaseSettingsSource,
-    SettingsConfigDict,
-)
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 
-def _config_path() -> Path:
-    if override := os.getenv("WIZARD_CONFIG_FILE"):
-        return Path(override)
-    if os.getenv("WIZARD_ENV", "development") == "production":
-        return Path.home() / ".wizard" / "config.json"
-    return Path(__file__).parent.parent / "config.json"
+class JsonConfigSettingsSource(PydanticBaseSettingsSource):
+    def get_field_value(self, field, field_name):
+        pass
+
+    def __call__(self) -> dict[str, Any]:
+        config_file = os.environ.get(
+            "WIZARD_CONFIG_FILE",
+            str(Path.home() / ".wizard" / "config.json"),
+        )
+        try:
+            with open(config_file) as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {}
+
+
+class JiraSettings(BaseModel):
+    base_url: str = ""
+    project_key: str = ""
+    token: str = ""
+
+
+class NotionSettings(BaseModel):
+    daily_page_id: str = ""
+    token: str = ""
+
+
+class KrispSettings(BaseModel):
+    api_base_url: str = ""
+    token: str = ""
+
+
+class ScrubbingSettings(BaseModel):
+    enabled: bool = True
+    allowlist: list[str] = Field(default_factory=list)
 
 
 class Settings(BaseSettings):
-    name: str = Field(default="Wizard MCP Server")
-    version: str = Field(default="1.2.0")
-    log_level: str = Field(default="INFO")
-
-    db: str = Field(default="wizard.db")
-
-    model_config = SettingsConfigDict(json_file=_config_path())
+    name: str = "wizard"
+    version: str = "1.1.0"
+    db: str = str(Path.home() / ".wizard" / "wizard.db")
+    jira: JiraSettings = Field(default_factory=JiraSettings)
+    notion: NotionSettings = Field(default_factory=NotionSettings)
+    krisp: KrispSettings = Field(default_factory=KrispSettings)
+    scrubbing: ScrubbingSettings = Field(default_factory=ScrubbingSettings)
 
     @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
+    def settings_customise_sources(cls, settings_cls, **kwargs):
         return (JsonConfigSettingsSource(settings_cls),)
 
 

@@ -1,69 +1,47 @@
 import json
-from pathlib import Path
+import pytest
 
 
-def test_config_path_returns_dev_path_by_default(monkeypatch):
-    monkeypatch.delenv("WIZARD_ENV", raising=False)
-    monkeypatch.delenv("WIZARD_CONFIG_FILE", raising=False)
-
-    from src.config import _config_path
-
-    result = _config_path()
-
-    assert result == Path(__file__).parent.parent / "config.json"
-
-
-def test_config_path_returns_prod_path(monkeypatch):
-    monkeypatch.setenv("WIZARD_ENV", "production")
-    monkeypatch.delenv("WIZARD_CONFIG_FILE", raising=False)
-
-    from src.config import _config_path
-
-    result = _config_path()
-
-    assert result == Path.home() / ".wizard" / "config.json"
-
-
-def test_config_path_override_takes_precedence(monkeypatch, tmp_path):
-    override = str(tmp_path / "custom.json")
-    monkeypatch.setenv("WIZARD_CONFIG_FILE", override)
-
-    from src.config import _config_path
-
-    result = _config_path()
-
-    assert result == Path(override)
-
-
-def test_settings_loads_values_from_json(monkeypatch, tmp_path):
-    import sys
-
-    config = {"name": "My Server", "version": "2.0.0", "log_level": "DEBUG"}
+def test_jira_settings_defaults(tmp_path, monkeypatch):
     config_file = tmp_path / "config.json"
-    config_file.write_text(json.dumps(config))
+    config_file.write_text(json.dumps({"db": ":memory:"}))
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(config_file))
-    # Settings.model_config bakes in the json_file path at class definition time,
-    # so we must force a re-import after setting the env var.
+
+    import sys
     monkeypatch.delitem(sys.modules, "src.config", raising=False)
+    from src.config import settings
 
-    from src.config import Settings
-
-    settings = Settings()
-
-    assert settings.name == "My Server"
-    assert settings.version == "2.0.0"
-    assert settings.log_level == "DEBUG"
+    assert settings.jira.base_url == ""
+    assert settings.jira.token == ""
+    assert settings.jira.project_key == ""
 
 
-def test_settings_uses_defaults_when_config_file_missing(monkeypatch, tmp_path):
-    missing = tmp_path / "nonexistent.json"
-    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(missing))
+def test_scrubbing_defaults(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"db": ":memory:"}))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(config_file))
 
-    from src.config import Settings
+    import sys
+    monkeypatch.delitem(sys.modules, "src.config", raising=False)
+    from src.config import settings
 
-    settings = Settings()
+    assert settings.scrubbing.enabled is True
+    assert settings.scrubbing.allowlist == []
 
-    assert settings.name == "Wizard MCP Server"
-    assert settings.version == "1.2.0"
-    assert settings.log_level == "INFO"
-    assert settings.db == "wizard.db"
+
+def test_nested_config_from_json(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({
+        "db": ":memory:",
+        "jira": {"base_url": "https://jira.example.com", "token": "tok", "project_key": "ENG"},
+        "scrubbing": {"enabled": True, "allowlist": ["SISU", "AUTH-\\d+"]}
+    }))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(config_file))
+
+    import sys
+    monkeypatch.delitem(sys.modules, "src.config", raising=False)
+    from src.config import settings
+
+    assert settings.jira.base_url == "https://jira.example.com"
+    assert settings.jira.token == "tok"
+    assert settings.scrubbing.allowlist == ["SISU", "AUTH-\\d+"]
