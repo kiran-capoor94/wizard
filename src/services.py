@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from .integrations import JiraClient, NotionClient
+from .integrations import JiraClient, NotionClient, _extract_krisp_id
 from .mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
 from .models import Meeting, MeetingCategory, Task, WizardSession
 from .schemas import SourceSyncStatus, WriteBackStatus
@@ -130,15 +130,7 @@ class SyncService:
             notion_id = raw.notion_id
             krisp_url = raw.krisp_url
 
-            # Extract krisp_id from krisp_url last path segment
-            krisp_id = None
-            if krisp_url:
-                try:
-                    segment = krisp_url.rstrip("/").split("/")[-1].split("?")[0].strip()
-                    if segment:
-                        krisp_id = segment
-                except Exception:
-                    pass
+            krisp_id = _extract_krisp_id(krisp_url)
 
             # Dedup: krisp_id → source_id, then notion_id
             existing = None
