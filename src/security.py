@@ -1,17 +1,16 @@
 import re
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+
+from pydantic import BaseModel
 
 
-@dataclass
-class ScrubResult:
+class ScrubResult(BaseModel):
     clean: str
-    stubs_applied: Dict[str, str]
+    stubs_applied: dict[str, str]
     was_modified: bool
 
 
 class SecurityService:
-    PATTERNS: List[Tuple[str, str, str]] = [
+    PATTERNS: list[tuple[str, str, str]] = [
         ("NHS_ID", r"\b\d{3}\s\d{3}\s\d{4}\b", "NHS_ID"),
         ("NI_NUMBER", r"\b[A-Z]{2}\d{6}[A-D]\b", "NI_NUMBER"),
         ("EMAIL", r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b", "EMAIL"),
@@ -24,7 +23,7 @@ class SecurityService:
         ("SECRET", r"(Bearer\s[A-Za-z0-9\-._~+/]+=*|sk-[A-Za-z0-9]{20,})", "SECRET"),
     ]
 
-    def __init__(self, allowlist: Optional[List[str]] = None, enabled: bool = True):
+    def __init__(self, allowlist: list[str] | None = None, enabled: bool = True):
         self._allowlist = allowlist or []
         self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
         self._enabled = enabled
@@ -33,8 +32,8 @@ class SecurityService:
         if not self._enabled:
             return ScrubResult(clean=content, stubs_applied={}, was_modified=False)
         clean = content
-        stubs_applied: Dict[str, str] = {}
-        counters: Dict[str, int] = {}
+        stubs_applied: dict[str, str] = {}
+        counters: dict[str, int] = {}
 
         for _name, pattern, prefix in self.PATTERNS:
 
