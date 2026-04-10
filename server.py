@@ -1,5 +1,6 @@
 from src.mcp_instance import mcp
-import src.tools  # noqa: F401 — registers all @mcp.tool decorators
+import src.tools  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.tool decorators
+import src.resources  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.resource decorators
 
 if __name__ == "__main__":
     mcp.run()
