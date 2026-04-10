@@ -121,8 +121,8 @@ def make_notion_client(
 
 # ---- fetch_tasks tests ----
 
-def test_notion_fetch_tasks_returns_list_of_dicts():
-    """fetch_tasks should return list with notion_id, name, status, priority, due_date, jira_url, jira_key"""
+def test_notion_fetch_tasks_returns_typed_models():
+    """fetch_tasks should return list of NotionTaskData with notion_id, name, status, priority, due_date, jira_url, jira_key"""
     client = make_notion_client()
 
     mock_pages = [
@@ -201,8 +201,8 @@ def test_notion_fetch_tasks_returns_empty_on_api_error():
 
 # ---- fetch_meetings tests ----
 
-def test_notion_fetch_meetings_returns_list_of_dicts():
-    """fetch_meetings should return list with notion_id, title, categories, summary, krisp_url, date"""
+def test_notion_fetch_meetings_returns_typed_models():
+    """fetch_meetings should return list of NotionMeetingData with notion_id, title, categories, summary, krisp_url, date"""
     mock_pages = [
         {
             "id": "meeting-uuid-1",
