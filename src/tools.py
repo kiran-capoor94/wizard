@@ -37,7 +37,7 @@ def _get_deps():
         daily_page_id=settings.notion.daily_page_id,
         token=settings.notion.token,
     )
-    security = SecurityService(allowlist=settings.scrubbing.allowlist)
+    security = SecurityService(allowlist=settings.scrubbing.allowlist, enabled=settings.scrubbing.enabled)
     sync = SyncService(jira=jira, krisp=krisp, security=security)
     writeback = WriteBackService(jira=jira, notion=notion)
     repo = NoteRepository()
