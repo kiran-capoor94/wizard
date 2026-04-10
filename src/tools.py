@@ -106,22 +106,22 @@ def note_repo() -> NoteRepository:
 # ---------------------------------------------------------------------------
 
 
-def session_start(ctx: Context = CurrentContext()) -> SessionStartResponse:
+async def session_start(ctx: Context = CurrentContext()) -> SessionStartResponse:
     """Creates a session, syncs Jira and Notion, returns open and blocked tasks + unsummarised meetings."""
     with get_session() as db:
-        ctx.info("Creating new session")
+        await ctx.info("Creating new session")
         session = WizardSession()
         db.add(session)
         db.flush()
         db.refresh(session)
         assert session.id is not None
 
-        ctx.report_progress(1, 3)
-        ctx.info("Syncing integrations")
+        await ctx.report_progress(1, 3)
+        await ctx.info("Syncing integrations")
         sync_results = sync_service().sync_all(db)
-        ctx.report_progress(2, 3)
+        await ctx.report_progress(2, 3)
 
-        ctx.report_progress(3, 3)
+        await ctx.report_progress(3, 3)
         return SessionStartResponse(
             session_id=session.id,
             open_tasks=task_repo().get_open_task_contexts(db),
@@ -268,7 +268,7 @@ def save_meeting_summary(
         )
 
 
-def session_end(
+async def session_end(
     session_id: int, summary: str, ctx: Context = CurrentContext()
 ) -> SessionEndResponse:
     """Persists session summary note and attempts Notion daily page write-back."""
@@ -277,7 +277,7 @@ def session_end(
         if session is None:
             raise ValueError(f"Session {session_id} not found")
 
-        ctx.info("Saving session summary")
+        await ctx.info("Saving session summary")
         clean_summary = security().scrub(summary).clean
         session.summary = clean_summary
         db.add(session)
@@ -293,7 +293,7 @@ def session_end(
         saved = note_repo().save(db, note)
         assert saved.id is not None
 
-        ctx.info("Writing back to Notion")
+        await ctx.info("Writing back to Notion")
         wb_result = writeback().push_session_summary(session)
 
         return SessionEndResponse(
@@ -302,7 +302,7 @@ def session_end(
         )
 
 
-def ingest_meeting(
+async def ingest_meeting(
     title: str,
     content: str,
     source_id: str | None = None,
@@ -312,7 +312,7 @@ def ingest_meeting(
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
     with get_session() as db:
-        ctx.info("Scrubbing and storing meeting")
+        await ctx.info("Scrubbing and storing meeting")
         clean_title = security().scrub(title).clean
         clean_content = security().scrub(content).clean
 
@@ -342,7 +342,7 @@ def ingest_meeting(
         db.refresh(meeting)
         assert meeting.id is not None
 
-        ctx.info("Writing back to Notion")
+        await ctx.info("Writing back to Notion")
         wb_result = writeback().push_meeting_to_notion(meeting)
         if wb_result.page_id:
             meeting.notion_id = wb_result.page_id
@@ -355,7 +355,7 @@ def ingest_meeting(
         )
 
 
-def create_task(
+async def create_task(
     name: str,
     priority: TaskPriority = TaskPriority.MEDIUM,
     category: TaskCategory = TaskCategory.ISSUE,
@@ -366,7 +366,7 @@ def create_task(
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
     with get_session() as db:
-        ctx.info("Creating task")
+        await ctx.info("Creating task")
         clean_name = security().scrub(name).clean
         task = Task(
             name=clean_name,
@@ -384,7 +384,7 @@ def create_task(
         if meeting_id:
             db.add(MeetingTasks(meeting_id=meeting_id, task_id=task.id))
 
-        ctx.info("Writing back to Notion")
+        await ctx.info("Writing back to Notion")
         wb_result = writeback().push_task_to_notion(task)
         if wb_result.page_id:
             task.notion_id = wb_result.page_id
