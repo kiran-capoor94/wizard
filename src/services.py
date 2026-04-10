@@ -1,5 +1,7 @@
 import datetime
 import logging
+from collections.abc import Callable
+from typing import Any
 
 from sqlmodel import Session, select
 
@@ -190,31 +192,35 @@ class WriteBackService:
         self._jira = jira
         self._notion = notion
 
+    def _call(self, fn: Callable[[], Any], error_label: str, **status_kwargs) -> WriteBackStatus:
+        try:
+            result = fn()
+            if result:
+                return WriteBackStatus(ok=True, **status_kwargs)
+            return WriteBackStatus(ok=False, error=f"{error_label} failed")
+        except Exception as e:
+            logger.warning("%s failed: %s", error_label, e)
+            return WriteBackStatus(ok=False, error=str(e))
+
     def push_task_status(self, task: Task) -> WriteBackStatus:
         if not task.source_id:
             return WriteBackStatus(ok=False, error="Task has no Jira source_id")
+        source_id = task.source_id
         jira_status = StatusMapper.local_to_jira(task.status)
-        try:
-            ok = self._jira.update_task_status(task.source_id, jira_status)
-            if ok:
-                return WriteBackStatus(ok=True)
-            return WriteBackStatus(ok=False, error="Jira API call failed")
-        except Exception as e:
-            logger.warning("WriteBack push_task_status (Jira) failed: %s", e)
-            return WriteBackStatus(ok=False, error=str(e))
+        return self._call(
+            lambda: self._jira.update_task_status(source_id, jira_status),
+            "WriteBack push_task_status (Jira)",
+        )
 
     def push_task_status_to_notion(self, task: Task) -> WriteBackStatus:
         if not task.notion_id:
             return WriteBackStatus(ok=False, error="Task has no notion_id")
+        notion_id = task.notion_id
         notion_status = StatusMapper.local_to_notion(task.status)
-        try:
-            ok = self._notion.update_task_status(task.notion_id, notion_status)
-            if ok:
-                return WriteBackStatus(ok=True)
-            return WriteBackStatus(ok=False, error="Notion API call failed")
-        except Exception as e:
-            logger.warning("WriteBack push_task_status (Notion) failed: %s", e)
-            return WriteBackStatus(ok=False, error=str(e))
+        return self._call(
+            lambda: self._notion.update_task_status(notion_id, notion_status),
+            "WriteBack push_task_status (Notion)",
+        )
 
     def push_task_to_notion(self, task: Task) -> WriteBackStatus:
         """Create or update task in Notion. Returns page_id in WriteBackStatus on success."""
@@ -246,22 +252,15 @@ class WriteBackService:
     def push_meeting_to_notion(self, meeting: Meeting) -> WriteBackStatus:
         """Create or update meeting in Notion. Returns page_id in WriteBackStatus on success."""
         if meeting.notion_id:
-            if meeting.summary:
-                try:
-                    ok = self._notion.update_meeting_summary(
-                        meeting.notion_id, meeting.summary
-                    )
-                    if ok:
-                        return WriteBackStatus(ok=True, page_id=meeting.notion_id)
-                    return WriteBackStatus(
-                        ok=False, error="Notion update_meeting_summary failed"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "WriteBack push_meeting_to_notion (update) failed: %s", e
-                    )
-                    return WriteBackStatus(ok=False, error=str(e))
-            return WriteBackStatus(ok=True, page_id=meeting.notion_id)
+            if not meeting.summary:
+                return WriteBackStatus(ok=True, page_id=meeting.notion_id)
+            notion_id = meeting.notion_id
+            summary = meeting.summary
+            return self._call(
+                lambda: self._notion.update_meeting_summary(notion_id, summary),
+                "WriteBack push_meeting_to_notion (update)",
+                page_id=notion_id,
+            )
         notion_category = MeetingCategoryMapper.local_to_notion(meeting.category)
         if not notion_category:
             return WriteBackStatus(
@@ -291,25 +290,18 @@ class WriteBackService:
             return WriteBackStatus(ok=False, error="Meeting has no notion_id")
         if not meeting.summary:
             return WriteBackStatus(ok=False, error="Meeting has no summary")
-        try:
-            ok = self._notion.update_meeting_summary(meeting.notion_id, meeting.summary)
-            if ok:
-                return WriteBackStatus(ok=True)
-            return WriteBackStatus(
-                ok=False, error="Notion update_meeting_summary failed"
-            )
-        except Exception as e:
-            logger.warning("WriteBack push_meeting_summary failed: %s", e)
-            return WriteBackStatus(ok=False, error=str(e))
+        notion_id = meeting.notion_id
+        summary = meeting.summary
+        return self._call(
+            lambda: self._notion.update_meeting_summary(notion_id, summary),
+            "WriteBack push_meeting_summary",
+        )
 
     def push_session_summary(self, session: WizardSession) -> WriteBackStatus:
         if not session.summary:
             return WriteBackStatus(ok=False, error="Session has no summary")
-        try:
-            ok = self._notion.update_daily_page(session.summary)
-            if ok:
-                return WriteBackStatus(ok=True)
-            return WriteBackStatus(ok=False, error="Notion update_daily_page failed")
-        except Exception as e:
-            logger.warning("WriteBack push_session_summary failed: %s", e)
-            return WriteBackStatus(ok=False, error=str(e))
+        summary = session.summary
+        return self._call(
+            lambda: self._notion.update_daily_page(summary),
+            "WriteBack push_session_summary",
+        )
