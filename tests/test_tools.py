@@ -4,6 +4,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+def _mock_context():
+    """Create a mock Context for testing tools that accept ctx parameter."""
+    ctx = MagicMock()
+    ctx.info = MagicMock()
+    ctx.warning = MagicMock()
+    ctx.report_progress = MagicMock()
+    return ctx
+
+
 def _mock_session(db_session):
     """Context manager that yields the test db_session instead of creating a new one."""
     @contextmanager
@@ -36,7 +45,7 @@ def test_session_start_creates_session(db_session):
     sync_mock.sync_all = MagicMock(return_value=[])
 
     with patch.multiple("src.tools", **patches):
-        result = session_start()
+        result = session_start(ctx=_mock_context())
 
     assert result.session_id is not None
     assert result.open_tasks is not None
@@ -51,7 +60,7 @@ def test_session_start_calls_sync(db_session):
     sync_mock.sync_all = MagicMock(return_value=[])
 
     with patch.multiple("src.tools", **patches):
-        session_start()
+        session_start(ctx=_mock_context())
 
     sync_mock.sync_all.assert_called_once()
 
@@ -67,7 +76,7 @@ def test_session_start_surfaces_sync_errors(db_session):
     ])
 
     with patch.multiple("src.tools", **patches):
-        result = session_start()
+        result = session_start(ctx=_mock_context())
 
     assert len(result.sync_results) == 3
     jira_sync = result.sync_results[0]
@@ -307,6 +316,7 @@ def test_session_end_saves_summary_note(db_session):
         result = session_end(
             session_id=session_id,
             summary="wrapped up today's work",
+            ctx=_mock_context(),
         )
 
     assert result.note_id is not None
@@ -338,6 +348,7 @@ def test_ingest_meeting_creates_meeting(db_session):
             source_id="krisp-abc",
             source_url="https://krisp.ai/m/abc",
             category="planning",
+            ctx=_mock_context(),
         )
 
     assert result.meeting_id is not None
@@ -364,7 +375,7 @@ def test_ingest_meeting_dedup_by_source_id(db_session):
 
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
-        result = ingest_meeting(title="New", content="new", source_id="krisp-abc")
+        result = ingest_meeting(title="New", content="new", source_id="krisp-abc", ctx=_mock_context())
 
     assert result.already_existed is True
     assert result.meeting_id == existing.id
@@ -397,6 +408,7 @@ def test_create_task_creates_and_links(db_session):
             name="Fix john@example.com auth bug",
             priority="high",
             meeting_id=meeting_id,
+            ctx=_mock_context(),
         )
 
     assert result.task_id is not None
@@ -451,7 +463,7 @@ def test_compounding_loop_across_two_sessions(db_session):
     patches, _, _ = _patch_tools(db_session, sync=sync_mock, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
         # --- Session 1 ---
-        s1 = session_start()
+        s1 = session_start(ctx=_mock_context())
         session_id = s1.session_id
 
         # task_start -- no prior notes yet
@@ -465,10 +477,10 @@ def test_compounding_loop_across_two_sessions(db_session):
         update_task_status(task_id=task_id, new_status="in_progress")
 
         # session_end
-        session_end(session_id=session_id, summary="Investigated auth bug")
+        session_end(session_id=session_id, summary="Investigated auth bug", ctx=_mock_context())
 
         # --- Session 2 ---
-        s2 = session_start()
+        s2 = session_start(ctx=_mock_context())
         assert s2.session_id != session_id
 
         # task_start -- should see prior notes now
