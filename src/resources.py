@@ -54,17 +54,7 @@ def task_context(task_id: int) -> TaskContextResource:
         task = task_repo().get_by_id(db, task_id)
         task_ctx = task_repo().build_task_context(db, task)
         notes = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
-        note_details = [
-            NoteDetail(
-                id=n.id,
-                note_type=n.note_type,
-                content=n.content,
-                created_at=n.created_at,
-                source_id=n.source_id,
-            )
-            for n in notes
-            if n.id is not None
-        ]
+        note_details = [NoteDetail.from_model(n) for n in notes if n.id is not None]
         return TaskContextResource(task=task_ctx, notes=note_details)
 
 
