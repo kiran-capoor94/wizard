@@ -11,14 +11,22 @@ def db_session(monkeypatch, tmp_path):
     config_file.write_text(json.dumps({"db": ":memory:"}))
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(config_file))
 
-    for mod in ["src.config", "src.database", "src.models"]:
+    for mod in [
+        "src.config",
+        "src.database",
+        "src.models",
+        "src.repositories",
+        "src.schemas",
+        "src.tools",
+        "src.resources",
+    ]:
         monkeypatch.delitem(sys.modules, mod, raising=False)
 
     SQLModel.metadata.clear()
     SQLModel._sa_registry.dispose(cascade=True)
 
     from src.database import engine
-    import src.models
+    import src.models  # noqa: F401 — registers models with SQLModel.metadata
 
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
