@@ -49,12 +49,16 @@ class JiraClient:
         if self._client is not None:
             self._client.close()
 
-    def fetch_open_tasks(self) -> list[JiraTaskData]:
+    def _require_client(self) -> httpx.Client:
         if self._client is None:
             raise ConfigurationError("Jira token not configured")
+        return self._client
+
+    def fetch_open_tasks(self) -> list[JiraTaskData]:
+        client = self._require_client()
         try:
             jql = f"project={self._project_key} AND statusCategory != Done ORDER BY priority DESC"
-            response = self._client.get(
+            response = client.get(
                 "/search", params={"jql": jql, "maxResults": 50}
             )
             response.raise_for_status()
@@ -75,10 +79,9 @@ class JiraClient:
             return []
 
     def update_task_status(self, source_id: str, status: str) -> bool:
-        if self._client is None:
-            raise ConfigurationError("Jira token not configured")
+        client = self._require_client()
         try:
-            response = self._client.post(
+            response = client.post(
                 f"/issue/{source_id}/transitions",
                 json={"transition": {"name": status}},
             )
@@ -111,11 +114,15 @@ class NotionClient:
         self._meetings_db_id = meetings_db_id
         self._client = NotionSdkClient(auth=token) if token else None
 
-    def _query_database(self, database_id: str, **kwargs) -> dict:
-        """Query a database by ID. Wraps client.request for v3.0 compat (databases.query was removed)."""
+    def _require_client(self) -> NotionSdkClient:
         if self._client is None:
             raise ConfigurationError("Notion token not configured")
-        return self._client.request(
+        return self._client
+
+    def _query_database(self, database_id: str, **kwargs) -> dict:
+        """Query a database by ID. Wraps client.request for v3.0 compat (databases.query was removed)."""
+        client = self._require_client()
+        return client.request(
             path=f"databases/{database_id}/query",
             method="POST",
             body=kwargs,
@@ -123,8 +130,7 @@ class NotionClient:
 
     def fetch_tasks(self) -> list[NotionTaskData]:
         """Query Tasks DB, return normalised NotionTaskData models."""
-        if self._client is None:
-            raise ConfigurationError("Notion token not configured")
+        self._require_client()
 
         try:
             pages = collect_paginated_api(
@@ -155,8 +161,7 @@ class NotionClient:
 
     def fetch_meetings(self) -> list[NotionMeetingData]:
         """Query Meeting Notes DB, return normalised NotionMeetingData models."""
-        if self._client is None:
-            raise ConfigurationError("Notion token not configured")
+        self._require_client()
 
         try:
             pages = collect_paginated_api(
@@ -196,8 +201,7 @@ class NotionClient:
         due_date: str | None = None,
     ) -> str | None:
         """Create page in Tasks DB, return page_id."""
-        if self._client is None:
-            raise ConfigurationError("Notion token not configured")
+        client = self._require_client()
 
         try:
             properties: dict = {
@@ -212,7 +216,7 @@ class NotionClient:
             if due_date:
                 properties["Due date"] = {"date": {"start": due_date}}
 
-            response = self._client.pages.create(
+            response = client.pages.create(
                 parent={"database_id": self._tasks_db_id},
                 properties=properties,
             )
@@ -229,8 +233,7 @@ class NotionClient:
         summary: str | None = None,
     ) -> str | None:
         """Create page in Meeting Notes DB, return page_id."""
-        if self._client is None:
-            raise ConfigurationError("Notion token not configured")
+        client = self._require_client()
 
         try:
             properties = {
@@ -243,7 +246,7 @@ class NotionClient:
             if summary:
                 properties["Summary"] = {"rich_text": [{"text": {"content": summary}}]}
 
-            response = self._client.pages.create(
+            response = client.pages.create(
                 parent={"database_id": self._meetings_db_id},
                 properties=properties,
             )
@@ -254,11 +257,10 @@ class NotionClient:
 
     def update_task_status(self, page_id: str, status: str) -> bool:
         """Update Status property on task page."""
-        if self._client is None:
-            raise ConfigurationError("Notion token not configured")
+        client = self._require_client()
 
         try:
-            self._client.pages.update(
+            client.pages.update(
                 page_id=page_id,
                 properties={"Status": {"status": {"name": status}}},
             )
@@ -269,11 +271,10 @@ class NotionClient:
 
     def update_meeting_summary(self, page_id: str, summary: str) -> bool:
         """Update Summary property on meeting page."""
-        if self._client is None:
-            raise ConfigurationError("Notion token not configured")
+        client = self._require_client()
 
         try:
-            self._client.pages.update(
+            client.pages.update(
                 page_id=page_id,
                 properties={"Summary": {"rich_text": [{"text": {"content": summary}}]}},
             )
@@ -284,11 +285,10 @@ class NotionClient:
 
     def update_daily_page(self, summary: str) -> bool:
         """Update Session Summary property on daily page."""
-        if self._client is None:
-            raise ConfigurationError("Notion token not configured")
+        client = self._require_client()
 
         try:
-            self._client.pages.update(
+            client.pages.update(
                 page_id=self._daily_page_id,
                 properties={
                     "Session Summary": {"rich_text": [{"text": {"content": summary}}]}
