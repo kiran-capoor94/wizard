@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 from sqlmodel import Session, select
 
 from .integrations import JiraClient, KrispClient, NotionClient
@@ -38,14 +37,16 @@ class SyncService:
 
     def _sync_jira(self, db: Session) -> None:
         from .models import Task, TaskStatus, TaskPriority
-        
+
         raw_tasks = self._jira.fetch_open_tasks()
         for raw in raw_tasks:
             scrubbed_name = self._security.scrub(raw["summary"]).clean
             existing = db.exec(select(Task).where(Task.source_id == raw["key"])).first()
             if existing:
                 existing.name = scrubbed_name
-                existing.priority = TaskPriority(_JIRA_PRIORITY_MAP.get(raw["priority"].lower(), "medium"))
+                existing.priority = TaskPriority(
+                    _JIRA_PRIORITY_MAP.get(raw["priority"].lower(), "medium")
+                )
                 existing.source_url = raw.get("url")
                 db.add(existing)
             else:
@@ -54,8 +55,12 @@ class SyncService:
                     source_id=raw["key"],
                     source_type="JIRA",
                     source_url=raw.get("url"),
-                    priority=TaskPriority(_JIRA_PRIORITY_MAP.get(raw["priority"].lower(), "medium")),
-                    status=TaskStatus(_JIRA_STATUS_MAP.get(raw["status"].lower(), "todo")),
+                    priority=TaskPriority(
+                        _JIRA_PRIORITY_MAP.get(raw["priority"].lower(), "medium")
+                    ),
+                    status=TaskStatus(
+                        _JIRA_STATUS_MAP.get(raw["status"].lower(), "todo")
+                    ),
                 )
                 db.add(task)
         db.commit()
@@ -67,7 +72,9 @@ class SyncService:
         for raw in raw_meetings:
             scrubbed_title = self._security.scrub(raw.get("title", "")).clean
             scrubbed_content = self._security.scrub(raw.get("transcript", "")).clean
-            existing = db.exec(select(Meeting).where(Meeting.source_id == raw["id"])).first()
+            existing = db.exec(
+                select(Meeting).where(Meeting.source_id == raw["id"])
+            ).first()
             if existing:
                 existing.title = scrubbed_title
                 existing.content = scrubbed_content
@@ -103,7 +110,9 @@ class WriteBackService:
         if not meeting.notion_id or not meeting.summary:
             return False
         try:
-            return self._notion.update_page_property(meeting.notion_id, "Summary", meeting.summary)
+            return self._notion.update_page_property(
+                meeting.notion_id, "Summary", meeting.summary
+            )
         except Exception as e:
             logger.warning("WriteBack push_meeting_summary failed: %s", e)
             return False
