@@ -163,6 +163,17 @@ class NoteDetail(BaseModel):
     created_at: datetime.datetime
     source_id: str | None
 
+    @classmethod
+    def from_model(cls, note) -> "NoteDetail":
+        assert note.id is not None
+        return cls(
+            id=note.id,
+            note_type=note.note_type,
+            content=note.content,
+            created_at=note.created_at,
+            source_id=note.source_id,
+        )
+
 
 class SessionStartResponse(BaseModel):
     session_id: int
