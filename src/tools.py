@@ -1,3 +1,5 @@
+import logging
+
 from fastmcp.exceptions import ToolError
 from sqlmodel import select
 
@@ -29,6 +31,8 @@ from .schemas import (
     UpdateTaskStatusResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Tool functions
@@ -37,6 +41,7 @@ from .schemas import (
 
 def session_start() -> SessionStartResponse:
     """Creates a session, syncs Jira and Notion, returns open and blocked tasks + unsummarised meetings."""
+    logger.info("session_start")
     with get_session() as db:
         session = WizardSession()
         db.add(session)
@@ -57,6 +62,7 @@ def session_start() -> SessionStartResponse:
 
 def task_start(task_id: int) -> TaskStartResponse:
     """Returns full task context + all prior notes for compounding context."""
+    logger.info("task_start task_id=%d", task_id)
     try:
         with get_session() as db:
             task = task_repo().get_by_id(db, task_id)
@@ -77,11 +83,13 @@ def task_start(task_id: int) -> TaskStartResponse:
                 prior_notes=prior_notes,
             )
     except ValueError as e:
+        logger.warning("task_start failed: %s", e)
         raise ToolError(str(e)) from e
 
 
 def save_note(task_id: int, note_type: NoteType, content: str) -> SaveNoteResponse:
     """Scrubs and persists a note. note_type: investigation|decision|docs|learnings|session_summary."""
+    logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
         with get_session() as db:
             task = task_repo().get_by_id(db, task_id)
@@ -96,6 +104,7 @@ def save_note(task_id: int, note_type: NoteType, content: str) -> SaveNoteRespon
             assert saved.id is not None
             return SaveNoteResponse(note_id=saved.id)
     except ValueError as e:
+        logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
 
 
@@ -103,6 +112,7 @@ def update_task_status(
     task_id: int, new_status: TaskStatus
 ) -> UpdateTaskStatusResponse:
     """Updates task status locally and attempts Jira and Notion write-back."""
+    logger.info("update_task_status task_id=%d new_status=%s", task_id, new_status.value)
     try:
         with get_session() as db:
             task = task_repo().get_by_id(db, task_id)
@@ -122,11 +132,13 @@ def update_task_status(
                 notion_write_back=notion_wb,
             )
     except ValueError as e:
+        logger.warning("update_task_status failed: %s", e)
         raise ToolError(str(e)) from e
 
 
 def get_meeting(meeting_id: int) -> GetMeetingResponse:
     """Returns meeting transcript and linked open tasks."""
+    logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
         with get_session() as db:
             meeting = meeting_repo().get_by_id(db, meeting_id)
@@ -148,6 +160,7 @@ def get_meeting(meeting_id: int) -> GetMeetingResponse:
                 open_tasks=linked_tasks,
             )
     except ValueError as e:
+        logger.warning("get_meeting failed: %s", e)
         raise ToolError(str(e)) from e
 
 
@@ -155,6 +168,7 @@ def save_meeting_summary(
     meeting_id: int, session_id: int, summary: str, task_ids: list[int] | None = None
 ) -> SaveMeetingSummaryResponse:
     """Scrubs and persists the LLM-generated meeting summary. Attempts Notion write-back."""
+    logger.info("save_meeting_summary meeting_id=%d session_id=%d", meeting_id, session_id)
     try:
         with get_session() as db:
             meeting = meeting_repo().get_by_id(db, meeting_id)
@@ -195,11 +209,13 @@ def save_meeting_summary(
                 notion_write_back=wb_result,
             )
     except ValueError as e:
+        logger.warning("save_meeting_summary failed: %s", e)
         raise ToolError(str(e)) from e
 
 
 def session_end(session_id: int, summary: str) -> SessionEndResponse:
     """Persists session summary note and attempts Notion daily page write-back."""
+    logger.info("session_end session_id=%d", session_id)
     with get_session() as db:
         session = db.get(WizardSession, session_id)
         if session is None:
@@ -236,6 +252,7 @@ def ingest_meeting(
     category: MeetingCategory = MeetingCategory.GENERAL,
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
+    logger.info("ingest_meeting source_id=%s", source_id)
     with get_session() as db:
         clean_title = security().scrub(title).clean
         clean_content = security().scrub(content).clean
@@ -287,6 +304,7 @@ def create_task(
     meeting_id: int | None = None,
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
+    logger.info("create_task priority=%s category=%s", priority.value, category.value)
     with get_session() as db:
         clean_name = security().scrub(name).clean
         task = Task(
