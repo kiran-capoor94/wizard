@@ -1,5 +1,5 @@
 import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .models import NoteType, TaskCategory, TaskPriority, TaskStatus, MeetingCategory
 
@@ -32,6 +32,65 @@ class NotionMeetingData(BaseModel):
     summary: str | None = None
     krisp_url: str | None = None
     date: str | None = None
+
+
+# --- Notion API property models (parse raw Notion property dicts) ---
+
+
+class NotionPropertyValue(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class NotionTitle(NotionPropertyValue):
+    title: list[dict] = []
+
+    @property
+    def text(self) -> str | None:
+        return self.title[0].get("plain_text") if self.title else None
+
+
+class NotionRichText(NotionPropertyValue):
+    rich_text: list[dict] = []
+
+    @property
+    def text(self) -> str | None:
+        return self.rich_text[0].get("plain_text") if self.rich_text else None
+
+
+class NotionSelect(NotionPropertyValue):
+    select: dict | None = None
+
+    @property
+    def name(self) -> str | None:
+        return self.select.get("name") if self.select else None
+
+
+class NotionMultiSelect(NotionPropertyValue):
+    multi_select: list[dict] = []
+
+    @property
+    def names(self) -> list[str]:
+        return [item["name"] for item in self.multi_select if "name" in item]
+
+
+class NotionUrl(NotionPropertyValue):
+    url: str | None = None
+
+
+class NotionDate(NotionPropertyValue):
+    date: dict | None = None
+
+    @property
+    def start(self) -> str | None:
+        return self.date.get("start") if self.date else None
+
+
+class NotionStatus(NotionPropertyValue):
+    status: dict | None = None
+
+    @property
+    def name(self) -> str | None:
+        return self.status.get("name") if self.status else None
 
 
 # --- Resource response models (read-only data exposed via FastMCP URIs) ---

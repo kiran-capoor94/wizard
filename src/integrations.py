@@ -6,7 +6,11 @@ from notion_client import Client as NotionSdkClient
 from notion_client.errors import APIResponseError
 from notion_client.helpers import collect_paginated_api
 
-from .schemas import JiraTaskData, NotionMeetingData, NotionTaskData
+from .schemas import (
+    JiraTaskData, NotionMeetingData, NotionTaskData,
+    NotionTitle, NotionRichText, NotionSelect, NotionMultiSelect,
+    NotionUrl, NotionDate, NotionStatus,
+)
 
 HTTPX_TIMEOUT = httpx.Timeout(10.0)
 
@@ -74,79 +78,12 @@ class JiraClient:
             return False
 
 
-# ============================================================================
-# Helper functions for extracting Notion properties
-# ============================================================================
-
-
 def _extract_jira_key(url: str | None) -> str | None:
     """Extract Jira issue key from URL like https://org.atlassian.net/browse/ENG-123"""
     if not url:
         return None
     match = re.search(r"/browse/([A-Z]+-\d+)", url)
     return match.group(1) if match else None
-
-
-def _get_title(properties: dict, key: str) -> str | None:
-    """Extract plain text from Notion title property."""
-    prop = properties.get(key, {})
-    if prop and "title" in prop:
-        titles = prop["title"]
-        if titles and len(titles) > 0:
-            return titles[0].get("plain_text")
-    return None
-
-
-def _get_rich_text(properties: dict, key: str) -> str | None:
-    """Extract plain text from Notion rich_text property."""
-    prop = properties.get(key, {})
-    if prop and "rich_text" in prop:
-        texts = prop["rich_text"]
-        if texts and len(texts) > 0:
-            return texts[0].get("plain_text")
-    return None
-
-
-def _get_select(properties: dict, key: str) -> str | None:
-    """Extract name from Notion select property."""
-    prop = properties.get(key, {})
-    if prop and "select" in prop and prop["select"]:
-        return prop["select"].get("name")
-    return None
-
-
-def _get_multi_select(properties: dict, key: str) -> list[str] | None:
-    """Extract list of names from Notion multi_select property."""
-    prop = properties.get(key, {})
-    if prop and "multi_select" in prop:
-        items = prop["multi_select"]
-        if isinstance(items, list):
-            return [item.get("name") for item in items if item and "name" in item]
-    return None
-
-
-def _get_url(properties: dict, key: str) -> str | None:
-    """Extract URL from Notion url property."""
-    prop = properties.get(key, {})
-    if prop and "url" in prop:
-        return prop["url"]
-    return None
-
-
-def _get_date_start(properties: dict, key: str) -> str | None:
-    """Extract start date from Notion date property."""
-    prop = properties.get(key, {})
-    if prop and "date" in prop and prop["date"]:
-        return prop["date"].get("start")
-    return None
-
-
-def _get_status(properties: dict, key: str) -> str | None:
-    """Extract name from Notion status property."""
-    prop = properties.get(key, {})
-    if prop and "status" in prop and prop["status"]:
-        return prop["status"].get("name")
-    return None
 
 
 # ============================================================================
@@ -188,14 +125,15 @@ class NotionClient:
                 page_id = page.get("id")
                 props = page.get("properties", {})
 
+                jira_url = NotionUrl.model_validate(props.get("Jira", {})).url
                 task = NotionTaskData(
                     notion_id=page_id,
-                    name=_get_title(props, "Task"),
-                    status=_get_status(props, "Status"),
-                    priority=_get_select(props, "Priority"),
-                    due_date=_get_date_start(props, "Due date"),
-                    jira_url=_get_url(props, "Jira"),
-                    jira_key=_extract_jira_key(_get_url(props, "Jira")),
+                    name=NotionTitle.model_validate(props.get("Task", {})).text,
+                    status=NotionStatus.model_validate(props.get("Status", {})).name,
+                    priority=NotionSelect.model_validate(props.get("Priority", {})).name,
+                    due_date=NotionDate.model_validate(props.get("Due date", {})).start,
+                    jira_url=jira_url,
+                    jira_key=_extract_jira_key(jira_url),
                 )
                 tasks.append(task)
             return tasks
@@ -219,11 +157,11 @@ class NotionClient:
 
                 meeting = NotionMeetingData(
                     notion_id=page_id,
-                    title=_get_title(props, "Meeting name"),
-                    categories=_get_multi_select(props, "Category") or [],
-                    summary=_get_rich_text(props, "Summary"),
-                    krisp_url=_get_url(props, "Krisp URL"),
-                    date=_get_date_start(props, "Date"),
+                    title=NotionTitle.model_validate(props.get("Meeting name", {})).text,
+                    categories=NotionMultiSelect.model_validate(props.get("Category", {})).names,
+                    summary=NotionRichText.model_validate(props.get("Summary", {})).text,
+                    krisp_url=NotionUrl.model_validate(props.get("Krisp URL", {})).url,
+                    date=NotionDate.model_validate(props.get("Date", {})).start,
                 )
                 meetings.append(meeting)
             return meetings
