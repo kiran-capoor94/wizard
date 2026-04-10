@@ -1,19 +1,17 @@
 {
   "name": "wizard",
   "version": "1.1.0",
-  "db": "/home/<you>/.wizard/wizard.db",
+  "db": "~/.wizard/wizard.db",
   "jira": {
     "base_url": "https://yourorg.atlassian.net",
     "project_key": "ENG",
     "token": "your-jira-api-token"
   },
   "notion": {
-    "daily_page_id": "notion-page-id-here",
+    "daily_page_id": "notion-daily-page-id",
+    "tasks_db_id": "4aa82f52-99c2-46e3-a0c2-c15826c02069",
+    "meetings_db_id": "32100339-99d0-807f-adfe-c647bf3308c7",
     "token": "your-notion-integration-token"
-  },
-  "krisp": {
-    "api_base_url": "https://api.krisp.ai",
-    "token": "your-krisp-api-token"
   },
   "scrubbing": {
     "enabled": true,

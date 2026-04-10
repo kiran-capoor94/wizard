@@ -31,11 +31,8 @@ class JiraSettings(BaseModel):
 
 class NotionSettings(BaseModel):
     daily_page_id: str = ""
-    token: str = ""
-
-
-class KrispSettings(BaseModel):
-    api_base_url: str = ""
+    tasks_db_id: str = ""
+    meetings_db_id: str = ""
     token: str = ""
 
 
@@ -50,7 +47,6 @@ class Settings(BaseSettings):
     db: str = str(Path.home() / ".wizard" / "wizard.db")
     jira: JiraSettings = Field(default_factory=JiraSettings)
     notion: NotionSettings = Field(default_factory=NotionSettings)
-    krisp: KrispSettings = Field(default_factory=KrispSettings)
     scrubbing: ScrubbingSettings = Field(default_factory=ScrubbingSettings)
 
     @classmethod
