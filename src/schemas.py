@@ -14,8 +14,8 @@ class TaskContext(BaseModel):
     due_date: Optional[datetime.datetime]
     source_id: Optional[str]
     source_url: Optional[str]
-    last_note_type: Optional[NoteType]       # most recent note type, or None
-    last_note_preview: Optional[str]         # first 120 chars of most recent note
+    last_note_type: Optional[NoteType]  # most recent note type, or None
+    last_note_preview: Optional[str]  # first 120 chars of most recent note
     last_worked_at: Optional[datetime.datetime]  # created_at of most recent note
 
 
@@ -24,7 +24,7 @@ class MeetingContext(BaseModel):
     title: str
     category: MeetingCategory
     created_at: datetime.datetime
-    has_summary: bool                        # False means call get_meeting to summarise
+    has_summary: bool  # False means call get_meeting to summarise
 
 
 class NoteDetail(BaseModel):
@@ -44,9 +44,9 @@ class SessionStartResponse(BaseModel):
 
 class TaskStartResponse(BaseModel):
     task: TaskContext
-    compounding: bool                        # True if prior notes exist for this task
-    notes_by_type: dict[str, int]            # {"investigation": 3, "decision": 1}
-    prior_notes: list[NoteDetail]            # all notes, oldest first
+    compounding: bool  # True if prior notes exist for this task
+    notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
+    prior_notes: list[NoteDetail]  # all notes, oldest first
 
 
 class SaveNoteResponse(BaseModel):
@@ -56,7 +56,8 @@ class SaveNoteResponse(BaseModel):
 class UpdateTaskStatusResponse(BaseModel):
     task_id: int
     new_status: TaskStatus
-    write_back_succeeded: bool
+    write_back_succeeded: bool           # Jira
+    notion_write_back_succeeded: bool    # Notion
 
 
 class GetMeetingResponse(BaseModel):
@@ -66,7 +67,7 @@ class GetMeetingResponse(BaseModel):
     content: str
     already_summarised: bool
     existing_summary: Optional[str]
-    open_tasks: list[TaskContext]            # tasks linked to this meeting
+    open_tasks: list[TaskContext]  # tasks linked to this meeting
 
 
 class SaveMeetingSummaryResponse(BaseModel):
@@ -76,3 +77,13 @@ class SaveMeetingSummaryResponse(BaseModel):
 
 class SessionEndResponse(BaseModel):
     note_id: int
+
+
+class IngestMeetingResponse(BaseModel):
+    meeting_id: int
+    already_existed: bool
+
+
+class CreateTaskResponse(BaseModel):
+    task_id: int
+    notion_write_back_succeeded: bool
