@@ -29,8 +29,8 @@ def _patch_tools(db_session, sync=None, wb=None):
 
     patches = {
         "get_session": _mock_session(db_session),
-        "_sync_service": lambda: sync_mock,
-        "_writeback": lambda: wb_mock,
+        "sync_service": lambda: sync_mock,
+        "writeback": lambda: wb_mock,
     }
     return patches, sync_mock, wb_mock
 
@@ -143,7 +143,7 @@ def test_task_start_raises_when_task_not_found(db_session):
 
 def test_save_note_scrubs_and_persists(db_session):
     from src.tools import save_note
-    from src.models import Task, Note
+    from src.models import Task, Note, NoteType
 
     task = Task(name="fix auth", source_id="ENG-1")
     db_session.add(task)
@@ -155,7 +155,7 @@ def test_save_note_scrubs_and_persists(db_session):
     with patch.multiple("src.tools", **patches):
         result = save_note(
             task_id=task.id,
-            note_type="investigation",
+            note_type=NoteType.INVESTIGATION,
             content="john@example.com found a bug",
         )
 
@@ -190,7 +190,7 @@ def test_update_task_status_persists_and_writebacks(db_session):
 
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
-        result = update_task_status(task_id=task_id, new_status="done")
+        result = update_task_status(task_id=task_id, new_status=TaskStatus.DONE)
 
     assert result.new_status == TaskStatus.DONE
     assert result.jira_write_back.ok is True
@@ -218,7 +218,7 @@ def test_update_task_status_dual_writeback(db_session):
 
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("src.tools", **patches):
-        result = update_task_status(task_id=task.id, new_status="done")
+        result = update_task_status(task_id=task.id, new_status=TaskStatus.DONE)
 
     assert result.jira_write_back.ok is True
     assert result.notion_write_back.ok is True
@@ -332,7 +332,7 @@ def test_session_end_saves_summary_note(db_session):
 
 def test_ingest_meeting_creates_meeting(db_session):
     from src.tools import ingest_meeting
-    from src.models import Meeting
+    from src.models import Meeting, MeetingCategory
     from src.schemas import WriteBackStatus
 
     wb_mock = MagicMock()
@@ -347,7 +347,7 @@ def test_ingest_meeting_creates_meeting(db_session):
             content="john@example.com reported a bug",
             source_id="krisp-abc",
             source_url="https://krisp.ai/m/abc",
-            category="planning",
+            category=MeetingCategory.PLANNING,
             ctx=_mock_context(),
         )
 
@@ -387,7 +387,7 @@ def test_ingest_meeting_dedup_by_source_id(db_session):
 
 def test_create_task_creates_and_links(db_session):
     from src.tools import create_task
-    from src.models import Meeting, Task, TaskStatus, MeetingTasks
+    from src.models import Meeting, Task, TaskStatus, TaskPriority, MeetingTasks
     from src.schemas import WriteBackStatus
     from sqlmodel import select
 
@@ -406,7 +406,7 @@ def test_create_task_creates_and_links(db_session):
     with patch.multiple("src.tools", **patches):
         result = create_task(
             name="Fix john@example.com auth bug",
-            priority="high",
+            priority=TaskPriority.HIGH,
             meeting_id=meeting_id,
             ctx=_mock_context(),
         )
@@ -439,7 +439,7 @@ def test_compounding_loop_across_two_sessions(db_session):
         session_start, task_start, save_note,
         update_task_status, session_end,
     )
-    from src.models import Task, TaskStatus
+    from src.models import Task, TaskStatus, NoteType
 
     # Seed a task (simulating what sync would produce)
     task = Task(name="Fix auth", source_id="ENG-100", status=TaskStatus.TODO)
@@ -471,10 +471,10 @@ def test_compounding_loop_across_two_sessions(db_session):
         assert ts1.compounding is False
 
         # save_note
-        save_note(task_id=task_id, note_type="investigation", content="Found the root cause")
+        save_note(task_id=task_id, note_type=NoteType.INVESTIGATION, content="Found the root cause")
 
         # update_task_status
-        update_task_status(task_id=task_id, new_status="in_progress")
+        update_task_status(task_id=task_id, new_status=TaskStatus.IN_PROGRESS)
 
         # session_end
         session_end(session_id=session_id, summary="Investigated auth bug", ctx=_mock_context())
