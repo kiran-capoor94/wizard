@@ -1,13 +1,6 @@
 from unittest.mock import patch
-from contextlib import contextmanager
 
-
-def _mock_session(db_session):
-    @contextmanager
-    def _inner():
-        yield db_session
-        db_session.flush()
-    return _inner
+from tests.helpers import mock_session
 
 
 def test_open_tasks_resource(db_session):
@@ -19,7 +12,7 @@ def test_open_tasks_resource(db_session):
     db_session.add(task)
     db_session.commit()
 
-    with patch("src.resources.get_session", _mock_session(db_session)):
+    with patch("src.resources.get_session", mock_session(db_session)):
         result = open_tasks()
 
     assert isinstance(result, OpenTasksResource)
@@ -31,7 +24,7 @@ def test_open_tasks_resource_empty(db_session):
     from src.resources import open_tasks
     from src.schemas import OpenTasksResource
 
-    with patch("src.resources.get_session", _mock_session(db_session)):
+    with patch("src.resources.get_session", mock_session(db_session)):
         result = open_tasks()
 
     assert isinstance(result, OpenTasksResource)
@@ -47,7 +40,7 @@ def test_blocked_tasks_resource(db_session):
     db_session.add(task)
     db_session.commit()
 
-    with patch("src.resources.get_session", _mock_session(db_session)):
+    with patch("src.resources.get_session", mock_session(db_session)):
         result = blocked_tasks()
 
     assert isinstance(result, BlockedTasksResource)
@@ -67,7 +60,7 @@ def test_current_session_resource_active(db_session):
     db_session.commit()
     db_session.refresh(session)
 
-    with patch("src.resources.get_session", _mock_session(db_session)):
+    with patch("src.resources.get_session", mock_session(db_session)):
         result = current_session()
 
     assert isinstance(result, SessionResource)
@@ -80,7 +73,7 @@ def test_current_session_resource_none(db_session):
     from src.resources import current_session
     from src.schemas import SessionResource
 
-    with patch("src.resources.get_session", _mock_session(db_session)):
+    with patch("src.resources.get_session", mock_session(db_session)):
         result = current_session()
 
     assert isinstance(result, SessionResource)
@@ -102,7 +95,7 @@ def test_task_context_resource(db_session):
     db_session.add(note)
     db_session.commit()
 
-    with patch("src.resources.get_session", _mock_session(db_session)):
+    with patch("src.resources.get_session", mock_session(db_session)):
         result = task_context(task_id=task.id)
 
     assert isinstance(result, TaskContextResource)

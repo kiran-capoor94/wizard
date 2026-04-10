@@ -9,8 +9,8 @@
   },
   "notion": {
     "daily_page_id": "notion-daily-page-id",
-    "tasks_db_id": "4aa82f52-99c2-46e3-a0c2-c15826c02069",
-    "meetings_db_id": "32100339-99d0-807f-adfe-c647bf3308c7",
+    "tasks_db_id": "your-notion-tasks-database-id",
+    "meetings_db_id": "your-notion-meetings-database-id",
     "token": "your-notion-integration-token"
   },
   "scrubbing": {

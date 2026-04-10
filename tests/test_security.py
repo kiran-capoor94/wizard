@@ -1,5 +1,4 @@
-import pytest
-from src.security import SecurityService, ScrubResult
+from src.security import SecurityService
 
 
 def test_email_is_redacted():
@@ -49,11 +48,11 @@ def test_allowlist_regex_skips_jira_keys():
     assert "ENG-123" in result.clean
 
 
-def test_stubs_applied_audit_map():
+def test_original_to_stub_audit_map():
     svc = SecurityService()
     result = svc.scrub("Email: test@example.com")
-    assert "test@example.com" in result.stubs_applied
-    assert result.stubs_applied["test@example.com"] == "[EMAIL_1]"
+    assert "test@example.com" in result.original_to_stub
+    assert result.original_to_stub["test@example.com"] == "[EMAIL_1]"
 
 
 def test_scrub_is_idempotent():
