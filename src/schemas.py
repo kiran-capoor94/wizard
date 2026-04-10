@@ -1,5 +1,4 @@
 import datetime
-from typing import Optional
 from pydantic import BaseModel
 
 from .models import NoteType, TaskCategory, TaskPriority, TaskStatus, MeetingCategory
@@ -39,7 +38,7 @@ class NotionMeetingData(BaseModel):
 
 
 class SessionResource(BaseModel):
-    session_id: Optional[int]
+    session_id: int | None
     open_task_count: int
     blocked_task_count: int
 
@@ -67,13 +66,13 @@ class ConfigResource(BaseModel):
 class SourceSyncStatus(BaseModel):
     source: str
     ok: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class WriteBackStatus(BaseModel):
     ok: bool
-    error: Optional[str] = None
-    page_id: Optional[str] = None
+    error: str | None = None
+    page_id: str | None = None
 
 
 class TaskContext(BaseModel):
@@ -82,12 +81,12 @@ class TaskContext(BaseModel):
     status: TaskStatus
     priority: TaskPriority
     category: TaskCategory
-    due_date: Optional[datetime.datetime]
-    source_id: Optional[str]
-    source_url: Optional[str]
-    last_note_type: Optional[NoteType]  # most recent note type, or None
-    last_note_preview: Optional[str]  # first 300 chars of most recent note
-    last_worked_at: Optional[datetime.datetime]  # created_at of most recent note
+    due_date: datetime.datetime | None
+    source_id: str | None
+    source_url: str | None
+    last_note_type: NoteType | None  # most recent note type, or None
+    last_note_preview: str | None  # first 300 chars of most recent note
+    last_worked_at: datetime.datetime | None  # created_at of most recent note
 
 
 class MeetingContext(BaseModel):
@@ -103,7 +102,7 @@ class NoteDetail(BaseModel):
     note_type: NoteType
     content: str
     created_at: datetime.datetime
-    source_id: Optional[str]
+    source_id: str | None
 
 
 class SessionStartResponse(BaseModel):
@@ -138,7 +137,7 @@ class GetMeetingResponse(BaseModel):
     category: MeetingCategory
     content: str
     already_summarised: bool
-    existing_summary: Optional[str]
+    existing_summary: str | None
     open_tasks: list[TaskContext]  # tasks linked to this meeting
 
 
