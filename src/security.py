@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class ScrubResult(BaseModel):
     clean: str
-    stubs_applied: dict[str, str]
+    original_to_stub: dict[str, str]
     was_modified: bool
 
 
@@ -30,9 +30,9 @@ class SecurityService:
 
     def scrub(self, content: str) -> ScrubResult:
         if not self._enabled:
-            return ScrubResult(clean=content, stubs_applied={}, was_modified=False)
+            return ScrubResult(clean=content, original_to_stub={}, was_modified=False)
         clean = content
-        stubs_applied: dict[str, str] = {}
+        original_to_stub: dict[str, str] = {}
         counters: dict[str, int] = {}
 
         for _name, pattern, prefix in self.PATTERNS:
@@ -41,17 +41,17 @@ class SecurityService:
                 matched = m.group(0)
                 if any(p.search(matched) for p in self._allowlist_patterns):
                     return matched
-                if matched in stubs_applied:
-                    return stubs_applied[matched]
+                if matched in original_to_stub:
+                    return original_to_stub[matched]
                 counters[_prefix] = counters.get(_prefix, 0) + 1
                 stub = f"[{_prefix}_{counters[_prefix]}]"
-                stubs_applied[matched] = stub
+                original_to_stub[matched] = stub
                 return stub
 
             clean = re.sub(pattern, replace, clean)
 
         return ScrubResult(
             clean=clean,
-            stubs_applied=stubs_applied,
+            original_to_stub=original_to_stub,
             was_modified=clean != content,
         )

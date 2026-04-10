@@ -41,6 +41,9 @@ class SyncService:
             scrubbed_name = self._security.scrub(raw.summary).clean
             existing = db.exec(select(Task).where(Task.source_id == raw.key)).first()
             if existing:
+                # Upsert rule: external source wins on name/priority/url.
+                # Status is preserved — local status reflects user actions
+                # (e.g. manually marking BLOCKED) that Jira may not know about.
                 existing.name = scrubbed_name
                 existing.priority = PriorityMapper.jira_to_local(raw.priority)
                 existing.source_url = raw.url
@@ -55,7 +58,7 @@ class SyncService:
                     status=StatusMapper.jira_to_local(raw.status),
                 )
                 db.add(task)
-        db.commit()
+        db.flush()
 
     def _sync_notion_tasks(self, db: Session) -> None:
         raw_tasks = self._notion.fetch_tasks()
@@ -90,6 +93,8 @@ class SyncService:
                     pass
 
             if existing:
+                # Upsert rule: same as Jira sync — external wins on name/priority/due_date,
+                # local status preserved. IDs are set-once (don't overwrite existing links).
                 existing.name = scrubbed_name
                 existing.priority = priority
                 existing.due_date = due_date
@@ -113,7 +118,7 @@ class SyncService:
                     status=StatusMapper.notion_to_local(raw_status),
                 )
                 db.add(task)
-        db.commit()
+        db.flush()
 
     def _sync_notion_meetings(self, db: Session) -> None:
         raw_meetings = self._notion.fetch_meetings()
@@ -177,7 +182,7 @@ class SyncService:
                     category=category,
                 )
                 db.add(meeting)
-        db.commit()
+        db.flush()
 
 
 class WriteBackService:
