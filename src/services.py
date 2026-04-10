@@ -1,17 +1,13 @@
-from __future__ import annotations
-
+import datetime
 import logging
-from typing import TYPE_CHECKING
 
 from sqlmodel import Session, select
 
 from .integrations import JiraClient, NotionClient
 from .mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
+from .models import Meeting, MeetingCategory, Task, WizardSession
 from .schemas import SourceSyncStatus, WriteBackStatus
 from .security import SecurityService
-
-if TYPE_CHECKING:
-    from .models import Meeting, Task, WizardSession
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +34,6 @@ class SyncService:
         return results
 
     def _sync_jira(self, db: Session) -> None:
-        from .models import Task
-
         raw_tasks = self._jira.fetch_open_tasks()
         for raw in raw_tasks:
             scrubbed_name = self._security.scrub(raw.summary).clean
@@ -62,9 +56,6 @@ class SyncService:
         db.commit()
 
     def _sync_notion_tasks(self, db: Session) -> None:
-        from .models import Task
-        import datetime as _dt
-
         raw_tasks = self._notion.fetch_tasks()
         for raw in raw_tasks:
             name = raw.name or ""
@@ -92,7 +83,7 @@ class SyncService:
             raw_due = raw.due_date
             if raw_due:
                 try:
-                    due_date = _dt.datetime.fromisoformat(raw_due)
+                    due_date = datetime.datetime.fromisoformat(raw_due)
                 except (ValueError, TypeError):
                     pass
 
@@ -123,8 +114,6 @@ class SyncService:
         db.commit()
 
     def _sync_notion_meetings(self, db: Session) -> None:
-        from .models import Meeting, MeetingCategory
-
         raw_meetings = self._notion.fetch_meetings()
         for raw in raw_meetings:
             title = raw.title or ""
