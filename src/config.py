@@ -8,8 +8,8 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 
 class JsonConfigSettingsSource(PydanticBaseSettingsSource):
-    def get_field_value(self, field, field_name):
-        pass
+    def get_field_value(self, field, field_name) -> tuple[Any, str, bool]:  # noqa: ARG002
+        return None, field_name, False
 
     def __call__(self) -> dict[str, Any]:
         config_file = os.environ.get(
@@ -50,7 +50,14 @@ class Settings(BaseSettings):
     scrubbing: ScrubbingSettings = Field(default_factory=ScrubbingSettings)
 
     @classmethod
-    def settings_customise_sources(cls, settings_cls, **kwargs):
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,  # noqa: ARG003
+        env_settings,  # noqa: ARG003
+        dotenv_settings,  # noqa: ARG003
+        file_secret_settings,  # noqa: ARG003
+    ):
         return (JsonConfigSettingsSource(settings_cls),)
 
 
