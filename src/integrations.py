@@ -1,18 +1,14 @@
-from __future__ import annotations
-
 import logging
 import re
-from typing import TYPE_CHECKING
 
 import httpx
 from notion_client import Client as NotionSdkClient
 from notion_client.errors import APIResponseError
 from notion_client.helpers import collect_paginated_api
 
-if TYPE_CHECKING:
-    from .schemas import JiraTaskData, NotionMeetingData, NotionTaskData
+from .schemas import JiraTaskData, NotionMeetingData, NotionTaskData
 
-_HTTPX_TIMEOUT = httpx.Timeout(10.0)
+HTTPX_TIMEOUT = httpx.Timeout(10.0)
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +28,20 @@ class JiraClient:
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
                 },
-                timeout=_HTTPX_TIMEOUT,
+                timeout=HTTPX_TIMEOUT,
             )
             if token
             else None
         )
 
     def fetch_open_tasks(self) -> list[JiraTaskData]:
-        from .schemas import JiraTaskData
-
         if self._client is None:
             raise ConfigurationError("Jira token not configured")
         try:
             jql = f"project={self._project_key} AND statusCategory != Done ORDER BY priority DESC"
-            response = self._client.get("/search", params={"jql": jql, "maxResults": 50})
+            response = self._client.get(
+                "/search", params={"jql": jql, "maxResults": 50}
+            )
             response.raise_for_status()
             issues = response.json().get("issues", [])
             return [
@@ -180,8 +176,6 @@ class NotionClient:
 
     def fetch_tasks(self) -> list[NotionTaskData]:
         """Query Tasks DB, return normalised NotionTaskData models."""
-        from .schemas import NotionTaskData
-
         if not self._token:
             raise ConfigurationError("Notion token not configured")
 
@@ -211,8 +205,6 @@ class NotionClient:
 
     def fetch_meetings(self) -> list[NotionMeetingData]:
         """Query Meeting Notes DB, return normalised NotionMeetingData models."""
-        from .schemas import NotionMeetingData
-
         if not self._token:
             raise ConfigurationError("Notion token not configured")
 
