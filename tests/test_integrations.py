@@ -4,6 +4,77 @@ import respx
 from unittest.mock import patch, MagicMock
 from notion_client.errors import APIResponseError
 
+from src.schemas import (
+    NotionTitle, NotionRichText, NotionSelect, NotionMultiSelect,
+    NotionUrl, NotionDate, NotionStatus,
+)
+
+
+class TestNotionTitle:
+    def test_extracts_plain_text(self):
+        prop = {"title": [{"plain_text": "Test Title"}]}
+        assert NotionTitle.model_validate(prop).text == "Test Title"
+
+    def test_returns_none_for_empty(self):
+        assert NotionTitle.model_validate({"title": []}).text is None
+
+    def test_returns_none_for_missing(self):
+        assert NotionTitle.model_validate({}).text is None
+
+
+class TestNotionRichText:
+    def test_extracts_plain_text(self):
+        prop = {"rich_text": [{"plain_text": "Test summary"}]}
+        assert NotionRichText.model_validate(prop).text == "Test summary"
+
+    def test_returns_none_for_empty(self):
+        assert NotionRichText.model_validate({"rich_text": []}).text is None
+
+
+class TestNotionSelect:
+    def test_extracts_name(self):
+        prop = {"select": {"name": "In Progress"}}
+        assert NotionSelect.model_validate(prop).name == "In Progress"
+
+    def test_returns_none_for_null(self):
+        assert NotionSelect.model_validate({"select": None}).name is None
+
+
+class TestNotionMultiSelect:
+    def test_extracts_names(self):
+        prop = {"multi_select": [{"name": "Tag1"}, {"name": "Tag2"}]}
+        assert NotionMultiSelect.model_validate(prop).names == ["Tag1", "Tag2"]
+
+    def test_returns_empty_for_empty(self):
+        assert NotionMultiSelect.model_validate({"multi_select": []}).names == []
+
+
+class TestNotionUrl:
+    def test_extracts_url(self):
+        prop = {"url": "https://example.com"}
+        assert NotionUrl.model_validate(prop).url == "https://example.com"
+
+    def test_returns_none_for_null(self):
+        assert NotionUrl.model_validate({"url": None}).url is None
+
+
+class TestNotionDate:
+    def test_extracts_start(self):
+        prop = {"date": {"start": "2026-04-15"}}
+        assert NotionDate.model_validate(prop).start == "2026-04-15"
+
+    def test_returns_none_for_null(self):
+        assert NotionDate.model_validate({"date": None}).start is None
+
+
+class TestNotionStatus:
+    def test_extracts_name(self):
+        prop = {"status": {"name": "Active"}}
+        assert NotionStatus.model_validate(prop).name == "Active"
+
+    def test_returns_none_for_null(self):
+        assert NotionStatus.model_validate({"status": None}).name is None
+
 
 def make_jira_client(base_url="https://jira.example.com", token="tok", project_key="ENG"):
     from src.integrations import JiraClient
@@ -538,8 +609,6 @@ def test_notion_update_daily_page_raises_error_without_token():
         client.update_daily_page("summary")
 
 
-# ---- Helper function tests ----
-
 def test_extract_jira_key_from_url():
     """_extract_jira_key should extract issue key from Jira URL"""
     from src.integrations import _extract_jira_key
@@ -549,122 +618,3 @@ def test_extract_jira_key_from_url():
     assert _extract_jira_key(None) is None
     assert _extract_jira_key("") is None
     assert _extract_jira_key("not-a-url") is None
-
-
-def test_get_title():
-    """_get_title should extract plain text from title property"""
-    from src.integrations import _get_title
-
-    props = {
-        "Name": {"title": [{"plain_text": "Test Title"}]}
-    }
-    assert _get_title(props, "Name") == "Test Title"
-
-    # Missing property
-    assert _get_title(props, "Missing") is None
-
-    # Empty title array
-    props2 = {"Name": {"title": []}}
-    assert _get_title(props2, "Name") is None
-
-
-def test_get_rich_text():
-    """_get_rich_text should extract plain text from rich_text property"""
-    from src.integrations import _get_rich_text
-
-    props = {
-        "Summary": {"rich_text": [{"plain_text": "Test summary"}]}
-    }
-    assert _get_rich_text(props, "Summary") == "Test summary"
-
-    # Missing property
-    assert _get_rich_text(props, "Missing") is None
-
-    # Empty rich text array
-    props2 = {"Summary": {"rich_text": []}}
-    assert _get_rich_text(props2, "Summary") is None
-
-
-def test_get_select():
-    """_get_select should extract name from select property"""
-    from src.integrations import _get_select
-
-    props = {
-        "Status": {"select": {"name": "In Progress"}}
-    }
-    assert _get_select(props, "Status") == "In Progress"
-
-    # Missing property
-    assert _get_select(props, "Missing") is None
-
-    # Null select
-    props2 = {"Status": {"select": None}}
-    assert _get_select(props2, "Status") is None
-
-
-def test_get_multi_select():
-    """_get_multi_select should extract list of names from multi_select property"""
-    from src.integrations import _get_multi_select
-
-    props = {
-        "Tags": {"multi_select": [{"name": "Tag1"}, {"name": "Tag2"}]}
-    }
-    assert _get_multi_select(props, "Tags") == ["Tag1", "Tag2"]
-
-    # Missing property
-    assert _get_multi_select(props, "Missing") is None
-
-    # Empty multi_select
-    props2 = {"Tags": {"multi_select": []}}
-    assert _get_multi_select(props2, "Tags") == []
-
-
-def test_get_url():
-    """_get_url should extract URL"""
-    from src.integrations import _get_url
-
-    props = {
-        "Link": {"url": "https://example.com"}
-    }
-    assert _get_url(props, "Link") == "https://example.com"
-
-    # Missing property
-    assert _get_url(props, "Missing") is None
-
-    # Null URL
-    props2 = {"Link": {"url": None}}
-    assert _get_url(props2, "Link") is None
-
-
-def test_get_date_start():
-    """_get_date_start should extract start date from date property"""
-    from src.integrations import _get_date_start
-
-    props = {
-        "Due": {"date": {"start": "2026-04-15"}}
-    }
-    assert _get_date_start(props, "Due") == "2026-04-15"
-
-    # Missing property
-    assert _get_date_start(props, "Missing") is None
-
-    # Null date
-    props2 = {"Due": {"date": None}}
-    assert _get_date_start(props2, "Due") is None
-
-
-def test_get_status():
-    """_get_status should extract name from status property"""
-    from src.integrations import _get_status
-
-    props = {
-        "State": {"status": {"name": "Active"}}
-    }
-    assert _get_status(props, "State") == "Active"
-
-    # Missing property
-    assert _get_status(props, "Missing") is None
-
-    # Null status
-    props2 = {"State": {"status": None}}
-    assert _get_status(props2, "State") is None
