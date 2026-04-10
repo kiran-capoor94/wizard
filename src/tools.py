@@ -1,13 +1,10 @@
-import logging
-from functools import lru_cache
-
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import CurrentContext
 from sqlmodel import select
 
-from .config import settings
 from .database import get_session
-from .integrations import JiraClient, NotionClient
+from .deps import meeting_repo, note_repo, security, sync_service, task_repo, writeback
 from .mcp_instance import mcp
 from .models import (
     Meeting,
@@ -21,7 +18,6 @@ from .models import (
     TaskStatus,
     WizardSession,
 )
-from .repositories import MeetingRepository, NoteRepository, TaskRepository
 from .schemas import (
     CreateTaskResponse,
     GetMeetingResponse,
@@ -34,71 +30,6 @@ from .schemas import (
     TaskStartResponse,
     UpdateTaskStatusResponse,
 )
-from .security import SecurityService
-from .services import SyncService, WriteBackService
-
-logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Cached dependency singletons — one instance per process.
-# Tests call <func>.cache_clear() to reset.
-# Config changes require restart.
-# ---------------------------------------------------------------------------
-
-
-@lru_cache
-def jira_client() -> JiraClient:
-    return JiraClient(
-        base_url=settings.jira.base_url,
-        token=settings.jira.token,
-        project_key=settings.jira.project_key,
-    )
-
-
-@lru_cache
-def notion_client() -> NotionClient:
-    return NotionClient(
-        token=settings.notion.token,
-        daily_page_id=settings.notion.daily_page_id,
-        tasks_db_id=settings.notion.tasks_db_id,
-        meetings_db_id=settings.notion.meetings_db_id,
-    )
-
-
-@lru_cache
-def security() -> SecurityService:
-    return SecurityService(
-        allowlist=settings.scrubbing.allowlist,
-        enabled=settings.scrubbing.enabled,
-    )
-
-
-@lru_cache
-def sync_service() -> SyncService:
-    return SyncService(
-        jira=jira_client(), notion=notion_client(), security=security()
-    )
-
-
-@lru_cache
-def writeback() -> WriteBackService:
-    return WriteBackService(jira=jira_client(), notion=notion_client())
-
-
-@lru_cache
-def task_repo() -> TaskRepository:
-    return TaskRepository()
-
-
-@lru_cache
-def meeting_repo() -> MeetingRepository:
-    return MeetingRepository()
-
-
-@lru_cache
-def note_repo() -> NoteRepository:
-    return NoteRepository()
 
 
 # ---------------------------------------------------------------------------
@@ -133,139 +64,156 @@ async def session_start(ctx: Context = CurrentContext()) -> SessionStartResponse
 
 def task_start(task_id: int) -> TaskStartResponse:
     """Returns full task context + all prior notes for compounding context."""
-    with get_session() as db:
-        task = task_repo().get_by_id(db, task_id)
-        task_ctx = task_repo().build_task_context(db, task)
+    try:
+        with get_session() as db:
+            task = task_repo().get_by_id(db, task_id)
+            task_ctx = task_repo().build_task_context(db, task)
 
-        notes = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
-        notes_by_type: dict[str, int] = {}
-        for note in notes:
-            key = note.note_type.value
-            notes_by_type[key] = notes_by_type.get(key, 0) + 1
+            notes = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
+            notes_by_type: dict[str, int] = {}
+            for note in notes:
+                key = note.note_type.value
+                notes_by_type[key] = notes_by_type.get(key, 0) + 1
 
-        prior_notes: list[NoteDetail] = []
-        for n in notes:
-            assert n.id is not None
-            prior_notes.append(
-                NoteDetail(
-                    id=n.id,
-                    note_type=n.note_type,
-                    content=n.content,
-                    created_at=n.created_at,
-                    source_id=n.source_id,
+            prior_notes: list[NoteDetail] = []
+            for n in notes:
+                assert n.id is not None
+                prior_notes.append(
+                    NoteDetail(
+                        id=n.id,
+                        note_type=n.note_type,
+                        content=n.content,
+                        created_at=n.created_at,
+                        source_id=n.source_id,
+                    )
                 )
-            )
 
-        return TaskStartResponse(
-            task=task_ctx,
-            compounding=len(notes) > 0,
-            notes_by_type=notes_by_type,
-            prior_notes=prior_notes,
-        )
+            return TaskStartResponse(
+                task=task_ctx,
+                compounding=len(notes) > 0,
+                notes_by_type=notes_by_type,
+                prior_notes=prior_notes,
+            )
+    except ValueError as e:
+        raise ToolError(str(e)) from e
 
 
 def save_note(task_id: int, note_type: NoteType, content: str) -> SaveNoteResponse:
     """Scrubs and persists a note. note_type: investigation|decision|docs|learnings|session_summary."""
-    with get_session() as db:
-        task = task_repo().get_by_id(db, task_id)
-        clean = security().scrub(content).clean
-        note = Note(
-            note_type=note_type,
-            content=clean,
-            task_id=task.id,
-            source_id=task.source_id,
-        )
-        saved = note_repo().save(db, note)
-        assert saved.id is not None
-        return SaveNoteResponse(note_id=saved.id)
+    try:
+        with get_session() as db:
+            task = task_repo().get_by_id(db, task_id)
+            clean = security().scrub(content).clean
+            note = Note(
+                note_type=note_type,
+                content=clean,
+                task_id=task.id,
+                source_id=task.source_id,
+            )
+            saved = note_repo().save(db, note)
+            assert saved.id is not None
+            return SaveNoteResponse(note_id=saved.id)
+    except ValueError as e:
+        raise ToolError(str(e)) from e
 
 
-def update_task_status(task_id: int, new_status: TaskStatus) -> UpdateTaskStatusResponse:
+def update_task_status(
+    task_id: int, new_status: TaskStatus
+) -> UpdateTaskStatusResponse:
     """Updates task status locally and attempts Jira and Notion write-back."""
-    with get_session() as db:
-        task = task_repo().get_by_id(db, task_id)
-        task.status = new_status
-        db.add(task)
-        db.flush()
-        db.refresh(task)
-        assert task.id is not None
+    try:
+        with get_session() as db:
+            task = task_repo().get_by_id(db, task_id)
+            task.status = new_status
+            db.add(task)
+            db.flush()
+            db.refresh(task)
+            assert task.id is not None
 
-        jira_wb = writeback().push_task_status(task)
-        notion_wb = writeback().push_task_status_to_notion(task)
+            jira_wb = writeback().push_task_status(task)
+            notion_wb = writeback().push_task_status_to_notion(task)
 
-        return UpdateTaskStatusResponse(
-            task_id=task.id,
-            new_status=task.status,
-            jira_write_back=jira_wb,
-            notion_write_back=notion_wb,
-        )
+            return UpdateTaskStatusResponse(
+                task_id=task.id,
+                new_status=task.status,
+                jira_write_back=jira_wb,
+                notion_write_back=notion_wb,
+            )
+    except ValueError as e:
+        raise ToolError(str(e)) from e
 
 
 def get_meeting(meeting_id: int) -> GetMeetingResponse:
     """Returns meeting transcript and linked open tasks."""
-    with get_session() as db:
-        meeting = meeting_repo().get_by_id(db, meeting_id)
-        assert meeting.id is not None
+    try:
+        with get_session() as db:
+            meeting = meeting_repo().get_by_id(db, meeting_id)
+            assert meeting.id is not None
 
-        linked_tasks = [
-            task_repo().build_task_context(db, t)
-            for t in meeting.tasks
-            if t.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
-        ]
+            linked_tasks = [
+                task_repo().build_task_context(db, t)
+                for t in meeting.tasks
+                if t.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
+            ]
 
-        return GetMeetingResponse(
-            meeting_id=meeting.id,
-            title=meeting.title,
-            category=meeting.category,
-            content=meeting.content,
-            already_summarised=meeting.summary is not None,
-            existing_summary=meeting.summary,
-            open_tasks=linked_tasks,
-        )
+            return GetMeetingResponse(
+                meeting_id=meeting.id,
+                title=meeting.title,
+                category=meeting.category,
+                content=meeting.content,
+                already_summarised=meeting.summary is not None,
+                existing_summary=meeting.summary,
+                open_tasks=linked_tasks,
+            )
+    except ValueError as e:
+        raise ToolError(str(e)) from e
 
 
 def save_meeting_summary(
     meeting_id: int, session_id: int, summary: str, task_ids: list[int] | None = None
 ) -> SaveMeetingSummaryResponse:
     """Scrubs and persists the LLM-generated meeting summary. Attempts Notion write-back."""
-    with get_session() as db:
-        meeting = meeting_repo().get_by_id(db, meeting_id)
-        assert meeting.id is not None
+    try:
+        with get_session() as db:
+            meeting = meeting_repo().get_by_id(db, meeting_id)
+            assert meeting.id is not None
 
-        clean_summary = security().scrub(summary).clean
-        meeting.summary = clean_summary
-        db.add(meeting)
+            clean_summary = security().scrub(summary).clean
+            meeting.summary = clean_summary
+            db.add(meeting)
 
-        note = Note(
-            note_type=NoteType.DOCS,
-            content=clean_summary,
-            meeting_id=meeting.id,
-            session_id=session_id,
-        )
-        saved = note_repo().save(db, note)
-        assert saved.id is not None
+            note = Note(
+                note_type=NoteType.DOCS,
+                content=clean_summary,
+                meeting_id=meeting.id,
+                session_id=session_id,
+            )
+            saved = note_repo().save(db, note)
+            assert saved.id is not None
 
-        if task_ids:
-            for tid in task_ids:
-                existing_link = db.exec(
-                    select(MeetingTasks).where(
-                        MeetingTasks.meeting_id == meeting.id,
-                        MeetingTasks.task_id == tid,
-                    )
-                ).first()
-                if not existing_link:
-                    db.add(MeetingTasks(meeting_id=meeting.id, task_id=tid))
+            if task_ids:
+                for tid in task_ids:
+                    existing_link = db.exec(
+                        select(MeetingTasks).where(
+                            MeetingTasks.meeting_id == meeting.id,
+                            MeetingTasks.task_id == tid,
+                        )
+                    ).first()
+                    if not existing_link:
+                        db.add(MeetingTasks(meeting_id=meeting.id, task_id=tid))
 
-        db.flush()
-        wb_result = writeback().push_meeting_summary(meeting)
+            db.flush()
+            wb_result = writeback().push_meeting_summary(meeting)
 
-        linked_task_ids = [t.id for t in meeting.tasks if t.id is not None]
+            linked_task_ids = [t.id for t in meeting.tasks if t.id is not None]
 
-        return SaveMeetingSummaryResponse(
-            note_id=saved.id,
-            linked_task_ids=linked_task_ids,
-            notion_write_back=wb_result,
-        )
+            return SaveMeetingSummaryResponse(
+                note_id=saved.id,
+                linked_task_ids=linked_task_ids,
+                notion_write_back=wb_result,
+            )
+    except ValueError as e:
+        raise ToolError(str(e)) from e
 
 
 async def session_end(
@@ -275,7 +223,7 @@ async def session_end(
     with get_session() as db:
         session = db.get(WizardSession, session_id)
         if session is None:
-            raise ValueError(f"Session {session_id} not found")
+            raise ToolError(f"Session {session_id} not found")
 
         await ctx.info("Saving session summary")
         clean_summary = security().scrub(summary).clean

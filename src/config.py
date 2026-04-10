@@ -8,7 +8,9 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 
 class JsonConfigSettingsSource(PydanticBaseSettingsSource):
-    def get_field_value(self, field, field_name) -> tuple[Any, str, bool]:  # noqa: ARG002
+    def get_field_value(
+        self, field, field_name  # noqa: ARG002
+    ) -> tuple[Any, str, bool]:
         return None, field_name, False
 
     def __call__(self) -> dict[str, Any]:

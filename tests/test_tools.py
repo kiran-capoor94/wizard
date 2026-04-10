@@ -1,8 +1,9 @@
 import asyncio
-from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.helpers import mock_session
 
 
 def _mock_context():
@@ -14,22 +15,13 @@ def _mock_context():
     return ctx
 
 
-def _mock_session(db_session):
-    """Context manager that yields the test db_session instead of creating a new one."""
-    @contextmanager
-    def _inner():
-        yield db_session
-        db_session.flush()
-    return _inner
-
-
 def _patch_tools(db_session, sync=None, wb=None):
     """Patch tools module dependencies with test doubles. Returns (patches, sync_mock, wb_mock)."""
     sync_mock = sync or MagicMock()
     wb_mock = wb or MagicMock()
 
     patches = {
-        "get_session": _mock_session(db_session),
+        "get_session": mock_session(db_session),
         "sync_service": lambda: sync_mock,
         "writeback": lambda: wb_mock,
     }
@@ -131,10 +123,11 @@ def test_task_start_returns_compounding_false_when_no_notes(db_session):
 
 
 def test_task_start_raises_when_task_not_found(db_session):
+    from fastmcp.exceptions import ToolError
     from src.tools import task_start
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("src.tools", **patches):
-        with pytest.raises(ValueError, match="Task 999 not found"):
+        with pytest.raises(ToolError, match="Task 999 not found"):
             task_start(task_id=999)
 
 
