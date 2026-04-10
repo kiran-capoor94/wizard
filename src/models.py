@@ -1,13 +1,16 @@
 import datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import ConfigDict
 from sqlmodel import Field, Relationship, SQLModel
 
 
 class TimestampMixin(SQLModel):
-    model_config = ConfigDict(validate_default=True, validate_assignment=True)
+    # SQLModel metaclass types model_config as SQLModelConfig — ConfigDict is valid at
+    # runtime but mismatches the declared type. Upstream typing gap in sqlmodel.
+    model_config = ConfigDict(  # pyright: ignore[reportAssignmentType, reportIncompatibleVariableOverride]
+        validate_default=True, validate_assignment=True
+    )
 
     created_at: datetime.datetime = Field(
         default_factory=datetime.datetime.now, index=True
@@ -63,64 +66,66 @@ class MeetingTasks(SQLModel, table=True):
 
 
 class Task(TimestampMixin, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     name: str
-    due_date: Optional[datetime.datetime] = None
+    due_date: datetime.datetime | None = None
     priority: TaskPriority = TaskPriority.MEDIUM
     category: TaskCategory = TaskCategory.ISSUE
     status: TaskStatus = TaskStatus.TODO
-    notion_id: Optional[str] = Field(default=None, index=True)
+    notion_id: str | None = Field(default=None, index=True)
     meetings: list["Meeting"] = Relationship(
         back_populates="tasks", link_model=MeetingTasks
     )
-    source_id: Optional[str] = Field(
+    source_id: str | None = Field(
         default=None,
         index=True,
         unique=True,
         description="identifier of the external entity this task originated from",
     )
-    source_type: Optional[str] = Field(default=None, index=True)
-    source_url: Optional[str] = Field(default=None)
+    source_type: str | None = Field(default=None, index=True)
+    source_url: str | None = Field(default=None)
 
 
 class Meeting(TimestampMixin, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     title: str
     content: str
-    notion_id: Optional[str] = Field(default=None, index=True)
+    notion_id: str | None = Field(default=None, index=True)
     category: MeetingCategory = MeetingCategory.GENERAL
-    summary: Optional[str] = None
+    summary: str | None = None
     tasks: list[Task] = Relationship(back_populates="meetings", link_model=MeetingTasks)
-    source_id: Optional[str] = Field(
+    source_id: str | None = Field(
         default=None,
         index=True,
         unique=True,
         description="identifier of the external entity this meeting relates to",
     )
-    source_type: Optional[str] = Field(default=None, index=True)
-    source_url: Optional[str] = Field(default=None)
+    source_type: str | None = Field(default=None, index=True)
+    source_url: str | None = Field(default=None)
 
 
 class WizardSession(TimestampMixin, table=True):
-    __tablename__ = "wizardsession"
+    # SQLAlchemy types __tablename__ as declared_attr — string literal is valid at
+    # runtime but mismatches the declared type. Upstream typing gap in sqlalchemy.
+    __tablename__ = "wizardsession"  # pyright: ignore[reportAssignmentType, reportIncompatibleVariableOverride]
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    summary: Optional[str] = None
+    id: int | None = Field(default=None, primary_key=True)
+    summary: str | None = None
     notes: list["Note"] = Relationship(back_populates="session")
 
 
 class Note(TimestampMixin, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     note_type: NoteType = Field(index=True)
     content: str
-    source_id: Optional[str] = Field(
+    source_id: str | None = Field(
         default=None,
         index=True,
         description="identifier of the external entity this note is about",
     )
-    source_type: Optional[str] = Field(default=None, index=True)
-    session_id: Optional[int] = Field(default=None, foreign_key="wizardsession.id")
-    source_url: Optional[str] = Field(default=None)
-    task_id: Optional[int] = Field(default=None, foreign_key="task.id")
-    meeting_id: Optional[int] = Field(default=None, foreign_key="meeting.id")
-    session: Optional[WizardSession] = Relationship(back_populates="notes")
+    source_type: str | None = Field(default=None, index=True)
+    session_id: int | None = Field(default=None, foreign_key="wizardsession.id")
+    source_url: str | None = Field(default=None)
+    task_id: int | None = Field(default=None, foreign_key="task.id")
+    meeting_id: int | None = Field(default=None, foreign_key="meeting.id")
+    session: WizardSession | None = Relationship(back_populates="notes")
