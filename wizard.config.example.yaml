@@ -1,0 +1,31 @@
+# wizard.config.example.yaml
+# Copy this file to wizard.config.yaml and fill in your tokens.
+# wizard.config.yaml is gitignored — never commit real tokens.
+
+integrations:
+  notion:
+    token: your-notion-integration-token
+  jira:
+    token: your-jira-api-token
+    project: PD        # Jira project key
+  github:
+    token: your-github-personal-access-token
+  krisp:
+    method: mcp        # only supported method in v2
+
+llm:
+  adapter: claude          # claude | openai | gemini | ollama
+  model: claude-sonnet-4-5
+  api_key: your-llm-api-key
+
+embedding:
+  adapter: ollama          # fixed for v2
+  model: nomic-embed-text  # vector(768)
+  dimensions: 768
+
+ide:
+  primary: neovim      # neovim | vscode | claude-desktop
+
+security:
+  pii_scrubbing: true
+  encryption_at_rest: true

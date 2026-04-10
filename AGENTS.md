@@ -159,7 +159,7 @@ Built in 5 sequential steps. Each proves a contract before the next adds complex
 | 4 | LLM output pipeline: process → transform → validate → store → materialise | Invalid output rejected, correct output retrievable |
 | 5 | All integrations, task-type context, CodeChunkEmbedding, CLI, evals | Full session flow end-to-end |
 
-Current status: **Step 2 in progress** — Step 1 complete, Step 2 (services layer) in progress.
+Current status: **Step 5 not started** — Steps 1-4 complete. Step 4 (LLM output pipeline) proved: valid output stored and retrievable, invalid output rejected, wrong attribution detected via pgvector.
 
 ## Tech Stack
 
