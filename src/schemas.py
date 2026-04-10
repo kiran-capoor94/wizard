@@ -35,6 +35,35 @@ class NotionMeetingData(BaseModel):
     date: str | None = None
 
 
+# --- Resource response models (read-only data exposed via FastMCP URIs) ---
+
+
+class SessionResource(BaseModel):
+    session_id: Optional[int]
+    open_task_count: int
+    blocked_task_count: int
+
+
+class TaskContextResource(BaseModel):
+    task: "TaskContext"
+    notes: list["NoteDetail"]
+
+
+class OpenTasksResource(BaseModel):
+    tasks: list["TaskContext"]
+
+
+class BlockedTasksResource(BaseModel):
+    tasks: list["TaskContext"]
+
+
+class ConfigResource(BaseModel):
+    jira_enabled: bool
+    notion_enabled: bool
+    scrubbing_enabled: bool
+    database_path: str
+
+
 class SourceSyncStatus(BaseModel):
     source: str
     ok: bool
