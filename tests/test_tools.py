@@ -205,3 +205,114 @@ def test_update_task_status_persists_and_writebacks(db_session):
     # Fetch fresh from DB after tool closes session
     task_fresh = db_session.get(Task, task_id)
     assert task_fresh.status == TaskStatus.DONE
+
+
+def test_get_meeting_returns_content_and_open_tasks(db_session):
+    from src.tools import get_meeting
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import Task, TaskStatus, Meeting, MeetingTasks
+
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    repo = NoteRepository()
+    security = SecurityService()
+
+    task = Task(name="fix auth", status=TaskStatus.IN_PROGRESS)
+    meeting = Meeting(title="standup", content="we discussed fix auth")
+    db_session.add(task)
+    db_session.add(meeting)
+    db_session.commit()
+    db_session.refresh(task)
+    db_session.refresh(meeting)
+
+    link = MeetingTasks(meeting_id=meeting.id, task_id=task.id)
+    db_session.add(link)
+    db_session.commit()
+
+    import src.tools
+    src.tools._get_deps = lambda: (sync, wb, repo, security)
+    src.tools._get_db = lambda: db_session
+
+    result = get_meeting(meeting_id=meeting.id)
+
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert data["meeting_id"] == meeting.id
+    assert data["already_summarised"] is False
+    assert len(data["open_tasks"]) == 1
+
+
+def test_save_meeting_summary_scrubs_and_persists(db_session):
+    from src.tools import save_meeting_summary
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import WizardSession, Meeting, Note
+
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    repo = NoteRepository()
+    security = SecurityService()
+    wb.push_meeting_summary.return_value = True
+
+    session = WizardSession()
+    meeting = Meeting(title="standup", content="notes")
+    db_session.add(session)
+    db_session.add(meeting)
+    db_session.commit()
+    db_session.refresh(session)
+    db_session.refresh(meeting)
+
+    import src.tools
+    src.tools._get_deps = lambda: (sync, wb, repo, security)
+    src.tools._get_db = lambda: db_session
+
+    result = save_meeting_summary(
+        meeting_id=meeting.id,
+        session_id=session.id,
+        summary="patient 943 476 5919 was discussed",
+    )
+
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert "note_id" in data
+
+    saved = db_session.get(Note, data["note_id"])
+    assert "943 476 5919" not in saved.content
+    assert "[NHS_ID_1]" in saved.content
+
+
+def test_session_end_saves_summary_note(db_session):
+    from src.tools import session_end
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import WizardSession, Note, NoteType
+
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    repo = NoteRepository()
+    security = SecurityService()
+    wb.push_session_summary.return_value = True
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    session_id = session.id
+    db_session.refresh(session)
+
+    import src.tools
+    src.tools._get_deps = lambda: (sync, wb, repo, security)
+    src.tools._get_db = lambda: db_session
+
+    result = session_end(
+        session_id=session_id,
+        summary="wrapped up today's work",
+    )
+
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert "note_id" in data
+
+    saved = db_session.get(Note, data["note_id"])
+    assert saved.note_type == NoteType.SESSION_SUMMARY
+    assert saved.session_id == session_id
