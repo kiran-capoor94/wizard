@@ -1,6 +1,8 @@
 from sqlmodel import col, select
 
+from .config import settings
 from .database import get_session
+from .mcp_instance import mcp
 from .models import WizardSession
 from .repositories import NoteRepository, TaskRepository
 from .schemas import (
@@ -12,8 +14,8 @@ from .schemas import (
     TaskContextResource,
 )
 
-_task_repo = TaskRepository()
-_note_repo = NoteRepository()
+task_repo = TaskRepository()
+note_repo = NoteRepository()
 
 
 def current_session() -> SessionResource:
@@ -27,32 +29,34 @@ def current_session() -> SessionResource:
         )
         session = db.exec(stmt).first()
         if session is None:
-            return SessionResource(session_id=None, open_task_count=0, blocked_task_count=0)
+            return SessionResource(
+                session_id=None, open_task_count=0, blocked_task_count=0
+            )
         return SessionResource(
             session_id=session.id,
-            open_task_count=len(_task_repo.get_open_task_contexts(db)),
-            blocked_task_count=len(_task_repo.get_blocked_task_contexts(db)),
+            open_task_count=len(task_repo.get_open_task_contexts(db)),
+            blocked_task_count=len(task_repo.get_blocked_task_contexts(db)),
         )
 
 
 def open_tasks() -> OpenTasksResource:
     """All open tasks with status and priority."""
     with get_session() as db:
-        return OpenTasksResource(tasks=_task_repo.get_open_task_contexts(db))
+        return OpenTasksResource(tasks=task_repo.get_open_task_contexts(db))
 
 
 def blocked_tasks() -> BlockedTasksResource:
     """All blocked tasks."""
     with get_session() as db:
-        return BlockedTasksResource(tasks=_task_repo.get_blocked_task_contexts(db))
+        return BlockedTasksResource(tasks=task_repo.get_blocked_task_contexts(db))
 
 
 def task_context(task_id: int) -> TaskContextResource:
     """Full task detail — metadata, notes, history."""
     with get_session() as db:
-        task = _task_repo.get_by_id(db, task_id)
-        task_ctx = _task_repo.build_task_context(db, task)
-        notes = _note_repo.get_for_task(db, task_id=task.id, source_id=task.source_id)
+        task = task_repo.get_by_id(db, task_id)
+        task_ctx = task_repo.build_task_context(db, task)
+        notes = note_repo.get_for_task(db, task_id=task.id, source_id=task.source_id)
         note_details = [
             NoteDetail(
                 id=n.id,
@@ -69,8 +73,6 @@ def task_context(task_id: int) -> TaskContextResource:
 
 def wizard_config() -> ConfigResource:
     """Current config — enabled integrations, active sources, database path."""
-    from .config import settings
-
     return ConfigResource(
         jira_enabled=bool(settings.jira.token),
         notion_enabled=bool(settings.notion.token),
@@ -79,18 +81,8 @@ def wizard_config() -> ConfigResource:
     )
 
 
-# ---------------------------------------------------------------------------
-# Register resources with MCP
-# ---------------------------------------------------------------------------
-
-def _get_mcp():
-    from .mcp_instance import mcp
-    return mcp
-
-
-_mcp = _get_mcp()
-_mcp.resource("wizard://session/current")(current_session)
-_mcp.resource("wizard://tasks/open")(open_tasks)
-_mcp.resource("wizard://tasks/blocked")(blocked_tasks)
-_mcp.resource("wizard://tasks/{task_id}/context")(task_context)
-_mcp.resource("wizard://config")(wizard_config)
+mcp.resource("wizard://session/current")(current_session)
+mcp.resource("wizard://tasks/open")(open_tasks)
+mcp.resource("wizard://tasks/blocked")(blocked_tasks)
+mcp.resource("wizard://tasks/{task_id}/context")(task_context)
+mcp.resource("wizard://config")(wizard_config)
