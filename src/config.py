@@ -1,10 +1,13 @@
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
+
+logger = logging.getLogger(__name__)
 
 
 class JsonConfigSettingsSource(PydanticBaseSettingsSource):
@@ -20,8 +23,11 @@ class JsonConfigSettingsSource(PydanticBaseSettingsSource):
         )
         try:
             with open(config_file) as f:
-                return json.load(f)
+                data = json.load(f)
+            logger.info("Loaded config from %s", config_file)
+            return data
         except FileNotFoundError:
+            logger.info("No config file at %s, using defaults", config_file)
             return {}
 
 

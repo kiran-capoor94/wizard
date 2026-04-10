@@ -1,3 +1,5 @@
+import logging
+
 from sqlmodel import Session, case, col, func, select, or_
 
 from .models import (
@@ -8,6 +10,8 @@ from .models import (
     TaskStatus,
 )
 from .schemas import MeetingContext, TaskContext
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -64,6 +68,7 @@ class TaskRepository:
     def get_by_id(self, db: Session, task_id: int) -> Task:
         task = db.get(Task, task_id)
         if task is None:
+            logger.warning("Task %d not found", task_id)
             raise ValueError(f"Task {task_id} not found")
         return task
 
@@ -130,6 +135,7 @@ class MeetingRepository:
     def get_by_id(self, db: Session, meeting_id: int) -> Meeting:
         meeting = db.get(Meeting, meeting_id)
         if meeting is None:
+            logger.warning("Meeting %d not found", meeting_id)
             raise ValueError(f"Meeting {meeting_id} not found")
         return meeting
 
