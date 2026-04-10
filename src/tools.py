@@ -68,18 +68,7 @@ def task_start(task_id: int) -> TaskStartResponse:
                 key = note.note_type.value
                 notes_by_type[key] = notes_by_type.get(key, 0) + 1
 
-            prior_notes: list[NoteDetail] = []
-            for n in notes:
-                assert n.id is not None
-                prior_notes.append(
-                    NoteDetail(
-                        id=n.id,
-                        note_type=n.note_type,
-                        content=n.content,
-                        created_at=n.created_at,
-                        source_id=n.source_id,
-                    )
-                )
+            prior_notes = [NoteDetail.from_model(n) for n in notes]
 
             return TaskStartResponse(
                 task=task_ctx,
