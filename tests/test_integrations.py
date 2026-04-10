@@ -618,3 +618,14 @@ def test_extract_jira_key_from_url():
     assert _extract_jira_key(None) is None
     assert _extract_jira_key("") is None
     assert _extract_jira_key("not-a-url") is None
+
+
+def test_extract_krisp_id_from_url():
+    """_extract_krisp_id should extract last path segment from Krisp URL"""
+    from src.integrations import _extract_krisp_id
+
+    assert _extract_krisp_id("https://krisp.ai/m/abc123") == "abc123"
+    assert _extract_krisp_id("https://krisp.ai/m/abc123/") == "abc123"
+    assert _extract_krisp_id("https://krisp.ai/m/abc123?foo=bar") == "abc123"
+    assert _extract_krisp_id(None) is None
+    assert _extract_krisp_id("") is None

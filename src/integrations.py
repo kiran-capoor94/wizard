@@ -100,6 +100,18 @@ def _extract_jira_key(url: str | None) -> str | None:
     return match.group(1) if match else None
 
 
+def _extract_krisp_id(url: str | None) -> str | None:
+    """Extract meeting ID from last path segment of a Krisp URL."""
+    if not url:
+        return None
+    try:
+        segment = url.rstrip("/").split("/")[-1].split("?")[0].strip()
+        return segment or None
+    except Exception:
+        logger.warning("Failed to extract krisp_id from URL: %s", url)
+        return None
+
+
 # ============================================================================
 # NotionClient
 # ============================================================================
