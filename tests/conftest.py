@@ -14,9 +14,11 @@ def db_session(monkeypatch, tmp_path):
     for mod in [
         "src.config",
         "src.database",
+        "src.integrations",
         "src.models",
         "src.repositories",
         "src.schemas",
+        "src.services",
         "src.tools",
         "src.resources",
     ]:
