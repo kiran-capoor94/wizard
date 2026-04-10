@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 import logging
 import re
+from typing import TYPE_CHECKING
 
 import httpx
 from notion_client import Client as NotionSdkClient
 from notion_client.errors import APIResponseError
 from notion_client.helpers import collect_paginated_api
+
+if TYPE_CHECKING:
+    from .schemas import JiraTaskData, NotionMeetingData, NotionTaskData
 
 _HTTPX_TIMEOUT = httpx.Timeout(10.0)
 
@@ -32,7 +38,9 @@ class JiraClient:
             else None
         )
 
-    def fetch_open_tasks(self) -> list[dict]:
+    def fetch_open_tasks(self) -> list[JiraTaskData]:
+        from .schemas import JiraTaskData
+
         if self._client is None:
             raise ConfigurationError("Jira token not configured")
         try:
@@ -41,14 +49,14 @@ class JiraClient:
             response.raise_for_status()
             issues = response.json().get("issues", [])
             return [
-                {
-                    "key": issue["key"],
-                    "summary": issue["fields"]["summary"],
-                    "status": issue["fields"]["status"]["name"],
-                    "priority": issue["fields"]["priority"]["name"],
-                    "issue_type": issue["fields"]["issuetype"]["name"],
-                    "url": issue["fields"].get("self", ""),
-                }
+                JiraTaskData(
+                    key=issue["key"],
+                    summary=issue["fields"]["summary"],
+                    status=issue["fields"]["status"]["name"],
+                    priority=issue["fields"]["priority"]["name"],
+                    issue_type=issue["fields"]["issuetype"]["name"],
+                    url=issue["fields"].get("self", ""),
+                )
                 for issue in issues
             ]
         except httpx.HTTPError as e:
@@ -170,8 +178,10 @@ class NotionClient:
             body=kwargs,
         )
 
-    def fetch_tasks(self) -> list[dict]:
-        """Query Tasks DB, return normalised dicts with keys: notion_id, name, status, priority, due_date, jira_url, jira_key"""
+    def fetch_tasks(self) -> list[NotionTaskData]:
+        """Query Tasks DB, return normalised NotionTaskData models."""
+        from .schemas import NotionTaskData
+
         if not self._token:
             raise ConfigurationError("Notion token not configured")
 
@@ -184,23 +194,25 @@ class NotionClient:
                 page_id = page.get("id")
                 props = page.get("properties", {})
 
-                task = {
-                    "notion_id": page_id,
-                    "name": _get_title(props, "Task"),
-                    "status": _get_status(props, "Status"),
-                    "priority": _get_select(props, "Priority"),
-                    "due_date": _get_date_start(props, "Due date"),
-                    "jira_url": _get_url(props, "Jira"),
-                    "jira_key": _extract_jira_key(_get_url(props, "Jira")),
-                }
+                task = NotionTaskData(
+                    notion_id=page_id,
+                    name=_get_title(props, "Task"),
+                    status=_get_status(props, "Status"),
+                    priority=_get_select(props, "Priority"),
+                    due_date=_get_date_start(props, "Due date"),
+                    jira_url=_get_url(props, "Jira"),
+                    jira_key=_extract_jira_key(_get_url(props, "Jira")),
+                )
                 tasks.append(task)
             return tasks
         except APIResponseError as e:
             logger.warning("Notion fetch_tasks failed: %s", e)
             return []
 
-    def fetch_meetings(self) -> list[dict]:
-        """Query Meeting Notes DB, return normalised dicts with keys: notion_id, title, categories, summary, krisp_url, date"""
+    def fetch_meetings(self) -> list[NotionMeetingData]:
+        """Query Meeting Notes DB, return normalised NotionMeetingData models."""
+        from .schemas import NotionMeetingData
+
         if not self._token:
             raise ConfigurationError("Notion token not configured")
 
@@ -213,14 +225,14 @@ class NotionClient:
                 page_id = page.get("id")
                 props = page.get("properties", {})
 
-                meeting = {
-                    "notion_id": page_id,
-                    "title": _get_title(props, "Meeting name"),
-                    "categories": _get_multi_select(props, "Category") or [],
-                    "summary": _get_rich_text(props, "Summary"),
-                    "krisp_url": _get_url(props, "Krisp URL"),
-                    "date": _get_date_start(props, "Date"),
-                }
+                meeting = NotionMeetingData(
+                    notion_id=page_id,
+                    title=_get_title(props, "Meeting name"),
+                    categories=_get_multi_select(props, "Category") or [],
+                    summary=_get_rich_text(props, "Summary"),
+                    krisp_url=_get_url(props, "Krisp URL"),
+                    date=_get_date_start(props, "Date"),
+                )
                 meetings.append(meeting)
             return meetings
         except APIResponseError as e:
