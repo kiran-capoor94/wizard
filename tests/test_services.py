@@ -88,3 +88,70 @@ def test_sync_scrubs_content_before_storing(db_session):
     assert "john@example.com" not in meetings[0].content
     assert "943 476 5919" not in meetings[0].content
     assert "[EMAIL_1]" in meetings[0].title or "[EMAIL_1]" in meetings[0].content
+
+
+def test_push_task_status_calls_jira(db_session):
+    from src.services import WriteBackService
+    from src.models import Task, TaskStatus
+    from src.integrations import JiraClient, NotionClient
+    jira = MagicMock(spec=JiraClient)
+    notion = MagicMock(spec=NotionClient)
+    jira.update_task_status.return_value = True
+
+    svc = WriteBackService(jira=jira, notion=notion)
+    task = Task(name="fix", source_id="ENG-1", status=TaskStatus.DONE)
+
+    result = svc.push_task_status(task)
+
+    assert result is True
+    jira.update_task_status.assert_called_once_with("ENG-1", TaskStatus.DONE)
+
+
+def test_push_task_status_skips_when_no_source_id(db_session):
+    from src.services import WriteBackService
+    from src.models import Task, TaskStatus
+    from src.integrations import JiraClient, NotionClient
+    jira = MagicMock(spec=JiraClient)
+    notion = MagicMock(spec=NotionClient)
+
+    svc = WriteBackService(jira=jira, notion=notion)
+    task = Task(name="local-only", source_id=None, status=TaskStatus.DONE)
+
+    result = svc.push_task_status(task)
+
+    assert result is False
+    jira.update_task_status.assert_not_called()
+
+
+def test_push_meeting_summary_calls_notion(db_session):
+    from src.services import WriteBackService
+    from src.models import Meeting
+    from src.integrations import JiraClient, NotionClient
+    jira = MagicMock(spec=JiraClient)
+    notion = MagicMock(spec=NotionClient)
+    notion.update_page_property.return_value = True
+
+    svc = WriteBackService(jira=jira, notion=notion)
+    meeting = Meeting(title="standup", content="notes", notion_id="page-abc", summary="summary text")
+
+    result = svc.push_meeting_summary(meeting)
+
+    assert result is True
+    notion.update_page_property.assert_called_once_with("page-abc", "Summary", "summary text")
+
+
+def test_push_session_summary_calls_notion_daily_page(db_session):
+    from src.services import WriteBackService
+    from src.models import WizardSession
+    from src.integrations import JiraClient, NotionClient
+    jira = MagicMock(spec=JiraClient)
+    notion = MagicMock(spec=NotionClient)
+    notion.update_daily_page.return_value = True
+
+    svc = WriteBackService(jira=jira, notion=notion)
+    session = WizardSession(summary="today's session summary")
+
+    result = svc.push_session_summary(session)
+
+    assert result is True
+    notion.update_daily_page.assert_called_once_with("today's session summary")
