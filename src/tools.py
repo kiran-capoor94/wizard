@@ -1,5 +1,6 @@
 import logging
 from sqlmodel import Session, select
+from .schemas import SaveNoteResponse, UpdateTaskStatusResponse
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,59 @@ def task_start(task_id: int) -> dict:
     ).model_dump(mode="json")
 
 
+def save_note(task_id: int, note_type: str, content: str) -> dict:
+    """Scrubs and persists a note. note_type: investigation|decision|docs|learnings|session_summary."""
+    from .models import Note, NoteType, Task
+
+    _sync, _wb, repo, security = _get_deps()
+    db = _get_db()
+    task = db.get(Task, task_id)
+    if task is None:
+        db.close()
+        raise ValueError(f"Task {task_id} not found")
+
+    clean = security.scrub(content).clean
+    note = Note(
+        note_type=NoteType(note_type),
+        content=clean,
+        task_id=task.id,
+        source_id=task.source_id,
+    )
+    saved = repo.save(db, note)
+    db.close()
+    return SaveNoteResponse(note_id=saved.id).model_dump(mode="json")
+
+
+def update_task_status(task_id: int, new_status: str) -> dict:
+    """Updates task status locally and attempts Jira write-back. Always commits local state first."""
+    from .models import Task, TaskStatus
+
+    _sync, wb, _repo, _security = _get_deps()
+    db = _get_db()
+    task = db.get(Task, task_id)
+    if task is None:
+        db.close()
+        raise ValueError(f"Task {task_id} not found")
+
+    task.status = TaskStatus(new_status)
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    write_back_ok = wb.push_task_status(task)
+
+    db.close()
+
+    return UpdateTaskStatusResponse(
+        task_id=task.id,
+        new_status=task.status,
+        write_back_succeeded=write_back_ok,
+    ).model_dump(mode="json")
+
+
 # Register tools with MCP
 _mcp = _get_mcp()
 _mcp.tool()(session_start)
 _mcp.tool()(task_start)
+_mcp.tool()(save_note)
+_mcp.tool()(update_task_status)
