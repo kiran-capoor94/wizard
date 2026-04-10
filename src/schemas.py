@@ -4,6 +4,48 @@ from pydantic import BaseModel
 
 from .models import NoteType, TaskCategory, TaskPriority, TaskStatus, MeetingCategory
 
+# --- Integration response models (typed outputs from Jira/Notion clients) ---
+
+
+class JiraTaskData(BaseModel):
+    key: str
+    summary: str
+    status: str
+    priority: str
+    issue_type: str
+    url: str = ""
+
+
+class NotionTaskData(BaseModel):
+    notion_id: str
+    name: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    due_date: str | None = None
+    jira_url: str | None = None
+    jira_key: str | None = None
+
+
+class NotionMeetingData(BaseModel):
+    notion_id: str
+    title: str | None = None
+    categories: list[str] = []
+    summary: str | None = None
+    krisp_url: str | None = None
+    date: str | None = None
+
+
+class SourceSyncStatus(BaseModel):
+    source: str
+    ok: bool
+    error: Optional[str] = None
+
+
+class WriteBackStatus(BaseModel):
+    ok: bool
+    error: Optional[str] = None
+    page_id: Optional[str] = None
+
 
 class TaskContext(BaseModel):
     id: int
@@ -15,7 +57,7 @@ class TaskContext(BaseModel):
     source_id: Optional[str]
     source_url: Optional[str]
     last_note_type: Optional[NoteType]  # most recent note type, or None
-    last_note_preview: Optional[str]  # first 120 chars of most recent note
+    last_note_preview: Optional[str]  # first 300 chars of most recent note
     last_worked_at: Optional[datetime.datetime]  # created_at of most recent note
 
 
@@ -40,6 +82,7 @@ class SessionStartResponse(BaseModel):
     open_tasks: list[TaskContext]
     blocked_tasks: list[TaskContext]
     unsummarised_meetings: list[MeetingContext]
+    sync_results: list[SourceSyncStatus]
 
 
 class TaskStartResponse(BaseModel):
@@ -56,8 +99,8 @@ class SaveNoteResponse(BaseModel):
 class UpdateTaskStatusResponse(BaseModel):
     task_id: int
     new_status: TaskStatus
-    write_back_succeeded: bool           # Jira
-    notion_write_back_succeeded: bool    # Notion
+    jira_write_back: WriteBackStatus
+    notion_write_back: WriteBackStatus
 
 
 class GetMeetingResponse(BaseModel):
@@ -73,17 +116,20 @@ class GetMeetingResponse(BaseModel):
 class SaveMeetingSummaryResponse(BaseModel):
     note_id: int
     linked_task_ids: list[int]
+    notion_write_back: WriteBackStatus
 
 
 class SessionEndResponse(BaseModel):
     note_id: int
+    notion_write_back: WriteBackStatus
 
 
 class IngestMeetingResponse(BaseModel):
     meeting_id: int
     already_existed: bool
+    notion_write_back: WriteBackStatus
 
 
 class CreateTaskResponse(BaseModel):
     task_id: int
-    notion_write_back_succeeded: bool
+    notion_write_back: WriteBackStatus

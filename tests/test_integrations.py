@@ -60,11 +60,11 @@ def test_jira_fetch_open_tasks_returns_list():
     tasks = client.fetch_open_tasks()
 
     assert len(tasks) == 1
-    assert tasks[0]["key"] == "ENG-1"
-    assert tasks[0]["summary"] == "Fix login"
-    assert tasks[0]["status"] == "In Progress"
-    assert tasks[0]["priority"] == "High"
-    assert tasks[0]["issue_type"] == "Bug"
+    assert tasks[0].key == "ENG-1"
+    assert tasks[0].summary == "Fix login"
+    assert tasks[0].status == "In Progress"
+    assert tasks[0].priority == "High"
+    assert tasks[0].issue_type == "Bug"
 
 
 @respx.mock
@@ -143,13 +143,13 @@ def test_notion_fetch_tasks_returns_list_of_dicts():
         tasks = client.fetch_tasks()
 
     assert len(tasks) == 1
-    assert tasks[0]["notion_id"] == "task-uuid-1"
-    assert tasks[0]["name"] == "Implement auth"
-    assert tasks[0]["status"] == "In Progress"
-    assert tasks[0]["priority"] == "High"
-    assert tasks[0]["due_date"] == "2026-04-15"
-    assert tasks[0]["jira_url"] == "https://org.atlassian.net/browse/ENG-123"
-    assert tasks[0]["jira_key"] == "ENG-123"
+    assert tasks[0].notion_id == "task-uuid-1"
+    assert tasks[0].name == "Implement auth"
+    assert tasks[0].status == "In Progress"
+    assert tasks[0].priority == "High"
+    assert tasks[0].due_date == "2026-04-15"
+    assert tasks[0].jira_url == "https://org.atlassian.net/browse/ENG-123"
+    assert tasks[0].jira_key == "ENG-123"
 
 
 def test_notion_fetch_tasks_handles_missing_properties():
@@ -172,13 +172,13 @@ def test_notion_fetch_tasks_handles_missing_properties():
         tasks = client.fetch_tasks()
 
     assert len(tasks) == 1
-    assert tasks[0]["notion_id"] == "task-uuid-2"
-    assert tasks[0]["name"] == "Task with minimal props"
-    assert tasks[0]["status"] is None
-    assert tasks[0]["priority"] is None
-    assert tasks[0]["due_date"] is None
-    assert tasks[0]["jira_url"] is None
-    assert tasks[0]["jira_key"] is None
+    assert tasks[0].notion_id == "task-uuid-2"
+    assert tasks[0].name == "Task with minimal props"
+    assert tasks[0].status is None
+    assert tasks[0].priority is None
+    assert tasks[0].due_date is None
+    assert tasks[0].jira_url is None
+    assert tasks[0].jira_key is None
 
 
 def test_notion_fetch_tasks_raises_error_without_token():
@@ -226,12 +226,12 @@ def test_notion_fetch_meetings_returns_list_of_dicts():
         meetings = client.fetch_meetings()
 
     assert len(meetings) == 1
-    assert meetings[0]["notion_id"] == "meeting-uuid-1"
-    assert meetings[0]["title"] == "Sprint Planning"
-    assert meetings[0]["categories"] == ["Planning", "Standup"]
-    assert meetings[0]["summary"] == "Discussed Q2 roadmap"
-    assert meetings[0]["krisp_url"] == "https://krisp.ai/m/abc123"
-    assert meetings[0]["date"] == "2026-04-10"
+    assert meetings[0].notion_id == "meeting-uuid-1"
+    assert meetings[0].title == "Sprint Planning"
+    assert meetings[0].categories == ["Planning", "Standup"]
+    assert meetings[0].summary == "Discussed Q2 roadmap"
+    assert meetings[0].krisp_url == "https://krisp.ai/m/abc123"
+    assert meetings[0].date == "2026-04-10"
 
 
 def test_notion_fetch_meetings_handles_missing_properties():
@@ -254,12 +254,12 @@ def test_notion_fetch_meetings_handles_missing_properties():
         meetings = client.fetch_meetings()
 
     assert len(meetings) == 1
-    assert meetings[0]["notion_id"] == "meeting-uuid-2"
-    assert meetings[0]["title"] == "Minimal meeting"
-    assert meetings[0]["categories"] == []
-    assert meetings[0]["summary"] is None
-    assert meetings[0]["krisp_url"] is None
-    assert meetings[0]["date"] is None
+    assert meetings[0].notion_id == "meeting-uuid-2"
+    assert meetings[0].title == "Minimal meeting"
+    assert meetings[0].categories == []
+    assert meetings[0].summary is None
+    assert meetings[0].krisp_url is None
+    assert meetings[0].date is None
 
 
 def test_notion_fetch_meetings_raises_error_without_token():
