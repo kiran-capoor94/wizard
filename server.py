@@ -1,18 +1,5 @@
-from fastmcp import FastMCP
-
-from src.config import settings
-
-mcp = FastMCP(
-    name=settings.name,
-    instructions="Wizard is a set of tools used by Kiran Capoor to enhance his workflows and build contexts before doing any engineering workflows. This is significantly helpful for Kiran since he has ADHD.",
-    version=settings.version,
-)
-
-
-@mcp.tool
-def greet(name: str) -> str:
-    return f"Hello, {name}"
-
+from src.mcp_instance import mcp
+import src.tools  # noqa: F401 — registers all @mcp.tool decorators
 
 if __name__ == "__main__":
     mcp.run()
