@@ -135,3 +135,73 @@ def test_task_start_raises_when_task_not_found(db_session):
 
     with pytest.raises(ValueError, match="Task 999 not found"):
         task_start(task_id=999)
+
+
+def test_save_note_scrubs_and_persists(db_session):
+    from src.tools import save_note
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import Task
+
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    repo = NoteRepository()
+    security = SecurityService()
+
+    task = Task(name="fix auth", source_id="ENG-1")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+
+    import src.tools
+    src.tools._get_deps = lambda: (sync, wb, repo, security)
+    src.tools._get_db = lambda: db_session
+
+    result = save_note(
+        task_id=task.id,
+        note_type="investigation",
+        content="john@example.com found a bug",
+    )
+
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert "note_id" in data
+
+    from src.models import Note
+    saved_note = db_session.get(Note, data["note_id"])
+    assert "john@example.com" not in saved_note.content
+    assert "[EMAIL_1]" in saved_note.content
+
+
+def test_update_task_status_persists_and_writebacks(db_session):
+    from src.tools import update_task_status
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import Task, TaskStatus
+
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    repo = NoteRepository()
+    security = SecurityService()
+    wb.push_task_status.return_value = True
+
+    task = Task(name="fix auth", source_id="ENG-1", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    task_id = task.id
+    db_session.refresh(task)
+
+    import src.tools
+    src.tools._get_deps = lambda: (sync, wb, repo, security)
+    src.tools._get_db = lambda: db_session
+
+    result = update_task_status(task_id=task_id, new_status="done")
+
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert data["new_status"] == "done"
+    assert data["write_back_succeeded"] is True
+
+    # Fetch fresh from DB after tool closes session
+    task_fresh = db_session.get(Task, task_id)
+    assert task_fresh.status == TaskStatus.DONE
