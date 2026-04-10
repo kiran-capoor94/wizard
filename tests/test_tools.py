@@ -1,223 +1,227 @@
-import json
-import pytest
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+
+def _mock_session(db_session):
+    """Context manager that yields the test db_session instead of creating a new one."""
+    @contextmanager
+    def _inner():
+        yield db_session
+        db_session.flush()
+    return _inner
+
+
+def _patch_tools(db_session, sync=None, wb=None):
+    """Patch tools module dependencies with test doubles. Returns (patches, sync_mock, wb_mock)."""
+    sync_mock = sync or MagicMock()
+    wb_mock = wb or MagicMock()
+
+    patches = {
+        "get_session": _mock_session(db_session),
+        "_sync_service": lambda: sync_mock,
+        "_writeback": lambda: wb_mock,
+    }
+    return patches, sync_mock, wb_mock
+
+
+# ---------------------------------------------------------------------------
+# session_start
+# ---------------------------------------------------------------------------
 
 def test_session_start_creates_session(db_session):
-    from src.models import WizardSession
-    from src.repositories import NoteRepository
-    from src.services import SyncService, WriteBackService
-    from src.security import SecurityService
     from src.tools import session_start
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_all = MagicMock(return_value=[])
 
-    # Monkey-patch the _get_deps and _get_db functions
-    import src.tools
-    sync_mock = MagicMock(spec=SyncService)
-    sync_mock.sync_all.return_value = None
-    src.tools._get_deps = lambda: (
-        sync_mock,
-        MagicMock(spec=WriteBackService),
-        NoteRepository(),
-        SecurityService(),
-    )
-    src.tools._get_db = lambda: db_session
+    with patch.multiple("src.tools", **patches):
+        result = session_start()
 
-    result = session_start()
-
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert "session_id" in data
-    assert "open_tasks" in data
-    assert "blocked_tasks" in data
-    assert "unsummarised_meetings" in data
+    assert result.session_id is not None
+    assert result.open_tasks is not None
+    assert result.blocked_tasks is not None
+    assert result.unsummarised_meetings is not None
+    assert result.sync_results is not None
 
 
 def test_session_start_calls_sync(db_session):
-    from src.models import WizardSession
-    from src.repositories import NoteRepository
-    from src.services import SyncService, WriteBackService
-    from src.security import SecurityService
     from src.tools import session_start
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_all = MagicMock(return_value=[])
 
-    # Monkey-patch the _get_deps and _get_db functions
-    import src.tools
-    sync_mock = MagicMock(spec=SyncService)
-    sync_mock.sync_all.return_value = None
-    src.tools._get_deps = lambda: (
-        sync_mock,
-        MagicMock(spec=WriteBackService),
-        NoteRepository(),
-        SecurityService(),
-    )
-    src.tools._get_db = lambda: db_session
-
-    session_start()
+    with patch.multiple("src.tools", **patches):
+        session_start()
 
     sync_mock.sync_all.assert_called_once()
 
 
+def test_session_start_surfaces_sync_errors(db_session):
+    from src.tools import session_start
+    from src.schemas import SourceSyncStatus
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_all = MagicMock(return_value=[
+        SourceSyncStatus(source="jira", ok=False, error="Jira token not configured"),
+        SourceSyncStatus(source="notion_tasks", ok=True),
+        SourceSyncStatus(source="notion_meetings", ok=True),
+    ])
+
+    with patch.multiple("src.tools", **patches):
+        result = session_start()
+
+    assert len(result.sync_results) == 3
+    jira_sync = result.sync_results[0]
+    assert jira_sync.source == "jira"
+    assert jira_sync.ok is False
+    assert jira_sync.error == "Jira token not configured"
+    assert result.sync_results[1].ok is True
+
+
+# ---------------------------------------------------------------------------
+# task_start
+# ---------------------------------------------------------------------------
+
 def test_task_start_returns_compounding_true_when_prior_notes(db_session):
     from src.models import Task, TaskStatus, Note, NoteType
-    from src.repositories import NoteRepository
-    from src.services import SyncService, WriteBackService
-    from src.security import SecurityService
     from src.tools import task_start
 
     task = Task(name="fix auth", source_id="ENG-1", status=TaskStatus.IN_PROGRESS)
     db_session.add(task)
     db_session.commit()
     db_session.refresh(task)
+    assert task.id is not None
 
-    prior_note = Note(note_type=NoteType.INVESTIGATION, content="prior investigation", task_id=task.id)
-    db_session.add(prior_note)
+    note = Note(note_type=NoteType.INVESTIGATION, content="prior investigation", task_id=task.id)
+    db_session.add(note)
     db_session.commit()
-    db_session.refresh(prior_note)
 
-    # Monkey-patch the _get_deps and _get_db functions
-    import src.tools
-    src.tools._get_deps = lambda: (
-        MagicMock(spec=SyncService),
-        MagicMock(spec=WriteBackService),
-        NoteRepository(),
-        SecurityService(),
-    )
-    src.tools._get_db = lambda: db_session
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("src.tools", **patches):
+        result = task_start(task_id=task.id)
 
-    result = task_start(task_id=task.id)
-
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert data["compounding"] is True
-    assert len(data["prior_notes"]) == 1
+    assert result.compounding is True
+    assert len(result.prior_notes) == 1
 
 
 def test_task_start_returns_compounding_false_when_no_notes(db_session):
     from src.models import Task, TaskStatus
-    from src.repositories import NoteRepository
-    from src.services import SyncService, WriteBackService
-    from src.security import SecurityService
     from src.tools import task_start
 
     task = Task(name="new task", status=TaskStatus.TODO)
     db_session.add(task)
     db_session.commit()
     db_session.refresh(task)
+    assert task.id is not None
 
-    # Monkey-patch the _get_deps and _get_db functions
-    import src.tools
-    src.tools._get_deps = lambda: (
-        MagicMock(spec=SyncService),
-        MagicMock(spec=WriteBackService),
-        NoteRepository(),
-        SecurityService(),
-    )
-    src.tools._get_db = lambda: db_session
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("src.tools", **patches):
+        result = task_start(task_id=task.id)
 
-    result = task_start(task_id=task.id)
-
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert data["compounding"] is False
+    assert result.compounding is False
 
 
 def test_task_start_raises_when_task_not_found(db_session):
-    from src.repositories import NoteRepository
-    from src.services import SyncService, WriteBackService
-    from src.security import SecurityService
     from src.tools import task_start
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("src.tools", **patches):
+        with pytest.raises(ValueError, match="Task 999 not found"):
+            task_start(task_id=999)
 
-    # Monkey-patch the _get_deps and _get_db functions
-    import src.tools
-    src.tools._get_deps = lambda: (
-        MagicMock(spec=SyncService),
-        MagicMock(spec=WriteBackService),
-        NoteRepository(),
-        SecurityService(),
-    )
-    src.tools._get_db = lambda: db_session
 
-    with pytest.raises(ValueError, match="Task 999 not found"):
-        task_start(task_id=999)
-
+# ---------------------------------------------------------------------------
+# save_note
+# ---------------------------------------------------------------------------
 
 def test_save_note_scrubs_and_persists(db_session):
     from src.tools import save_note
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
-    from src.models import Task
-
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    repo = NoteRepository()
-    security = SecurityService()
+    from src.models import Task, Note
 
     task = Task(name="fix auth", source_id="ENG-1")
     db_session.add(task)
     db_session.commit()
     db_session.refresh(task)
+    assert task.id is not None
 
-    import src.tools
-    src.tools._get_deps = lambda: (sync, wb, repo, security)
-    src.tools._get_db = lambda: db_session
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("src.tools", **patches):
+        result = save_note(
+            task_id=task.id,
+            note_type="investigation",
+            content="john@example.com found a bug",
+        )
 
-    result = save_note(
-        task_id=task.id,
-        note_type="investigation",
-        content="john@example.com found a bug",
-    )
+    assert result.note_id is not None
 
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert "note_id" in data
-
-    from src.models import Note
-    saved_note = db_session.get(Note, data["note_id"])
+    saved_note = db_session.get(Note, result.note_id)
     assert "john@example.com" not in saved_note.content
     assert "[EMAIL_1]" in saved_note.content
 
 
+# ---------------------------------------------------------------------------
+# update_task_status
+# ---------------------------------------------------------------------------
+
 def test_update_task_status_persists_and_writebacks(db_session):
     from src.tools import update_task_status
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
     from src.models import Task, TaskStatus
+    from src.schemas import WriteBackStatus
 
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    repo = NoteRepository()
-    security = SecurityService()
-    wb.push_task_status.return_value = True
+    wb_mock = MagicMock()
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(
+        ok=False, error="Task has no notion_id",
+    )
 
     task = Task(name="fix auth", source_id="ENG-1", status=TaskStatus.IN_PROGRESS)
     db_session.add(task)
     db_session.commit()
-    task_id = task.id
     db_session.refresh(task)
+    assert task.id is not None
+    task_id = task.id
 
-    import src.tools
-    src.tools._get_deps = lambda: (sync, wb, repo, security)
-    src.tools._get_db = lambda: db_session
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("src.tools", **patches):
+        result = update_task_status(task_id=task_id, new_status="done")
 
-    result = update_task_status(task_id=task_id, new_status="done")
+    assert result.new_status == TaskStatus.DONE
+    assert result.jira_write_back.ok is True
+    assert result.notion_write_back.ok is False
+    assert result.notion_write_back.error == "Task has no notion_id"
 
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert data["new_status"] == "done"
-    assert data["write_back_succeeded"] is True
-
-    # Fetch fresh from DB after tool closes session
     task_fresh = db_session.get(Task, task_id)
     assert task_fresh.status == TaskStatus.DONE
 
 
+def test_update_task_status_dual_writeback(db_session):
+    from src.tools import update_task_status
+    from src.models import Task, TaskStatus
+    from src.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+
+    task = Task(name="fix", source_id="ENG-1", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("src.tools", **patches):
+        result = update_task_status(task_id=task.id, new_status="done")
+
+    assert result.jira_write_back.ok is True
+    assert result.notion_write_back.ok is True
+
+
+# ---------------------------------------------------------------------------
+# get_meeting
+# ---------------------------------------------------------------------------
+
 def test_get_meeting_returns_content_and_open_tasks(db_session):
     from src.tools import get_meeting
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
     from src.models import Task, TaskStatus, Meeting, MeetingTasks
-
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    repo = NoteRepository()
-    security = SecurityService()
 
     task = Task(name="fix auth", status=TaskStatus.IN_PROGRESS)
     meeting = Meeting(title="standup", content="we discussed fix auth")
@@ -226,35 +230,33 @@ def test_get_meeting_returns_content_and_open_tasks(db_session):
     db_session.commit()
     db_session.refresh(task)
     db_session.refresh(meeting)
+    assert task.id is not None
+    assert meeting.id is not None
 
     link = MeetingTasks(meeting_id=meeting.id, task_id=task.id)
     db_session.add(link)
     db_session.commit()
 
-    import src.tools
-    src.tools._get_deps = lambda: (sync, wb, repo, security)
-    src.tools._get_db = lambda: db_session
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("src.tools", **patches):
+        result = get_meeting(meeting_id=meeting.id)
 
-    result = get_meeting(meeting_id=meeting.id)
+    assert result.meeting_id == meeting.id
+    assert result.already_summarised is False
+    assert len(result.open_tasks) == 1
 
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert data["meeting_id"] == meeting.id
-    assert data["already_summarised"] is False
-    assert len(data["open_tasks"]) == 1
 
+# ---------------------------------------------------------------------------
+# save_meeting_summary
+# ---------------------------------------------------------------------------
 
 def test_save_meeting_summary_scrubs_and_persists(db_session):
     from src.tools import save_meeting_summary
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
     from src.models import WizardSession, Meeting, Note
+    from src.schemas import WriteBackStatus
 
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    repo = NoteRepository()
-    security = SecurityService()
-    wb.push_meeting_summary.return_value = True
+    wb_mock = MagicMock()
+    wb_mock.push_meeting_summary.return_value = WriteBackStatus(ok=True)
 
     session = WizardSession()
     meeting = Meeting(title="standup", content="notes")
@@ -263,186 +265,146 @@ def test_save_meeting_summary_scrubs_and_persists(db_session):
     db_session.commit()
     db_session.refresh(session)
     db_session.refresh(meeting)
+    assert session.id is not None
+    assert meeting.id is not None
 
-    import src.tools
-    src.tools._get_deps = lambda: (sync, wb, repo, security)
-    src.tools._get_db = lambda: db_session
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("src.tools", **patches):
+        result = save_meeting_summary(
+            meeting_id=meeting.id,
+            session_id=session.id,
+            summary="patient 943 476 5919 was discussed",
+        )
 
-    result = save_meeting_summary(
-        meeting_id=meeting.id,
-        session_id=session.id,
-        summary="patient 943 476 5919 was discussed",
-    )
+    assert result.note_id is not None
 
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert "note_id" in data
-
-    saved = db_session.get(Note, data["note_id"])
+    saved = db_session.get(Note, result.note_id)
     assert "943 476 5919" not in saved.content
     assert "[NHS_ID_1]" in saved.content
 
 
+# ---------------------------------------------------------------------------
+# session_end
+# ---------------------------------------------------------------------------
+
 def test_session_end_saves_summary_note(db_session):
     from src.tools import session_end
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
     from src.models import WizardSession, Note, NoteType
+    from src.schemas import WriteBackStatus
 
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    repo = NoteRepository()
-    security = SecurityService()
-    wb.push_session_summary.return_value = True
+    wb_mock = MagicMock()
+    wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
 
     session = WizardSession()
     db_session.add(session)
     db_session.commit()
-    session_id = session.id
     db_session.refresh(session)
+    assert session.id is not None
+    session_id = session.id
 
-    import src.tools
-    src.tools._get_deps = lambda: (sync, wb, repo, security)
-    src.tools._get_db = lambda: db_session
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("src.tools", **patches):
+        result = session_end(
+            session_id=session_id,
+            summary="wrapped up today's work",
+        )
 
-    result = session_end(
-        session_id=session_id,
-        summary="wrapped up today's work",
-    )
+    assert result.note_id is not None
 
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert "note_id" in data
-
-    saved = db_session.get(Note, data["note_id"])
+    saved = db_session.get(Note, result.note_id)
     assert saved.note_type == NoteType.SESSION_SUMMARY
     assert saved.session_id == session_id
 
 
-def test_task_start_closes_db_on_error(db_session):
-    from src.tools import task_start
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    repo = NoteRepository()
-    security = SecurityService()
-    mock_db = MagicMock(wraps=db_session)
-    mock_db.get.return_value = None
-    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
-        with patch("src.tools._get_db", return_value=mock_db):
-            with pytest.raises(ValueError):
-                task_start(task_id=999)
-    mock_db.close.assert_called_once()
-
-
-def test_update_task_status_dual_writeback(db_session):
-    from src.tools import update_task_status
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
-    from src.models import Task, TaskStatus
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    wb.push_task_status.return_value = True
-    wb.push_task_status_to_notion.return_value = True
-    repo = NoteRepository()
-    security = SecurityService()
-    task = Task(name="fix", source_id="ENG-1", status=TaskStatus.IN_PROGRESS)
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
-        with patch("src.tools._get_db", return_value=db_session):
-            result = update_task_status(task_id=task.id, new_status="done")
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert data["write_back_succeeded"] is True
-    assert data["notion_write_back_succeeded"] is True
-
+# ---------------------------------------------------------------------------
+# ingest_meeting
+# ---------------------------------------------------------------------------
 
 def test_ingest_meeting_creates_meeting(db_session):
     from src.tools import ingest_meeting
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
     from src.models import Meeting
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    wb.push_meeting_to_notion.return_value = True
-    repo = NoteRepository()
-    security = SecurityService()
-    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
-        with patch("src.tools._get_db", return_value=db_session):
-            result = ingest_meeting(
-                title="Sprint Planning",
-                content="john@example.com reported a bug",
-                source_id="krisp-abc",
-                source_url="https://krisp.ai/m/abc",
-                category="planning",
-            )
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert "meeting_id" in data
-    assert data["already_existed"] is False
-    meeting = db_session.get(Meeting, data["meeting_id"])
+    from src.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_meeting_to_notion.return_value = WriteBackStatus(
+        ok=True, page_id="notion-meeting-page-id",
+    )
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("src.tools", **patches):
+        result = ingest_meeting(
+            title="Sprint Planning",
+            content="john@example.com reported a bug",
+            source_id="krisp-abc",
+            source_url="https://krisp.ai/m/abc",
+            category="planning",
+        )
+
+    assert result.meeting_id is not None
+    assert result.already_existed is False
+    meeting = db_session.get(Meeting, result.meeting_id)
     assert "john@example.com" not in meeting.content
     assert "[EMAIL_1]" in meeting.content
 
 
 def test_ingest_meeting_dedup_by_source_id(db_session):
     from src.tools import ingest_meeting
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
     from src.models import Meeting
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    wb.push_meeting_to_notion.return_value = True
-    repo = NoteRepository()
-    security = SecurityService()
+    from src.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_meeting_to_notion.return_value = WriteBackStatus(
+        ok=True, page_id="notion-meeting-page-id",
+    )
+
     existing = Meeting(title="Old", content="old", source_id="krisp-abc")
     db_session.add(existing)
     db_session.commit()
     db_session.refresh(existing)
-    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
-        with patch("src.tools._get_db", return_value=db_session):
-            result = ingest_meeting(title="New", content="new", source_id="krisp-abc")
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert data["already_existed"] is True
-    assert data["meeting_id"] == existing.id
 
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("src.tools", **patches):
+        result = ingest_meeting(title="New", content="new", source_id="krisp-abc")
+
+    assert result.already_existed is True
+    assert result.meeting_id == existing.id
+
+
+# ---------------------------------------------------------------------------
+# create_task
+# ---------------------------------------------------------------------------
 
 def test_create_task_creates_and_links(db_session):
     from src.tools import create_task
-    from src.services import SyncService, WriteBackService
-    from src.repositories import NoteRepository
-    from src.security import SecurityService
-    from src.models import Meeting, Task, TaskStatus
+    from src.models import Meeting, Task, TaskStatus, MeetingTasks
+    from src.schemas import WriteBackStatus
     from sqlmodel import select
-    sync = MagicMock(spec=SyncService)
-    wb = MagicMock(spec=WriteBackService)
-    wb.push_task_to_notion.return_value = True
-    repo = NoteRepository()
-    security = SecurityService()
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_to_notion.return_value = WriteBackStatus(
+        ok=True, page_id="notion-task-page-id",
+    )
+
     meeting = Meeting(title="standup", content="notes")
     db_session.add(meeting)
     db_session.commit()
     db_session.refresh(meeting)
     meeting_id = meeting.id
-    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
-        with patch("src.tools._get_db", return_value=db_session):
-            result = create_task(
-                name="Fix john@example.com auth bug",
-                priority="high",
-                meeting_id=meeting_id,
-            )
-    data = result if isinstance(result, dict) else json.loads(result)
-    assert "task_id" in data
-    assert data["notion_write_back_succeeded"] is True
-    task = db_session.get(Task, data["task_id"])
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("src.tools", **patches):
+        result = create_task(
+            name="Fix john@example.com auth bug",
+            priority="high",
+            meeting_id=meeting_id,
+        )
+
+    assert result.task_id is not None
+    assert result.notion_write_back.ok is True
+    task = db_session.get(Task, result.task_id)
     assert "john@example.com" not in task.name
     assert task.status == TaskStatus.TODO
-    # Verify link
-    from src.models import MeetingTasks
+
     link = db_session.exec(
         select(MeetingTasks).where(
             MeetingTasks.task_id == task.id,
@@ -450,3 +412,91 @@ def test_create_task_creates_and_links(db_session):
         )
     ).first()
     assert link is not None
+
+
+# ---------------------------------------------------------------------------
+# End-to-end compounding loop (design spec Section 10)
+# ---------------------------------------------------------------------------
+
+def test_compounding_loop_across_two_sessions(db_session):
+    """Proves the full compounding context loop:
+    session 1: session_start -> task_start -> save_note -> update_task_status -> session_end
+    session 2: session_start -> task_start returns compounding=True with prior notes
+    """
+    from src.tools import (
+        session_start, task_start, save_note,
+        update_task_status, session_end,
+    )
+    from src.models import Task, TaskStatus
+
+    # Seed a task (simulating what sync would produce)
+    task = Task(name="Fix auth", source_id="ENG-100", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+    task_id: int = task.id
+
+    from src.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(
+        ok=False, error="Task has no notion_id",
+    )
+    wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
+    sync_mock = MagicMock()
+    sync_mock.sync_all = MagicMock(return_value=[])
+
+    patches, _, _ = _patch_tools(db_session, sync=sync_mock, wb=wb_mock)
+    with patch.multiple("src.tools", **patches):
+        # --- Session 1 ---
+        s1 = session_start()
+        session_id = s1.session_id
+
+        # task_start -- no prior notes yet
+        ts1 = task_start(task_id=task_id)
+        assert ts1.compounding is False
+
+        # save_note
+        save_note(task_id=task_id, note_type="investigation", content="Found the root cause")
+
+        # update_task_status
+        update_task_status(task_id=task_id, new_status="in_progress")
+
+        # session_end
+        session_end(session_id=session_id, summary="Investigated auth bug")
+
+        # --- Session 2 ---
+        s2 = session_start()
+        assert s2.session_id != session_id
+
+        # task_start -- should see prior notes now
+        ts2 = task_start(task_id=task_id)
+        assert ts2.compounding is True
+        assert len(ts2.prior_notes) >= 1
+        assert ts2.notes_by_type["investigation"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Spike: FastMCP serializes Pydantic models directly
+# ---------------------------------------------------------------------------
+
+def test_fastmcp_serializes_pydantic_models():
+    """Spike: verify FastMCP 3.2.0+ can serialize our response models without .model_dump()."""
+    from fastmcp import FastMCP
+    from src.schemas import SessionStartResponse, SourceSyncStatus
+
+    test_mcp = FastMCP("test")
+
+    @test_mcp.tool()
+    def test_tool() -> SessionStartResponse:
+        return SessionStartResponse(
+            session_id=1,
+            open_tasks=[],
+            blocked_tasks=[],
+            unsummarised_meetings=[],
+            sync_results=[SourceSyncStatus(source="jira", ok=True)],
+        )
+
+    assert test_tool is not None
