@@ -59,7 +59,7 @@ def _build_task_context(task, repo, db):
         source_id=task.source_id,
         source_url=task.source_url,
         last_note_type=latest.note_type if latest else None,
-        last_note_preview=latest.content[:120] if latest else None,
+        last_note_preview=latest.content[:300] if latest else None,
         last_worked_at=latest.created_at if latest else None,
     )
 
@@ -67,7 +67,11 @@ def _build_task_context(task, repo, db):
 def _sort_tasks(tasks):
     priority_order = {"high": 0, "medium": 1, "low": 2}
     return sorted(
-        tasks, key=lambda t: (priority_order.get(t.priority.value, 99), t.name)
+        tasks,
+        key=lambda t: (
+            priority_order.get(t.priority.value, 99),
+            -(t.last_worked_at.timestamp() if t.last_worked_at else 0),
+        ),
     )
 
 
@@ -155,7 +159,7 @@ def task_start(task_id: int) -> dict:
         source_id=task.source_id,
         source_url=task.source_url,
         last_note_type=latest.note_type if latest else None,
-        last_note_preview=latest.content[:120] if latest else None,
+        last_note_preview=latest.content[:300] if latest else None,
         last_worked_at=latest.created_at if latest else None,
     )
 
@@ -265,7 +269,7 @@ def get_meeting(meeting_id: int) -> dict:
     ).model_dump(mode="json")
 
 
-def save_meeting_summary(meeting_id: int, session_id: int, summary: str) -> dict:
+def save_meeting_summary(meeting_id: int, session_id: int, summary: str, task_ids: list[int] | None = None) -> dict:
     """Scrubs and persists the LLM-generated meeting summary. Attempts Notion write-back."""
     from .models import Meeting, Note, NoteType
 
@@ -283,12 +287,26 @@ def save_meeting_summary(meeting_id: int, session_id: int, summary: str) -> dict
     db.refresh(meeting)
 
     note = Note(
-        note_type=NoteType.SESSION_SUMMARY,
+        note_type=NoteType.DOCS,
         content=clean_summary,
         meeting_id=meeting.id,
         session_id=session_id,
     )
     saved = repo.save(db, note)
+
+    # Link specified tasks to this meeting
+    if task_ids:
+        from .models import MeetingTasks
+        for tid in task_ids:
+            existing_link = db.exec(
+                select(MeetingTasks).where(
+                    MeetingTasks.meeting_id == meeting.id,
+                    MeetingTasks.task_id == tid,
+                )
+            ).first()
+            if not existing_link:
+                db.add(MeetingTasks(meeting_id=meeting.id, task_id=tid))
+        db.commit()
 
     wb.push_meeting_summary(meeting)
 
