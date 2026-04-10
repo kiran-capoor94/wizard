@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class SyncService:
-    def __init__(self, jira: JiraClient, notion: NotionClient, security: SecurityService):
+    def __init__(
+        self, jira: JiraClient, notion: NotionClient, security: SecurityService
+    ):
         self._jira = jira
         self._notion = notion
         self._security = security
@@ -165,7 +167,9 @@ class SyncService:
                 meeting = Meeting(
                     title=scrubbed_title,
                     content="",
-                    summary=self._security.scrub(raw_summary).clean if raw_summary else None,
+                    summary=(
+                        self._security.scrub(raw_summary).clean if raw_summary else None
+                    ),
                     notion_id=notion_id,
                     source_id=krisp_id,
                     source_type="KRISP" if krisp_id else None,
@@ -227,7 +231,9 @@ class WriteBackService:
             )
             if page_id:
                 return WriteBackStatus(ok=True, page_id=page_id)
-            return WriteBackStatus(ok=False, error="Notion create_task_page returned no page ID")
+            return WriteBackStatus(
+                ok=False, error="Notion create_task_page returned no page ID"
+            )
         except Exception as e:
             logger.warning("WriteBack push_task_to_notion failed: %s", e)
             return WriteBackStatus(ok=False, error=str(e))
@@ -237,12 +243,18 @@ class WriteBackService:
         if meeting.notion_id:
             if meeting.summary:
                 try:
-                    ok = self._notion.update_meeting_summary(meeting.notion_id, meeting.summary)
+                    ok = self._notion.update_meeting_summary(
+                        meeting.notion_id, meeting.summary
+                    )
                     if ok:
                         return WriteBackStatus(ok=True, page_id=meeting.notion_id)
-                    return WriteBackStatus(ok=False, error="Notion update_meeting_summary failed")
+                    return WriteBackStatus(
+                        ok=False, error="Notion update_meeting_summary failed"
+                    )
                 except Exception as e:
-                    logger.warning("WriteBack push_meeting_to_notion (update) failed: %s", e)
+                    logger.warning(
+                        "WriteBack push_meeting_to_notion (update) failed: %s", e
+                    )
                     return WriteBackStatus(ok=False, error=str(e))
             return WriteBackStatus(ok=True, page_id=meeting.notion_id)
         notion_category = MeetingCategoryMapper.local_to_notion(meeting.category)
@@ -255,12 +267,16 @@ class WriteBackService:
             page_id = self._notion.create_meeting_page(
                 title=meeting.title,
                 category=notion_category,
-                krisp_url=meeting.source_url if meeting.source_type == "KRISP" else None,
+                krisp_url=(
+                    meeting.source_url if meeting.source_type == "KRISP" else None
+                ),
                 summary=meeting.summary,
             )
             if page_id:
                 return WriteBackStatus(ok=True, page_id=page_id)
-            return WriteBackStatus(ok=False, error="Notion create_meeting_page returned no page ID")
+            return WriteBackStatus(
+                ok=False, error="Notion create_meeting_page returned no page ID"
+            )
         except Exception as e:
             logger.warning("WriteBack push_meeting_to_notion (create) failed: %s", e)
             return WriteBackStatus(ok=False, error=str(e))
@@ -271,12 +287,12 @@ class WriteBackService:
         if not meeting.summary:
             return WriteBackStatus(ok=False, error="Meeting has no summary")
         try:
-            ok = self._notion.update_meeting_summary(
-                meeting.notion_id, meeting.summary
-            )
+            ok = self._notion.update_meeting_summary(meeting.notion_id, meeting.summary)
             if ok:
                 return WriteBackStatus(ok=True)
-            return WriteBackStatus(ok=False, error="Notion update_meeting_summary failed")
+            return WriteBackStatus(
+                ok=False, error="Notion update_meeting_summary failed"
+            )
         except Exception as e:
             logger.warning("WriteBack push_meeting_summary failed: %s", e)
             return WriteBackStatus(ok=False, error=str(e))
