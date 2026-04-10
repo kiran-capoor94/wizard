@@ -1,6 +1,9 @@
+import logging
 import re
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class ScrubResult(BaseModel):
@@ -50,6 +53,11 @@ class SecurityService:
 
             clean = re.sub(pattern, replace, clean)
 
+        if original_to_stub:
+            logger.info(
+                "PII scrubbed: %d substitution(s) across patterns",
+                len(original_to_stub),
+            )
         return ScrubResult(
             clean=clean,
             original_to_stub=original_to_stub,
