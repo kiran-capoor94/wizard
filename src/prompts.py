@@ -1,13 +1,12 @@
-from dataclasses import dataclass
+from pydantic import BaseModel
+
+from .mcp_instance import mcp
 
 
-@dataclass
-class Message:
-    """Lightweight prompt message with a plain-string content field.
+class Message(BaseModel):
+    """Lightweight prompt message.
 
-    FastMCP accepts any object with ``role`` and ``content`` attributes when
-    registering prompts, so we avoid wrapping in ``fastmcp.prompts.base.Message``
-    which converts content to ``TextContent`` and breaks ``in`` membership tests.
+    FastMCP accepts any object with ``role`` and ``content`` attributes.
     """
 
     role: str
@@ -122,14 +121,8 @@ def user_elicitation() -> str:
 # Register prompts with MCP
 # ---------------------------------------------------------------------------
 
-def _get_mcp():
-    from .mcp_instance import mcp
-    return mcp
-
-
-_mcp = _get_mcp()
-_mcp.prompt()(session_triage)
-_mcp.prompt()(task_investigation)
-_mcp.prompt()(meeting_summarisation)
-_mcp.prompt()(session_wrapup)
-_mcp.prompt()(user_elicitation)
+mcp.prompt()(session_triage)
+mcp.prompt()(task_investigation)
+mcp.prompt()(meeting_summarisation)
+mcp.prompt()(session_wrapup)
+mcp.prompt()(user_elicitation)
