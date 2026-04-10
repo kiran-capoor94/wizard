@@ -114,6 +114,7 @@ class TestMeetingCategoryMapperNotionToLocal:
         with caplog.at_level(logging.WARNING):
             result = MeetingCategoryMapper.notion_to_local("xyz-unknown")
         assert result == MeetingCategory.GENERAL
+        assert "xyz-unknown" in caplog.text
 
 
 class TestMeetingCategoryMapperLocalToNotion:
