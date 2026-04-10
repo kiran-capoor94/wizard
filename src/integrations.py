@@ -7,9 +7,16 @@ from notion_client.errors import APIResponseError
 from notion_client.helpers import collect_paginated_api
 
 from .schemas import (
-    JiraTaskData, NotionMeetingData, NotionTaskData,
-    NotionTitle, NotionRichText, NotionSelect, NotionMultiSelect,
-    NotionUrl, NotionDate, NotionStatus,
+    JiraTaskData,
+    NotionMeetingData,
+    NotionTaskData,
+    NotionTitle,
+    NotionRichText,
+    NotionSelect,
+    NotionMultiSelect,
+    NotionUrl,
+    NotionDate,
+    NotionStatus,
 )
 
 HTTPX_TIMEOUT = httpx.Timeout(10.0)
@@ -37,6 +44,10 @@ class JiraClient:
             if token
             else None
         )
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
 
     def fetch_open_tasks(self) -> list[JiraTaskData]:
         if self._client is None:
@@ -95,7 +106,6 @@ class NotionClient:
     def __init__(
         self, token: str, daily_page_id: str, tasks_db_id: str, meetings_db_id: str
     ):
-        self._token = token
         self._daily_page_id = daily_page_id
         self._tasks_db_id = tasks_db_id
         self._meetings_db_id = meetings_db_id
@@ -113,7 +123,7 @@ class NotionClient:
 
     def fetch_tasks(self) -> list[NotionTaskData]:
         """Query Tasks DB, return normalised NotionTaskData models."""
-        if not self._token:
+        if self._client is None:
             raise ConfigurationError("Notion token not configured")
 
         try:
@@ -130,7 +140,9 @@ class NotionClient:
                     notion_id=page_id,
                     name=NotionTitle.model_validate(props.get("Task", {})).text,
                     status=NotionStatus.model_validate(props.get("Status", {})).name,
-                    priority=NotionSelect.model_validate(props.get("Priority", {})).name,
+                    priority=NotionSelect.model_validate(
+                        props.get("Priority", {})
+                    ).name,
                     due_date=NotionDate.model_validate(props.get("Due date", {})).start,
                     jira_url=jira_url,
                     jira_key=_extract_jira_key(jira_url),
@@ -143,7 +155,7 @@ class NotionClient:
 
     def fetch_meetings(self) -> list[NotionMeetingData]:
         """Query Meeting Notes DB, return normalised NotionMeetingData models."""
-        if not self._token:
+        if self._client is None:
             raise ConfigurationError("Notion token not configured")
 
         try:
@@ -157,9 +169,15 @@ class NotionClient:
 
                 meeting = NotionMeetingData(
                     notion_id=page_id,
-                    title=NotionTitle.model_validate(props.get("Meeting name", {})).text,
-                    categories=NotionMultiSelect.model_validate(props.get("Category", {})).names,
-                    summary=NotionRichText.model_validate(props.get("Summary", {})).text,
+                    title=NotionTitle.model_validate(
+                        props.get("Meeting name", {})
+                    ).text,
+                    categories=NotionMultiSelect.model_validate(
+                        props.get("Category", {})
+                    ).names,
+                    summary=NotionRichText.model_validate(
+                        props.get("Summary", {})
+                    ).text,
                     krisp_url=NotionUrl.model_validate(props.get("Krisp URL", {})).url,
                     date=NotionDate.model_validate(props.get("Date", {})).start,
                 )

@@ -1,4 +1,5 @@
 import json
+
 import pytest
 from sqlmodel import Session, SQLModel
 
@@ -14,6 +15,7 @@ def db_session(monkeypatch, tmp_path):
     for mod in [
         "src.config",
         "src.database",
+        "src.deps",
         "src.integrations",
         "src.models",
         "src.repositories",

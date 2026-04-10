@@ -72,6 +72,8 @@ def test_meeting_tasks_relationship(db_session):
     db_session.commit()
     db_session.refresh(meeting)
     db_session.refresh(task)
+    assert meeting.id is not None
+    assert task.id is not None
 
     link = MeetingTasks(meeting_id=meeting.id, task_id=task.id)
     db_session.add(link)
@@ -92,6 +94,8 @@ def test_task_meetings_relationship(db_session):
     db_session.commit()
     db_session.refresh(meeting)
     db_session.refresh(task)
+    assert meeting.id is not None
+    assert task.id is not None
 
     link = MeetingTasks(meeting_id=meeting.id, task_id=task.id)
     db_session.add(link)
@@ -108,7 +112,7 @@ def test_invalid_enum_value_rejected():
     from src.models import Task
 
     with pytest.raises(ValidationError):
-        Task(name="test", priority="invalid_value")
+        Task(name="test", priority="invalid_value")  # pyright: ignore[reportArgumentType]
 
 
 def test_task_has_notion_id(db_session):

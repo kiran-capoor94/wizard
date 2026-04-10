@@ -1,5 +1,4 @@
 import json
-import pytest
 
 
 def test_jira_settings_defaults(tmp_path, monkeypatch):

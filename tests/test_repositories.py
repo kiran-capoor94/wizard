@@ -1,6 +1,9 @@
-import pytest
-import time
+import datetime
 
+
+# ---------------------------------------------------------------------------
+# NoteRepository
+# ---------------------------------------------------------------------------
 
 def test_save_note(db_session):
     from src.models import Note, NoteType
@@ -58,7 +61,7 @@ def test_get_for_task_or_semantics(db_session):
     assert len(results) == 2
 
 
-def test_get_latest_for_task(db_session):
+def test_get_for_task_returns_latest_first(db_session):
     from src.models import Note, NoteType, Task
     from src.repositories import NoteRepository
     repo = NoteRepository()
@@ -67,19 +70,138 @@ def test_get_latest_for_task(db_session):
     db_session.commit()
     db_session.refresh(task)
 
-    n1 = Note(note_type=NoteType.INVESTIGATION, content="first", task_id=task.id)
+    n1 = Note(
+        note_type=NoteType.INVESTIGATION, content="first", task_id=task.id,
+        created_at=datetime.datetime(2026, 1, 1, 12, 0, 0),
+    )
     repo.save(db_session, n1)
-    time.sleep(0.05)
-    n2 = Note(note_type=NoteType.DECISION, content="second", task_id=task.id)
+    n2 = Note(
+        note_type=NoteType.DECISION, content="second", task_id=task.id,
+        created_at=datetime.datetime(2026, 1, 1, 12, 1, 0),
+    )
     repo.save(db_session, n2)
 
-    latest = repo.get_latest_for_task(db_session, task_id=task.id, source_id=None)
-    assert latest is not None
-    assert latest.content == "second"
+    results = repo.get_for_task(db_session, task_id=task.id, source_id=None)
+    assert len(results) == 2
+    assert results[0].content == "second"
 
 
-def test_get_latest_for_task_returns_none_when_empty(db_session):
+def test_get_for_task_returns_empty_when_no_match(db_session):
     from src.repositories import NoteRepository
     repo = NoteRepository()
-    result = repo.get_latest_for_task(db_session, task_id=999, source_id=None)
-    assert result is None
+    results = repo.get_for_task(db_session, task_id=999, source_id=None)
+    assert results == []
+
+
+# ---------------------------------------------------------------------------
+# TaskRepository
+# ---------------------------------------------------------------------------
+
+def test_task_get_by_id(db_session):
+    from src.models import Task, TaskStatus
+    from src.repositories import TaskRepository
+    repo = TaskRepository()
+    task = Task(name="fix auth", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    found = repo.get_by_id(db_session, task.id)
+    assert found.name == "fix auth"
+
+
+def test_task_get_by_id_raises_when_missing(db_session):
+    import pytest
+    from src.repositories import TaskRepository
+    repo = TaskRepository()
+    with pytest.raises(ValueError, match="Task 999 not found"):
+        repo.get_by_id(db_session, 999)
+
+
+def test_open_task_contexts_sorted_by_priority(db_session):
+    from src.models import Task, TaskStatus, TaskPriority
+    from src.repositories import TaskRepository
+    repo = TaskRepository()
+    low = Task(name="low", status=TaskStatus.TODO, priority=TaskPriority.LOW)
+    high = Task(name="high", status=TaskStatus.IN_PROGRESS, priority=TaskPriority.HIGH)
+    med = Task(name="med", status=TaskStatus.TODO, priority=TaskPriority.MEDIUM)
+    db_session.add_all([low, high, med])
+    db_session.commit()
+
+    contexts = repo.get_open_task_contexts(db_session)
+    names = [c.name for c in contexts]
+    assert names == ["high", "med", "low"]
+
+
+def test_blocked_task_contexts(db_session):
+    from src.models import Task, TaskStatus
+    from src.repositories import TaskRepository
+    repo = TaskRepository()
+    blocked = Task(name="blocked", status=TaskStatus.BLOCKED)
+    done = Task(name="done", status=TaskStatus.DONE)
+    db_session.add_all([blocked, done])
+    db_session.commit()
+
+    contexts = repo.get_blocked_task_contexts(db_session)
+    assert len(contexts) == 1
+    assert contexts[0].name == "blocked"
+
+
+def test_build_task_context_includes_latest_note(db_session):
+    from src.models import Task, TaskStatus, Note, NoteType
+    from src.repositories import TaskRepository
+    repo = TaskRepository()
+    task = Task(name="fix auth", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+
+    note = Note(note_type=NoteType.INVESTIGATION, content="found the issue", task_id=task.id)
+    db_session.add(note)
+    db_session.commit()
+
+    ctx = repo.build_task_context(db_session, task)
+    assert ctx.last_note_type == NoteType.INVESTIGATION
+    assert ctx.last_note_preview == "found the issue"
+
+
+# ---------------------------------------------------------------------------
+# MeetingRepository
+# ---------------------------------------------------------------------------
+
+def test_meeting_get_by_id(db_session):
+    from src.models import Meeting
+    from src.repositories import MeetingRepository
+    repo = MeetingRepository()
+    meeting = Meeting(title="standup", content="notes")
+    db_session.add(meeting)
+    db_session.commit()
+    db_session.refresh(meeting)
+    assert meeting.id is not None
+
+    found = repo.get_by_id(db_session, meeting.id)
+    assert found.title == "standup"
+
+
+def test_meeting_get_by_id_raises_when_missing(db_session):
+    import pytest
+    from src.repositories import MeetingRepository
+    repo = MeetingRepository()
+    with pytest.raises(ValueError, match="Meeting 999 not found"):
+        repo.get_by_id(db_session, 999)
+
+
+def test_unsummarised_contexts(db_session):
+    from src.models import Meeting
+    from src.repositories import MeetingRepository
+    repo = MeetingRepository()
+    unsummarised = Meeting(title="standup", content="notes")
+    summarised = Meeting(title="retro", content="notes", summary="done")
+    db_session.add_all([unsummarised, summarised])
+    db_session.commit()
+
+    contexts = repo.get_unsummarised_contexts(db_session)
+    assert len(contexts) == 1
+    assert contexts[0].title == "standup"
+    assert contexts[0].has_summary is False
