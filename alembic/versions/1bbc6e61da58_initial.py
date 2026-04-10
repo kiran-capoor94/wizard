@@ -1,8 +1,8 @@
 """initial
 
-Revision ID: abaf4086789e
+Revision ID: 1bbc6e61da58
 Revises: 
-Create Date: 2026-04-10 03:05:48.116994
+Create Date: 2026-04-10 13:48:17.698026
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'abaf4086789e'
+revision: str = '1bbc6e61da58'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -29,7 +29,7 @@ def upgrade() -> None:
     sa.Column('title', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('content', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('notion_id', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
-    sa.Column('category', sa.Enum('standup', 'planning', 'presentation', 'retro', 'one_on_one', 'training', 'general', name='meetingcategory'), nullable=False),
+    sa.Column('category', sa.Enum('standup', 'planning', 'retro', 'one_on_one', 'general', name='meetingcategory'), nullable=False),
     sa.Column('summary', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('source_id', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('source_type', sqlmodel.sql.sqltypes.AutoString(), nullable=True),

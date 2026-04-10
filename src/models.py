@@ -88,7 +88,7 @@ class Meeting(TimestampMixin, table=True):
     title: str
     content: str
     notion_id: Optional[str] = Field(default=None, index=True)
-    category: MeetingCategory = MeetingCategory.STANDUP
+    category: MeetingCategory = MeetingCategory.GENERAL
     summary: Optional[str] = None
     tasks: list[Task] = Relationship(back_populates="meetings", link_model=MeetingTasks)
     source_id: Optional[str] = Field(
