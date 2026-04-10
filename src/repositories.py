@@ -3,7 +3,7 @@ from sqlmodel import Session, select, or_
 
 
 class NoteRepository:
-    def save(self, db: Session, note) -> None:
+    def save(self, db: Session, note):
         db.add(note)
         db.commit()
         db.refresh(note)
@@ -36,6 +36,6 @@ class NoteRepository:
         db: Session,
         task_id: Optional[int],
         source_id: Optional[str],
-    ) -> Optional[any]:
+    ):
         notes = self.get_for_task(db, task_id=task_id, source_id=source_id)
         return notes[-1] if notes else None

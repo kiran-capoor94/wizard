@@ -44,10 +44,8 @@ class TaskStatus(str, Enum):
 class MeetingCategory(str, Enum):
     STANDUP = "standup"
     PLANNING = "planning"
-    PRESENTATION = "presentation"
     RETRO = "retro"
     ONE_ON_ONE = "one_on_one"
-    TRAINING = "training"
     GENERAL = "general"
 
 
