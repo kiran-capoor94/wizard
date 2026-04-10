@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from sqlmodel import Session, select
 
 from .integrations import JiraClient, NotionClient
+from .mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
 from .schemas import SourceSyncStatus, WriteBackStatus
 from .security import SecurityService
 
@@ -13,71 +14,6 @@ if TYPE_CHECKING:
     from .models import Meeting, Task, WizardSession
 
 logger = logging.getLogger(__name__)
-
-_JIRA_STATUS_MAP = {
-    "to do": "todo",
-    "in progress": "in_progress",
-    "blocked": "blocked",
-    "done": "done",
-}
-
-_JIRA_PRIORITY_MAP = {
-    "highest": "high",
-    "high": "high",
-    "medium": "medium",
-    "low": "low",
-    "lowest": "low",
-}
-
-_NOTION_STATUS_MAP = {
-    "not started": "todo",
-    "in progress": "in_progress",
-    "blocked": "blocked",
-    "done": "done",
-    "archive": "archived",
-}
-
-# 1:1 mapping — Notion uses capitalised labels that map directly to TaskPriority values.
-# Kept separate from _JIRA_PRIORITY_MAP to avoid accidental cross-contamination.
-_NOTION_PRIORITY_MAP = {
-    "high": "high",
-    "medium": "medium",
-    "low": "low",
-}
-
-_LOCAL_TO_NOTION_STATUS = {
-    "todo": "Not started",
-    "in_progress": "In progress",
-    "blocked": "Blocked",
-    "done": "Done",
-    "archived": "Archive",
-}
-
-_LOCAL_TO_JIRA_STATUS = {
-    "todo": "To Do",
-    "in_progress": "In Progress",
-    "blocked": "Blocked",
-    "done": "Done",
-    "archived": "Done",
-}
-
-_NOTION_MEETING_CATEGORY_MAP = {
-    "standup": "standup",
-    "planning": "planning",
-    "retro": "retro",
-    "presentation": "general",
-    "customer call": "general",
-}
-
-# None = no Notion page created for these categories.
-# ONE_ON_ONE and GENERAL are local-only; Notion write-back is silently skipped.
-_LOCAL_TO_NOTION_MEETING_CATEGORY = {
-    "standup": "Standup",
-    "planning": "Planning",
-    "retro": "Retro",
-    "one_on_one": None,
-    "general": None,
-}
 
 
 class SyncService:
@@ -102,7 +38,7 @@ class SyncService:
         return results
 
     def _sync_jira(self, db: Session) -> None:
-        from .models import Task, TaskStatus, TaskPriority
+        from .models import Task
 
         raw_tasks = self._jira.fetch_open_tasks()
         for raw in raw_tasks:
@@ -110,9 +46,7 @@ class SyncService:
             existing = db.exec(select(Task).where(Task.source_id == raw.key)).first()
             if existing:
                 existing.name = scrubbed_name
-                existing.priority = TaskPriority(
-                    _JIRA_PRIORITY_MAP.get(raw.priority.lower(), "medium")
-                )
+                existing.priority = PriorityMapper.jira_to_local(raw.priority)
                 existing.source_url = raw.url
                 db.add(existing)
             else:
@@ -121,18 +55,14 @@ class SyncService:
                     source_id=raw.key,
                     source_type="JIRA",
                     source_url=raw.url,
-                    priority=TaskPriority(
-                        _JIRA_PRIORITY_MAP.get(raw.priority.lower(), "medium")
-                    ),
-                    status=TaskStatus(
-                        _JIRA_STATUS_MAP.get(raw.status.lower(), "todo")
-                    ),
+                    priority=PriorityMapper.jira_to_local(raw.priority),
+                    status=StatusMapper.jira_to_local(raw.status),
                 )
                 db.add(task)
         db.commit()
 
     def _sync_notion_tasks(self, db: Session) -> None:
-        from .models import Task, TaskStatus, TaskPriority
+        from .models import Task
         import datetime as _dt
 
         raw_tasks = self._notion.fetch_tasks()
@@ -155,9 +85,7 @@ class SyncService:
                 ).first()
 
             raw_priority = raw.priority or "Medium"
-            priority = TaskPriority(
-                _NOTION_PRIORITY_MAP.get(raw_priority.lower(), "medium")
-            )
+            priority = PriorityMapper.notion_to_local(raw_priority)
 
             # Parse due_date from ISO string if present
             due_date = None
@@ -181,7 +109,6 @@ class SyncService:
                 db.add(existing)
             else:
                 raw_status = raw.status or "not started"
-                status_value = _NOTION_STATUS_MAP.get(raw_status.lower(), "todo")
                 task = Task(
                     name=scrubbed_name,
                     notion_id=notion_id,
@@ -190,7 +117,7 @@ class SyncService:
                     source_url=jira_url,
                     priority=priority,
                     due_date=due_date,
-                    status=TaskStatus(status_value),
+                    status=StatusMapper.notion_to_local(raw_status),
                 )
                 db.add(task)
         db.commit()
@@ -226,13 +153,12 @@ class SyncService:
                     select(Meeting).where(Meeting.notion_id == notion_id)
                 ).first()
 
-            # Map category — first match wins, fallback GENERAL
+            # Map category — first non-GENERAL match wins, fallback GENERAL
             raw_categories = raw.categories or []
             category = MeetingCategory.GENERAL
             for raw_cat in raw_categories:
-                mapped = _NOTION_MEETING_CATEGORY_MAP.get(raw_cat.lower())
-                if mapped:
-                    category = MeetingCategory(mapped)
+                category = MeetingCategoryMapper.notion_to_local(raw_cat)
+                if category != MeetingCategory.GENERAL:
                     break
 
             if existing:
@@ -269,10 +195,7 @@ class WriteBackService:
     def push_task_status(self, task: Task) -> WriteBackStatus:
         if not task.source_id:
             return WriteBackStatus(ok=False, error="Task has no Jira source_id")
-        status_key = task.status.value if hasattr(task.status, "value") else task.status
-        jira_status = _LOCAL_TO_JIRA_STATUS.get(status_key)
-        if not jira_status:
-            return WriteBackStatus(ok=False, error=f"No Jira status mapping for '{status_key}'")
+        jira_status = StatusMapper.local_to_jira(task.status)
         try:
             ok = self._jira.update_task_status(task.source_id, jira_status)
             if ok:
@@ -285,10 +208,7 @@ class WriteBackService:
     def push_task_status_to_notion(self, task: Task) -> WriteBackStatus:
         if not task.notion_id:
             return WriteBackStatus(ok=False, error="Task has no notion_id")
-        status_key = task.status.value if hasattr(task.status, "value") else task.status
-        notion_status = _LOCAL_TO_NOTION_STATUS.get(status_key)
-        if not notion_status:
-            return WriteBackStatus(ok=False, error=f"No Notion status mapping for '{status_key}'")
+        notion_status = StatusMapper.local_to_notion(task.status)
         try:
             ok = self._notion.update_task_status(task.notion_id, notion_status)
             if ok:
@@ -307,12 +227,8 @@ class WriteBackService:
                 error=result.error,
                 page_id=task.notion_id if result.ok else None,
             )
-        notion_status = _LOCAL_TO_NOTION_STATUS.get(
-            task.status.value if hasattr(task.status, "value") else task.status,
-            "Not started",
-        )
-        priority = task.priority.value if hasattr(task.priority, "value") else task.priority
-        priority_label = priority.capitalize() if priority else None
+        notion_status = StatusMapper.local_to_notion(task.status)
+        priority_label = PriorityMapper.local_to_notion(task.priority)
         try:
             page_id = self._notion.create_task_page(
                 name=task.name,
@@ -340,12 +256,11 @@ class WriteBackService:
                     logger.warning("WriteBack push_meeting_to_notion (update) failed: %s", e)
                     return WriteBackStatus(ok=False, error=str(e))
             return WriteBackStatus(ok=True, page_id=meeting.notion_id)
-        category_value = meeting.category.value if hasattr(meeting.category, "value") else meeting.category
-        notion_category = _LOCAL_TO_NOTION_MEETING_CATEGORY.get(category_value)
+        notion_category = MeetingCategoryMapper.local_to_notion(meeting.category)
         if not notion_category:
             return WriteBackStatus(
                 ok=False,
-                error=f"No Notion category mapping for '{category_value}'",
+                error=f"No Notion category mapping for '{meeting.category.value}'",
             )
         try:
             page_id = self._notion.create_meeting_page(
