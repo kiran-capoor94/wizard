@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 def test_session_start_creates_session(db_session):
@@ -316,3 +316,137 @@ def test_session_end_saves_summary_note(db_session):
     saved = db_session.get(Note, data["note_id"])
     assert saved.note_type == NoteType.SESSION_SUMMARY
     assert saved.session_id == session_id
+
+
+def test_task_start_closes_db_on_error(db_session):
+    from src.tools import task_start
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    repo = NoteRepository()
+    security = SecurityService()
+    mock_db = MagicMock(wraps=db_session)
+    mock_db.get.return_value = None
+    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
+        with patch("src.tools._get_db", return_value=mock_db):
+            with pytest.raises(ValueError):
+                task_start(task_id=999)
+    mock_db.close.assert_called_once()
+
+
+def test_update_task_status_dual_writeback(db_session):
+    from src.tools import update_task_status
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import Task, TaskStatus
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    wb.push_task_status.return_value = True
+    wb.push_task_status_to_notion.return_value = True
+    repo = NoteRepository()
+    security = SecurityService()
+    task = Task(name="fix", source_id="ENG-1", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
+        with patch("src.tools._get_db", return_value=db_session):
+            result = update_task_status(task_id=task.id, new_status="done")
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert data["write_back_succeeded"] is True
+    assert data["notion_write_back_succeeded"] is True
+
+
+def test_ingest_meeting_creates_meeting(db_session):
+    from src.tools import ingest_meeting
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import Meeting
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    wb.push_meeting_to_notion.return_value = True
+    repo = NoteRepository()
+    security = SecurityService()
+    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
+        with patch("src.tools._get_db", return_value=db_session):
+            result = ingest_meeting(
+                title="Sprint Planning",
+                content="john@example.com reported a bug",
+                source_id="krisp-abc",
+                source_url="https://krisp.ai/m/abc",
+                category="planning",
+            )
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert "meeting_id" in data
+    assert data["already_existed"] is False
+    meeting = db_session.get(Meeting, data["meeting_id"])
+    assert "john@example.com" not in meeting.content
+    assert "[EMAIL_1]" in meeting.content
+
+
+def test_ingest_meeting_dedup_by_source_id(db_session):
+    from src.tools import ingest_meeting
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import Meeting
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    wb.push_meeting_to_notion.return_value = True
+    repo = NoteRepository()
+    security = SecurityService()
+    existing = Meeting(title="Old", content="old", source_id="krisp-abc")
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
+        with patch("src.tools._get_db", return_value=db_session):
+            result = ingest_meeting(title="New", content="new", source_id="krisp-abc")
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert data["already_existed"] is True
+    assert data["meeting_id"] == existing.id
+
+
+def test_create_task_creates_and_links(db_session):
+    from src.tools import create_task
+    from src.services import SyncService, WriteBackService
+    from src.repositories import NoteRepository
+    from src.security import SecurityService
+    from src.models import Meeting, Task, TaskStatus
+    from sqlmodel import select
+    sync = MagicMock(spec=SyncService)
+    wb = MagicMock(spec=WriteBackService)
+    wb.push_task_to_notion.return_value = True
+    repo = NoteRepository()
+    security = SecurityService()
+    meeting = Meeting(title="standup", content="notes")
+    db_session.add(meeting)
+    db_session.commit()
+    db_session.refresh(meeting)
+    meeting_id = meeting.id
+    with patch("src.tools._get_deps", return_value=(sync, wb, repo, security)):
+        with patch("src.tools._get_db", return_value=db_session):
+            result = create_task(
+                name="Fix john@example.com auth bug",
+                priority="high",
+                meeting_id=meeting_id,
+            )
+    data = result if isinstance(result, dict) else json.loads(result)
+    assert "task_id" in data
+    assert data["notion_write_back_succeeded"] is True
+    task = db_session.get(Task, data["task_id"])
+    assert "john@example.com" not in task.name
+    assert task.status == TaskStatus.TODO
+    # Verify link
+    from src.models import MeetingTasks
+    link = db_session.exec(
+        select(MeetingTasks).where(
+            MeetingTasks.task_id == task.id,
+            MeetingTasks.meeting_id == meeting_id,
+        )
+    ).first()
+    assert link is not None
