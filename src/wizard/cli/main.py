@@ -141,3 +141,60 @@ def doctor() -> None:
     else:
         typer.echo("\nSome checks failed — run 'wizard setup' to fix.")
         raise typer.Exit(code=1)
+
+
+@app.command()
+def uninstall(
+    yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
+) -> None:
+    """Remove all Wizard runtime state and MCP registration."""
+    from wizard.mcp_config import deregister_wizard_mcp, find_wizard_mcp_targets
+
+    # Step 1: Gather what exists
+    wizard_files = {
+        "wizard.db": "all notes, sessions, meetings",
+        "config.json": None,
+        "skills/": None,
+    }
+    existing_files: list[tuple[str, str | None]] = []
+    for name, desc in wizard_files.items():
+        path = WIZARD_HOME / name.rstrip("/")
+        if path.exists():
+            existing_files.append((name, desc))
+
+    mcp_targets = find_wizard_mcp_targets()
+
+    has_wizard_dir = WIZARD_HOME.exists()
+    has_anything = has_wizard_dir or bool(mcp_targets)
+
+    if not has_anything:
+        typer.echo("Nothing to uninstall.")
+        return
+
+    # Step 2: Confirmation prompt
+    if not yes:
+        typer.echo("This will permanently delete:")
+        for name, desc in existing_files:
+            suffix = f"  ({desc})" if desc else ""
+            typer.echo(f"  ~/.wizard/{name}{suffix}")
+        if has_wizard_dir and not existing_files:
+            typer.echo("  ~/.wizard/")
+        for name in mcp_targets:
+            typer.echo(f"  wizard MCP entry from {name} config")
+        typer.echo("")
+        confirm = typer.prompt("Are you sure? [y/N]", default="N", show_default=False)
+        if confirm.lower() != "y":
+            typer.echo("Aborted.")
+            return
+
+    # Step 3: Execute
+    deregistered = deregister_wizard_mcp()
+    for name in deregistered:
+        typer.echo(f"  Removed wizard MCP from {name}")
+
+    if has_wizard_dir:
+        shutil.rmtree(WIZARD_HOME)
+        typer.echo(f"  Removed {WIZARD_HOME}")
+
+    # Step 4: Summary
+    typer.echo("Wizard uninstalled. Run `pip uninstall wizard` to remove the package.")
