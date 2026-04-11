@@ -7,16 +7,13 @@ import typer
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(
-    name="wizard",
-    help="Wizard — local memory layer for AI agents",
-    invoke_without_command=True,
-)
+app = typer.Typer(name="wizard", invoke_without_command=True)
 
 
 @app.callback()
 def _main_callback() -> None:
     """Wizard — local memory layer for AI agents."""
+
 
 WIZARD_HOME = Path.home() / ".wizard"
 
@@ -78,9 +75,14 @@ def sync() -> None:
 @app.command()
 def doctor() -> None:
     """Check wizard installation health."""
-    from wizard.config import settings
-
     ok = True
+
+    try:
+        from wizard.config import settings
+    except Exception as e:
+        typer.echo(f"  [ERROR] config failed to load: {e}")
+        typer.echo("\nSome checks failed — run 'wizard setup' to fix.")
+        raise typer.Exit(code=1)
 
     # 1. Check ~/.wizard/ exists
     if WIZARD_HOME.exists():
