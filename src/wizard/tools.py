@@ -1,7 +1,7 @@
 import logging
 
 from fastmcp.exceptions import ToolError
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from .database import get_session
 from .deps import meeting_repo, note_repo, notion_client, security, sync_service, task_repo, writeback
@@ -16,6 +16,7 @@ from .models import (
     TaskCategory,
     TaskPriority,
     TaskStatus,
+    ToolCall,
     WizardSession,
 )
 from .schemas import (
@@ -34,6 +35,11 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 
+def _log_tool_call(db: Session, tool_name: str, session_id: int | None = None) -> None:
+    db.add(ToolCall(tool_name=tool_name, session_id=session_id))
+    db.flush()
+
+
 # ---------------------------------------------------------------------------
 # Tool functions
 # ---------------------------------------------------------------------------
@@ -48,6 +54,7 @@ def session_start() -> SessionStartResponse:
         db.flush()
         db.refresh(session)
         assert session.id is not None
+        _log_tool_call(db, "session_start", session_id=session.id)
 
         sync_results = sync_service().sync_all(db)
 
@@ -79,6 +86,7 @@ def task_start(task_id: int) -> TaskStartResponse:
     logger.info("task_start task_id=%d", task_id)
     try:
         with get_session() as db:
+            _log_tool_call(db, "task_start")
             task = task_repo().get_by_id(db, task_id)
             task_ctx = task_repo().build_task_context(db, task)
 
@@ -106,6 +114,7 @@ def save_note(task_id: int, note_type: NoteType, content: str) -> SaveNoteRespon
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
         with get_session() as db:
+            _log_tool_call(db, "save_note")
             task = task_repo().get_by_id(db, task_id)
             clean = security().scrub(content).clean
             note = Note(
@@ -113,6 +122,7 @@ def save_note(task_id: int, note_type: NoteType, content: str) -> SaveNoteRespon
                 content=clean,
                 task_id=task.id,
                 source_id=task.source_id,
+                source_type=task.source_type,
             )
             saved = note_repo().save(db, note)
             assert saved.id is not None
@@ -129,6 +139,7 @@ def update_task_status(
     logger.info("update_task_status task_id=%d new_status=%s", task_id, new_status.value)
     try:
         with get_session() as db:
+            _log_tool_call(db, "update_task_status")
             task = task_repo().get_by_id(db, task_id)
             task.status = new_status
             db.add(task)
@@ -159,6 +170,7 @@ def get_meeting(meeting_id: int) -> GetMeetingResponse:
     logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
         with get_session() as db:
+            _log_tool_call(db, "get_meeting")
             meeting = meeting_repo().get_by_id(db, meeting_id)
             assert meeting.id is not None
 
@@ -189,6 +201,7 @@ def save_meeting_summary(
     logger.info("save_meeting_summary meeting_id=%d session_id=%d", meeting_id, session_id)
     try:
         with get_session() as db:
+            _log_tool_call(db, "save_meeting_summary", session_id=session_id)
             meeting = meeting_repo().get_by_id(db, meeting_id)
             assert meeting.id is not None
 
@@ -235,6 +248,7 @@ def session_end(session_id: int, summary: str) -> SessionEndResponse:
     """Persists session summary note and attempts Notion daily page write-back."""
     logger.info("session_end session_id=%d", session_id)
     with get_session() as db:
+        _log_tool_call(db, "session_end", session_id=session_id)
         session = db.get(WizardSession, session_id)
         if session is None:
             raise ToolError(f"Session {session_id} not found")
@@ -272,6 +286,7 @@ def ingest_meeting(
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
     logger.info("ingest_meeting source_id=%s", source_id)
     with get_session() as db:
+        _log_tool_call(db, "ingest_meeting")
         clean_title = security().scrub(title).clean
         clean_content = security().scrub(content).clean
 
@@ -324,6 +339,7 @@ def create_task(
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
     with get_session() as db:
+        _log_tool_call(db, "create_task")
         clean_name = security().scrub(name).clean
         task = Task(
             name=clean_name,

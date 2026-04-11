@@ -130,3 +130,16 @@ class Note(TimestampMixin, table=True):
     task_id: int | None = Field(default=None, foreign_key="task.id")
     meeting_id: int | None = Field(default=None, foreign_key="meeting.id")
     session: WizardSession | None = Relationship(back_populates="notes")
+
+
+class ToolCall(SQLModel, table=True):
+    """Telemetry — append-only, never updated. No TimestampMixin because
+    updated_at is meaningless and called_at is more intention-revealing
+    than created_at for a log record."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    session_id: int | None = Field(default=None, foreign_key="wizardsession.id")
+    tool_name: str
+    called_at: datetime.datetime = Field(
+        default_factory=datetime.datetime.now, index=True
+    )
