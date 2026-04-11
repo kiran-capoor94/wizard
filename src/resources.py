@@ -1,3 +1,4 @@
+from fastmcp.resources import ResourceContent, ResourceResult
 from sqlmodel import col, select
 
 from .config import settings
@@ -15,7 +16,7 @@ from .schemas import (
 )
 
 
-def current_session() -> SessionResource:
+def current_session():
     """Active session with open/blocked task counts."""
     with get_session() as db:
         stmt = (
@@ -26,45 +27,95 @@ def current_session() -> SessionResource:
         )
         session = db.exec(stmt).first()
         if session is None:
-            return SessionResource(
-                session_id=None, open_task_count=0, blocked_task_count=0
+            return ResourceResult(
+                contents=[
+                    ResourceContent(
+                        content=SessionResource(
+                            session_id=None, open_task_count=0, blocked_task_count=0
+                        ).model_dump_json(),
+                        mime_type="application/json",
+                    )
+                ]
             )
-        return SessionResource(
-            session_id=session.id,
-            open_task_count=len(task_repo().get_open_task_contexts(db)),
-            blocked_task_count=len(task_repo().get_blocked_task_contexts(db)),
+        return ResourceResult(
+            contents=[
+                ResourceContent(
+                    content=SessionResource(
+                        session_id=session.id,
+                        open_task_count=len(task_repo().get_open_task_contexts(db)),
+                        blocked_task_count=len(
+                            task_repo().get_blocked_task_contexts(db)
+                        ),
+                    ).model_dump_json(),
+                    mime_type="application/json",
+                )
+            ]
         )
 
 
-def open_tasks() -> OpenTasksResource:
+def open_tasks():
     """All open tasks with status and priority."""
     with get_session() as db:
-        return OpenTasksResource(tasks=task_repo().get_open_task_contexts(db))
+        return ResourceResult(
+            contents=[
+                ResourceContent(
+                    content=OpenTasksResource(
+                        tasks=task_repo().get_open_task_contexts(db)
+                    ).model_dump_json(),
+                    mime_type="application/json",
+                )
+            ]
+        )
 
 
-def blocked_tasks() -> BlockedTasksResource:
+def blocked_tasks():
     """All blocked tasks."""
     with get_session() as db:
-        return BlockedTasksResource(tasks=task_repo().get_blocked_task_contexts(db))
+        return ResourceResult(
+            contents=[
+                ResourceContent(
+                    content=BlockedTasksResource(
+                        tasks=task_repo().get_blocked_task_contexts(db)
+                    ).model_dump_json(),
+                    mime_type="application/json",
+                )
+            ]
+        )
 
 
-def task_context(task_id: int) -> TaskContextResource:
+def task_context(task_id: int):
     """Full task detail — metadata, notes, history."""
     with get_session() as db:
         task = task_repo().get_by_id(db, task_id)
         task_ctx = task_repo().build_task_context(db, task)
         notes = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
         note_details = [NoteDetail.from_model(n) for n in notes if n.id is not None]
-        return TaskContextResource(task=task_ctx, notes=note_details)
+        return ResourceResult(
+            contents=[
+                ResourceContent(
+                    content=TaskContextResource(
+                        task=task_ctx, notes=note_details
+                    ).model_dump_json(),
+                    mime_type="application/json",
+                )
+            ]
+        )
 
 
-def wizard_config() -> ConfigResource:
+def wizard_config():
     """Current config — enabled integrations, active sources, database path."""
-    return ConfigResource(
-        jira_enabled=bool(settings.jira.token),
-        notion_enabled=bool(settings.notion.token),
-        scrubbing_enabled=settings.scrubbing.enabled,
-        database_path=settings.db,
+    return ResourceResult(
+        contents=[
+            ResourceContent(
+                content=ConfigResource(
+                    jira_enabled=bool(settings.jira.token),
+                    notion_enabled=bool(settings.notion.token),
+                    scrubbing_enabled=settings.scrubbing.enabled,
+                    database_path=settings.db,
+                ).model_dump_json(),
+                mime_type="application/json",
+            )
+        ]
     )
 
 
