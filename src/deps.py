@@ -23,6 +23,7 @@ def jira_client() -> JiraClient:
         base_url=settings.jira.base_url,
         token=settings.jira.token,
         project_key=settings.jira.project_key,
+        email=settings.jira.email,
     )
 
 
