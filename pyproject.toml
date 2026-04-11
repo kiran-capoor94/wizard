@@ -1,6 +1,6 @@
 [project]
 name = "wizard"
-version = "1.1.1"
+version = "1.1.2"
 description = "Local memory layer MCP server — syncs Jira and Notion, scrubs PII, surfaces structured context across sessions"
 readme = "README.md"
 requires-python = ">=3.14"
