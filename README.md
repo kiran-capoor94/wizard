@@ -155,3 +155,13 @@ src/wizard/
     main.py              # Typer CLI (setup, sync, doctor, uninstall)
   skills/                # FastMCP skills (installed to ~/.wizard/skills/)
 ```
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+Built by [Kiran Capoor](https://github.com/kiran-capoor94) — [Ctrl Alt Tech](https://youtube.com/@ctrlalttechwithkiran)
+
+Built with [FastMCP](https://github.com/jlowin/fastmcp), [SQLModel](https://sqlmodel.tiangolo.com/), [Typer](https://typer.tiangolo.com/), [httpx](https://www.python-httpx.org/), and [Notion SDK](https://github.com/ramnes/notion-sdk-py).
