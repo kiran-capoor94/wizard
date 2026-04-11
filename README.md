@@ -5,7 +5,7 @@
 [![Built with FastMCP](https://img.shields.io/badge/built%20with-FastMCP-purple)](https://github.com/jlowin/fastmcp)
 [![SQLite](https://img.shields.io/badge/database-SQLite-lightblue)](https://www.sqlite.org/)
 
-*A local memory layer for AI agents. Syncs Jira and Notion, scrubs PII, and surfaces structured context across sessions.*
+_A local memory layer for AI agents. Syncs Jira and Notion, scrubs PII, and surfaces structured context across sessions._
 
 AI coding agents forget everything between sessions. Wizard gives them persistent memory — tasks, meetings, notes, and decisions — synced from the tools you already use, with PII scrubbed before anything touches disk.
 
@@ -17,7 +17,7 @@ AI coding agents forget everything between sessions. Wizard gives them persisten
 git clone https://github.com/kiran-capoor94/wizard.git
 cd wizard
 uv sync
-wizard setup
+uv run wizard setup
 ```
 
 `wizard setup` creates `~/.wizard/`, scaffolds `config.json`, installs skills, and registers the MCP server with Claude Code and Claude Desktop.
@@ -39,17 +39,17 @@ Context compounds. The more you use Wizard, the less ramp-up time each session c
 
 Wizard exposes 9 tools via the [Model Context Protocol](https://modelcontextprotocol.io/). The MCP server self-describes its tools, so this is just for orientation.
 
-| Tool | Description |
-|------|-------------|
-| `session_start` | Sync all sources, return open/blocked tasks and unsummarised meetings |
-| `session_end` | Persist session summary, update daily Notion page |
-| `task_start` | Get full task context + all prior notes |
-| `create_task` | Create a new task, optionally linked to a meeting |
-| `update_task_status` | Update status locally + write back to Jira/Notion |
-| `save_note` | Scrub PII and persist investigation/decision/learning notes |
-| `get_meeting` | Retrieve transcript and linked open tasks |
-| `save_meeting_summary` | Store summary, create note, update Notion |
-| `ingest_meeting` | Accept raw meeting data (e.g. from Krisp), scrub and store |
+| Tool                   | Description                                                           |
+| ---------------------- | --------------------------------------------------------------------- |
+| `session_start`        | Sync all sources, return open/blocked tasks and unsummarised meetings |
+| `session_end`          | Persist session summary, update daily Notion page                     |
+| `task_start`           | Get full task context + all prior notes                               |
+| `create_task`          | Create a new task, optionally linked to a meeting                     |
+| `update_task_status`   | Update status locally + write back to Jira/Notion                     |
+| `save_note`            | Scrub PII and persist investigation/decision/learning notes           |
+| `get_meeting`          | Retrieve transcript and linked open tasks                             |
+| `save_meeting_summary` | Store summary, create note, update Notion                             |
+| `ingest_meeting`       | Accept raw meeting data (e.g. from Krisp), scrub and store            |
 
 ## Architecture
 
@@ -106,21 +106,21 @@ After running `wizard setup`, edit `~/.wizard/config.json`:
 }
 ```
 
-| Field | Notes |
-|-------|-------|
-| `jira.token` | [Create an API token](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) from your Atlassian account |
-| `notion.token` | [Create an integration](https://www.notion.so/profile/integrations) and share your databases with it |
-| `scrubbing.allowlist` | Regex patterns for identifiers to preserve through PII scrubbing (e.g. `ENG-\d+` keeps Jira keys intact) |
+| Field                 | Notes                                                                                                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jira.token`          | [Create an API token](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) from your Atlassian account |
+| `notion.token`        | [Create an integration](https://www.notion.so/profile/integrations) and share your databases with it                                                  |
+| `scrubbing.allowlist` | Regex patterns for identifiers to preserve through PII scrubbing (e.g. `ENG-\d+` keeps Jira keys intact)                                              |
 
 Override the config path with the `WIZARD_CONFIG_FILE` environment variable.
 
 ## CLI
 
 ```
-wizard setup       # Initialize ~/.wizard/, config, skills, MCP registration
-wizard sync        # Manual sync from Jira/Notion
-wizard doctor      # Health check — config, database, integrations, skills
-wizard uninstall   # Clean removal of all state and MCP registration
+uv run wizard setup       # Initialize ~/.wizard/, config, skills, MCP registration
+uv run wizard sync        # Manual sync from Jira/Notion
+uv run wizard doctor      # Health check — config, database, integrations, skills
+uv run wizard uninstall   # Clean removal of all state and MCP registration
 ```
 
 ## Development
