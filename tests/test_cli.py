@@ -52,10 +52,7 @@ def test_setup_creates_default_config(tmp_path):
     assert "scrubbing" in config
 
 
-import pytest
 
-
-@pytest.mark.skip(reason="requires skills from Task 5")
 def test_setup_copies_skills(tmp_path):
     wizard_dir = tmp_path / ".wizard"
 
