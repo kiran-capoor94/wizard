@@ -52,6 +52,15 @@ def setup() -> None:
     else:
         typer.echo("No skills found in package — skipping skill install")
 
+    # Register MCP server in Claude config files
+    from wizard.mcp_config import register_wizard_mcp
+
+    registered = register_wizard_mcp()
+    for name in registered:
+        typer.echo(f"  Registered wizard MCP in {name}")
+    if not registered:
+        typer.echo("  No Claude config files found — MCP not registered. Run setup again after installing Claude.")
+
     typer.echo("Setup complete.")
 
 
