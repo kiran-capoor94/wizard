@@ -1,3 +1,4 @@
+import base64
 import logging
 import re
 
@@ -29,21 +30,22 @@ class ConfigurationError(Exception):
 
 
 class JiraClient:
-    def __init__(self, base_url: str, token: str, project_key: str):
+    def __init__(self, base_url: str, token: str, project_key: str, email: str = ""):
         self._base_url = base_url.rstrip("/")
         self._project_key = project_key
-        self._client: httpx.Client | None = (
-            httpx.Client(
-                base_url=f"{self._base_url}/rest/api/2",
+        self._email = email
+        self._token = token
+        self._client: httpx.Client | None = None
+        if token:
+            self._client = httpx.Client(
+                base_url=f"{self._base_url}/rest/api/3",
                 headers={
-                    "Authorization": f"Bearer {token}",
+                    "Authorization": f"Basic {base64.b64encode(f'{email}:{token}'.encode()).decode()}",
                     "Content-Type": "application/json",
+                    "Accept": "application/json",
                 },
                 timeout=HTTPX_TIMEOUT,
             )
-            if token
-            else None
-        )
 
     def close(self) -> None:
         if self._client is not None:
@@ -58,11 +60,16 @@ class JiraClient:
         client = self._require_client()
         try:
             jql = f"project={self._project_key} AND statusCategory != Done ORDER BY priority DESC"
-            response = client.get(
-                "/search", params={"jql": jql, "maxResults": 50}
+            response = client.post(
+                "/search/jql",
+                json={"jql": jql, "maxResults": 50},
             )
             response.raise_for_status()
             issues = response.json().get("issues", [])
+            if not issues:
+                logger.warning(
+                    "Jira fetch_open_tasks: got 0 issues - may lack Browse Projects permission"
+                )
             return [
                 JiraTaskData(
                     key=issue["key"],
@@ -74,6 +81,16 @@ class JiraClient:
                 )
                 for issue in issues
             ]
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "Jira fetch_open_tasks HTTP error: %s - Response: %s",
+                e,
+                e.response.text[:500],
+            )
+            return []
+        except httpx.HTTPError as e:
+            logger.warning("Jira fetch_open_tasks failed: %s", e)
+            return []
         except httpx.HTTPError as e:
             logger.warning("Jira fetch_open_tasks failed: %s", e)
             return []
@@ -83,13 +100,27 @@ class JiraClient:
         try:
             response = client.post(
                 f"/issue/{source_id}/transitions",
-                json={"transition": {"name": status}},
+                json={"transition": {"id": self._get_transition_id(source_id, status)}},
             )
             response.raise_for_status()
             return True
         except httpx.HTTPError as e:
             logger.warning("Jira update_task_status failed: %s", e)
             return False
+
+    def _get_transition_id(self, issue_key: str, status: str) -> str | None:
+        """Get transition ID for a given status name."""
+        client = self._require_client()
+        try:
+            response = client.get(f"/issue/{issue_key}/transitions")
+            response.raise_for_status()
+            transitions = response.json().get("transitions", [])
+            for t in transitions:
+                if t.get("name", "").lower() == status.lower():
+                    return t.get("id")
+        except httpx.HTTPError:
+            pass
+        return None
 
 
 def _extract_jira_key(url: str | None) -> str | None:
@@ -132,13 +163,9 @@ class NotionClient:
         return self._client
 
     def _query_database(self, database_id: str, **kwargs) -> dict:
-        """Query a database by ID. Wraps client.request for v3.0 compat (databases.query was removed)."""
+        """Query a database by ID using data_sources API (v3.0)."""
         client = self._require_client()
-        return client.request(
-            path=f"databases/{database_id}/query",
-            method="POST",
-            body=kwargs,
-        )
+        return client.data_sources.query(data_source_id=database_id, **kwargs)
 
     def fetch_tasks(self) -> list[NotionTaskData]:
         """Query Tasks DB, return normalised NotionTaskData models."""
@@ -167,8 +194,8 @@ class NotionClient:
                 )
                 tasks.append(task)
             return tasks
-        except APIResponseError as e:
-            logger.warning("Notion fetch_tasks failed: %s", e)
+        except Exception as e:
+            logger.warning("Notion fetch_tasks failed: %s - %s", type(e).__name__, e)
             return []
 
     def fetch_meetings(self) -> list[NotionMeetingData]:
@@ -200,8 +227,8 @@ class NotionClient:
                 )
                 meetings.append(meeting)
             return meetings
-        except APIResponseError as e:
-            logger.warning("Notion fetch_meetings failed: %s", e)
+        except Exception as e:
+            logger.warning("Notion fetch_meetings failed: %s - %s", type(e).__name__, e)
             return []
 
     def create_task_page(
