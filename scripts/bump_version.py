@@ -41,7 +41,6 @@ def bump_version(current: str, bump_type: str) -> str:
 
 
 _PYPROJECT_VERSION_RE = re.compile(r'^(version\s*=\s*")([^"]+)(")', re.MULTILINE)
-_CONFIG_VERSION_RE = re.compile(r'^(\s*version:\s*str\s*=\s*")([^"]+)(")', re.MULTILINE)
 
 
 def read_current_version(project_root: Path | None = None) -> str:
