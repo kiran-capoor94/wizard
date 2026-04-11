@@ -175,11 +175,14 @@ class NotionClient:
 
     def _list_sisu_work_children(self) -> list[dict]:
         """Return non-archived child_page blocks under the SISU Work page."""
-        client = self._require_client()
-        results = client.blocks.children.list(block_id=self._sisu_work_page_id)
+        self._require_client()
+        blocks = collect_paginated_api(
+            self._client.blocks.children.list,
+            block_id=self._sisu_work_page_id,
+        )
         return [
             block
-            for block in results.get("results", [])
+            for block in blocks
             if block.get("type") == "child_page" and not block.get("archived", False)
         ]
 
