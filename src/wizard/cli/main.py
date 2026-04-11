@@ -31,7 +31,7 @@ def _package_skills_dir() -> Path:
 
 @app.command()
 def setup() -> None:
-    """Create ~/.wizard, default config, and install skills."""
+    """Create ~/.wizard, default config, install skills, and register MCP."""
     WIZARD_HOME.mkdir(parents=True, exist_ok=True)
 
     config_path = WIZARD_HOME / "config.json"
