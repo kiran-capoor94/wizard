@@ -551,3 +551,124 @@ def test_fastmcp_serializes_pydantic_models():
         )
 
     assert test_tool is not None
+
+
+# ---------------------------------------------------------------------------
+# ToolCall telemetry
+# ---------------------------------------------------------------------------
+
+def test_session_start_logs_tool_call(db_session):
+    from wizard.tools import session_start
+    from wizard.models import ToolCall
+    from sqlmodel import select
+
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_all = MagicMock(return_value=[])
+
+    with patch.multiple("wizard.tools", **patches):
+        result = session_start()
+
+    rows = db_session.exec(select(ToolCall)).all()
+    assert len(rows) == 1
+    assert rows[0].tool_name == "session_start"
+    assert rows[0].session_id == result.session_id
+
+
+def test_task_start_logs_tool_call_without_session_id(db_session):
+    from wizard.tools import task_start
+    from wizard.models import Task, ToolCall
+    from sqlmodel import select
+
+    task = Task(name="test", source_id="T-1", source_type="JIRA")
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        task_start(task_id=task.id)
+
+    rows = db_session.exec(select(ToolCall)).all()
+    assert len(rows) == 1
+    assert rows[0].tool_name == "task_start"
+    assert rows[0].session_id is None
+
+
+def test_session_end_logs_tool_call_with_session_id(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession, ToolCall
+    from sqlmodel import select
+
+    session = WizardSession(daily_page_id="p-1")
+    db_session.add(session)
+    db_session.flush()
+    db_session.refresh(session)
+
+    patches, _, wb_mock = _patch_tools(db_session)
+    from wizard.schemas import WriteBackStatus
+    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
+
+    with patch.multiple("wizard.tools", **patches):
+        session_end(session_id=session.id, summary="done")
+
+    rows = db_session.exec(select(ToolCall)).all()
+    assert len(rows) == 1
+    assert rows[0].tool_name == "session_end"
+    assert rows[0].session_id == session.id
+
+
+def test_ingest_meeting_logs_tool_call_without_session_id(db_session):
+    from wizard.tools import ingest_meeting
+    from wizard.models import ToolCall
+    from sqlmodel import select
+
+    patches, _, wb_mock = _patch_tools(db_session)
+    from wizard.schemas import WriteBackStatus
+    wb_mock.push_meeting_to_notion = MagicMock(
+        return_value=WriteBackStatus(ok=False, error="no token")
+    )
+
+    with patch.multiple("wizard.tools", **patches):
+        ingest_meeting(title="standup", content="transcript here")
+
+    rows = db_session.exec(select(ToolCall)).all()
+    assert len(rows) == 1
+    assert rows[0].tool_name == "ingest_meeting"
+    assert rows[0].session_id is None
+
+
+def test_tool_call_sequence_within_session(db_session):
+    """session_start -> save_note -> session_end produces ordered ToolCall rows."""
+    from wizard.tools import session_start, save_note, session_end
+    from wizard.models import Task, ToolCall, NoteType
+    from wizard.schemas import WriteBackStatus
+    from sqlmodel import col, select
+
+    task = Task(name="test", source_id="T-1", source_type="JIRA")
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    patches, sync_mock, wb_mock = _patch_tools(db_session)
+    sync_mock.sync_all = MagicMock(return_value=[])
+    wb_mock.push_session_summary = MagicMock(
+        return_value=WriteBackStatus(ok=True)
+    )
+
+    with patch.multiple("wizard.tools", **patches):
+        s = session_start()
+        save_note(
+            task_id=task.id,
+            note_type=NoteType.INVESTIGATION,
+            content="finding",
+        )
+        session_end(session_id=s.session_id, summary="wrap up")
+
+    rows = db_session.exec(
+        select(ToolCall).order_by(col(ToolCall.called_at))
+    ).all()
+    names = [r.tool_name for r in rows]
+    assert names == ["session_start", "save_note", "session_end"]
+    assert rows[0].session_id == s.session_id
+    assert rows[1].session_id is None
+    assert rows[2].session_id == s.session_id
