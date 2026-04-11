@@ -12,17 +12,18 @@
 
 ## File Structure
 
-| File | Action | Responsibility |
-|------|--------|----------------|
-| `src/prompts.py` | Modify | Replace custom Message import with FastMCP's Message |
-| `src/tools.py` | Modify | Expand `task_start` and `get_meeting` docstrings |
-| `tests/test_prompts.py` | Verify (no changes) | Existing tests validate prompt return shape |
+| File                    | Action              | Responsibility                                       |
+| ----------------------- | ------------------- | ---------------------------------------------------- |
+| `src/prompts.py`        | Modify              | Replace custom Message import with FastMCP's Message |
+| `src/tools.py`          | Modify              | Expand `task_start` and `get_meeting` docstrings     |
+| `tests/test_prompts.py` | Verify (no changes) | Existing tests validate prompt return shape          |
 
 ---
 
 ### Task 1: Fix prompt Message type
 
 **Files:**
+
 - Modify: `src/prompts.py:1-14`
 - Test: `tests/test_prompts.py`
 
@@ -90,6 +91,7 @@ or str. This caused TypeError on all three multi-message prompts."
 ### Task 2: Improve tool docstrings
 
 **Files:**
+
 - Modify: `src/tools.py:63-64` (task_start docstring)
 - Modify: `src/tools.py:139-140` (get_meeting docstring)
 

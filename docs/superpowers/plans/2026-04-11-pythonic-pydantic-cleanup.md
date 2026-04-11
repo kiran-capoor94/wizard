@@ -13,6 +13,7 @@
 ### Task 1: Modern Typing + pyproject.toml
 
 **Files:**
+
 - Modify: `pyproject.toml:7`
 - Modify: `src/models.py:2-3`
 - Modify: `src/schemas.py:2`
@@ -31,6 +32,7 @@ requires-python = ">=3.14"
 - [ ] **Step 2: Modernize models.py typing**
 
 Replace:
+
 ```python
 from typing import Optional
 ```
@@ -72,6 +74,7 @@ session: WizardSession | None = Relationship(back_populates="notes")
 - [ ] **Step 3: Modernize schemas.py typing**
 
 Replace:
+
 ```python
 from typing import Optional
 ```
@@ -81,11 +84,13 @@ With nothing. Replace all `Optional[X]` with `X | None` throughout the file. Aff
 - [ ] **Step 4: Modernize repositories.py typing**
 
 Replace:
+
 ```python
 from typing import Optional
 ```
 
 With nothing. Change `get_for_task` signature:
+
 ```python
 def get_for_task(
     self,
@@ -98,11 +103,13 @@ def get_for_task(
 - [ ] **Step 5: Modernize database.py typing**
 
 Replace:
+
 ```python
 from typing import Generator
 ```
 
 With `collections.abc.Generator`:
+
 ```python
 from collections.abc import Generator
 ```
@@ -127,6 +134,7 @@ collections.abc.Generator. Bump requires-python to >=3.14."
 ### Task 2: ScrubResult dataclass to Pydantic BaseModel
 
 **Files:**
+
 - Modify: `src/security.py`
 - Test: `tests/test_security.py` (no changes needed — existing tests verify behavior)
 
@@ -213,6 +221,7 @@ Also modernize typing: Dict to dict, List to list, Tuple to tuple, Optional to |
 ### Task 3: Message dataclass to Pydantic BaseModel + prompts.py cleanup
 
 **Files:**
+
 - Modify: `src/prompts.py`
 - Test: `tests/test_prompts.py` (no changes needed)
 
@@ -348,6 +357,7 @@ mcp.prompt()(user_elicitation)
 ```
 
 Changes from original:
+
 - `dataclass` import replaced with `pydantic.BaseModel`
 - `Message` extends `BaseModel` instead of `@dataclass`
 - `_get_mcp()` wrapper replaced with direct `from .mcp_instance import mcp`
@@ -373,6 +383,7 @@ Also replace _get_mcp() wrapper with direct import."
 ### Task 4: Mappers underscore prefix cleanup
 
 **Files:**
+
 - Modify: `src/mappers.py`
 - Test: `tests/test_mappers.py` (no changes needed — tests use mapper classes, not dict names)
 
@@ -412,6 +423,7 @@ Module-level constants used by mapper classes, not private internals."
 ### Task 5: integrations.py + services.py import cleanup
 
 **Files:**
+
 - Modify: `src/integrations.py`
 - Modify: `src/services.py`
 - Test: `tests/test_integrations.py` (no changes needed yet)
@@ -486,6 +498,7 @@ from .security import SecurityService
 ```
 
 Then remove all in-function imports from `services.py` method bodies:
+
 - `_sync_jira`: remove `from .models import Task`
 - `_sync_notion_tasks`: remove `from .models import Task` and `import datetime as _dt`, replace `_dt.datetime` with `datetime.datetime`
 - `_sync_notion_meetings`: remove `from .models import Meeting, MeetingCategory`
@@ -510,6 +523,7 @@ services.py: direct model imports, move datetime to top-level."
 ### Task 6: Notion Property Pydantic Models
 
 **Files:**
+
 - Modify: `src/schemas.py` (add Notion property models)
 - Modify: `src/integrations.py` (replace `_get_*` helpers with model usage)
 - Modify: `tests/test_integrations.py` (rewrite helper function tests)
@@ -667,9 +681,10 @@ class NotionStatus(NotionPropertyValue):
 Run: `pytest tests/test_integrations.py -k "TestNotion" -v`
 Expected: All 14 new tests pass.
 
-- [ ] **Step 5: Replace _get_* helpers in integrations.py with model usage**
+- [ ] **Step 5: Replace _get_\* helpers in integrations.py with model usage**
 
 Remove these functions from `src/integrations.py`:
+
 - `_get_title`
 - `_get_rich_text`
 - `_get_select`
@@ -679,6 +694,7 @@ Remove these functions from `src/integrations.py`:
 - `_get_status`
 
 Update the import at top of `src/integrations.py` to include Notion property models:
+
 ```python
 from .schemas import (
     JiraTaskData, NotionMeetingData, NotionTaskData,
@@ -688,6 +704,7 @@ from .schemas import (
 ```
 
 Update `fetch_tasks` method in `NotionClient`:
+
 ```python
 def fetch_tasks(self) -> list[NotionTaskData]:
     """Query Tasks DB, return normalised NotionTaskData models."""
@@ -721,6 +738,7 @@ def fetch_tasks(self) -> list[NotionTaskData]:
 ```
 
 Update `fetch_meetings` method:
+
 ```python
 def fetch_meetings(self) -> list[NotionMeetingData]:
     """Query Meeting Notes DB, return normalised NotionMeetingData models."""
@@ -754,6 +772,7 @@ def fetch_meetings(self) -> list[NotionMeetingData]:
 - [ ] **Step 6: Update test_integrations.py — remove old helper tests**
 
 Remove these test functions from `tests/test_integrations.py`:
+
 - `test_get_title`
 - `test_get_rich_text`
 - `test_get_select`
@@ -785,6 +804,7 @@ NotionUrl, NotionDate, NotionStatus models to schemas.py. Replace
 ### Task 7: resources.py cleanup
 
 **Files:**
+
 - Modify: `src/resources.py`
 - Test: `tests/test_resources.py` (no changes needed)
 
@@ -884,6 +904,7 @@ mcp.resource("wizard://config")(wizard_config)
 ```
 
 Changes from original:
+
 - `_get_mcp()` wrapper replaced with direct `from .mcp_instance import mcp`
 - `_task_repo` renamed to `task_repo`, `_note_repo` renamed to `note_repo`
 - `_mcp` variable replaced with direct `mcp` usage
@@ -909,6 +930,7 @@ move config import to top-level."
 ### Task 8: tools.py — @lru_cache singletons + top-level imports + enum params
 
 **Files:**
+
 - Modify: `src/tools.py`
 - Modify: `tests/test_tools.py`
 
@@ -1484,12 +1506,12 @@ Expected: No output.
 Run: `grep -rn "from typing import.*Optional\|from typing import.*Dict\|from typing import.*List\|from typing import.*Tuple" src/`
 Expected: No output (config.py still imports `Any`, which is correct).
 
-- [ ] **Step 4: Verify no remaining __future__ imports**
+- [ ] **Step 4: Verify no remaining **future** imports**
 
 Run: `grep -rn "from __future__" src/`
 Expected: No output.
 
-- [ ] **Step 5: Verify no remaining _get_mcp pattern**
+- [ ] **Step 5: Verify no remaining \_get_mcp pattern**
 
 Run: `grep -rn "_get_mcp" src/`
 Expected: No output.
