@@ -409,13 +409,12 @@ class NotionClient:
             logger.warning("Notion update_meeting_summary failed: %s", e)
             return False
 
-    def update_daily_page(self, summary: str) -> bool:
-        """Update Session Summary property on daily page."""
+    def update_daily_page(self, page_id: str, summary: str) -> bool:
+        """Update Session Summary property on a daily page."""
         client = self._require_client()
-
         try:
             client.pages.update(
-                page_id=self._sisu_work_page_id,
+                page_id=page_id,
                 properties={
                     "Session Summary": {"rich_text": [{"text": {"content": summary}}]}
                 },
