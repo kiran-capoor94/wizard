@@ -79,3 +79,79 @@ graph TD
 **Integrations** — Jira REST API (basic auth) and Notion SDK. Graceful error handling so a single integration failure doesn't block the session.
 
 **Why SQLite?** Local-first, zero infrastructure, ships with Python. Wizard is a personal tool — it doesn't need Postgres.
+
+## Configuration
+
+After running `wizard setup`, edit `~/.wizard/config.json`:
+
+```json
+{
+  "db": "~/.wizard/wizard.db",
+  "jira": {
+    "base_url": "https://yourorg.atlassian.net",
+    "project_key": "ENG",
+    "token": "your-jira-api-token",
+    "email": "your@email.com"
+  },
+  "notion": {
+    "token": "your-notion-integration-token",
+    "sisu_work_page_id": "notion-page-id",
+    "tasks_db_id": "notion-tasks-db-id",
+    "meetings_db_id": "notion-meetings-db-id"
+  },
+  "scrubbing": {
+    "enabled": true,
+    "allowlist": ["ENG-\\d+"]
+  }
+}
+```
+
+| Field | Notes |
+|-------|-------|
+| `jira.token` | [Create an API token](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) from your Atlassian account |
+| `notion.token` | [Create an integration](https://www.notion.so/profile/integrations) and share your databases with it |
+| `scrubbing.allowlist` | Regex patterns for identifiers to preserve through PII scrubbing (e.g. `ENG-\d+` keeps Jira keys intact) |
+
+Override the config path with the `WIZARD_CONFIG_FILE` environment variable.
+
+## CLI
+
+```
+wizard setup       # Initialize ~/.wizard/, config, skills, MCP registration
+wizard sync        # Manual sync from Jira/Notion
+wizard doctor      # Health check — config, database, integrations, skills
+wizard uninstall   # Clean removal of all state and MCP registration
+```
+
+## Development
+
+```bash
+uv run pytest                  # Run tests
+uv run server.py               # Run server locally
+uv run alembic upgrade head    # Run migrations
+```
+
+### Project Structure
+
+```
+server.py                # FastMCP server entry point
+src/wizard/
+  mcp_instance.py        # MCP app factory
+  models.py              # SQLModel entities (Task, Meeting, Note, Session)
+  schemas.py             # Pydantic response schemas
+  repositories.py        # Query layer
+  services.py            # Sync and write-back logic
+  integrations.py        # Jira and Notion clients
+  mappers.py             # External-to-internal data mapping
+  tools.py               # MCP tool functions
+  prompts.py             # MCP prompt templates
+  resources.py           # MCP read-only resources
+  security.py            # PII scrubbing
+  config.py              # Pydantic settings
+  database.py            # SQLite connection management
+  deps.py                # Dependency injection
+  mcp_config.py          # MCP server configuration
+  cli/
+    main.py              # Typer CLI (setup, sync, doctor, uninstall)
+  skills/                # FastMCP skills (installed to ~/.wizard/skills/)
+```
