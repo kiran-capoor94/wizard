@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 class JsonConfigSettingsSource(PydanticBaseSettingsSource):
     def get_field_value(
-        self, field, field_name  # noqa: ARG002
+        self,
+        field,
+        field_name,  # noqa: ARG002
     ) -> tuple[Any, str, bool]:
         return None, field_name, False
 
@@ -35,6 +37,7 @@ class JiraSettings(BaseModel):
     base_url: str = ""
     project_key: str = ""
     token: str = ""
+    email: str = ""
 
 
 class NotionSettings(BaseModel):
