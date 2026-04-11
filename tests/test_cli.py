@@ -52,6 +52,28 @@ def test_setup_creates_default_config(tmp_path):
     assert "scrubbing" in config
 
 
+import pytest
+
+
+@pytest.mark.skip(reason="requires skills from Task 5")
+def test_setup_copies_skills(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        result = runner.invoke(ctx.app, ["setup"])
+
+    assert result.exit_code == 0
+    skills_dir = wizard_dir / "skills"
+    assert skills_dir.exists()
+    assert (skills_dir / "session-start" / "SKILL.md").exists()
+    assert (skills_dir / "task-start" / "SKILL.md").exists()
+    assert (skills_dir / "note" / "SKILL.md").exists()
+    assert (skills_dir / "meeting" / "SKILL.md").exists()
+    assert (skills_dir / "code-review" / "SKILL.md").exists()
+    assert (skills_dir / "architecture-debate" / "SKILL.md").exists()
+    assert (skills_dir / "session-end" / "SKILL.md").exists()
+
+
 def test_setup_handles_missing_skills_source(tmp_path):
     wizard_dir = tmp_path / ".wizard"
 
