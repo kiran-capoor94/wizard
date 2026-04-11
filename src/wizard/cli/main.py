@@ -73,3 +73,60 @@ def sync() -> None:
         typer.echo(f"  {r.source}: {status}")
 
     typer.echo("Sync complete.")
+
+
+@app.command()
+def doctor() -> None:
+    """Check wizard installation health."""
+    from wizard.config import settings
+
+    ok = True
+
+    # 1. Check ~/.wizard/ exists
+    if WIZARD_HOME.exists():
+        typer.echo(f"  [ok] wizard home: {WIZARD_HOME}")
+    else:
+        typer.echo(f"  [MISSING] wizard home not found: {WIZARD_HOME}")
+        ok = False
+
+    # 2. Check config.json
+    config_path = WIZARD_HOME / "config.json"
+    if config_path.exists():
+        typer.echo(f"  [ok] config: {config_path}")
+    else:
+        typer.echo(f"  [MISSING] config not found: {config_path}")
+        ok = False
+
+    # 3. Check DB
+    db_path = Path(settings.db)
+    if settings.db == ":memory:" or db_path.exists():
+        typer.echo(f"  [ok] database: {settings.db}")
+    else:
+        typer.echo(f"  [MISSING] database not found: {settings.db}")
+        ok = False
+
+    # 4. Check integrations
+    if settings.jira.token:
+        typer.echo("  [ok] jira: configured")
+    else:
+        typer.echo("  [--] jira: not configured")
+
+    if settings.notion.token:
+        typer.echo("  [ok] notion: configured")
+    else:
+        typer.echo("  [--] notion: not configured")
+
+    # 5. Check skills
+    skills_dir = WIZARD_HOME / "skills"
+    if skills_dir.exists() and any(skills_dir.iterdir()):
+        skill_count = sum(1 for d in skills_dir.iterdir() if d.is_dir())
+        typer.echo(f"  [ok] skills: {skill_count} installed")
+    else:
+        typer.echo("  [MISSING] skills not installed — run 'wizard setup'")
+        ok = False
+
+    if ok:
+        typer.echo("\nAll checks passed.")
+    else:
+        typer.echo("\nSome checks failed — run 'wizard setup' to fix.")
+        raise typer.Exit(code=1)
