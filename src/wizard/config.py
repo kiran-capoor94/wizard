@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 class JsonConfigSettingsSource(PydanticBaseSettingsSource):
     def get_field_value(
         self,
-        field,
-        field_name,  # noqa: ARG002
+        field,  # noqa: ARG002
+        field_name,
     ) -> tuple[Any, str, bool]:
         return None, field_name, False
 
@@ -54,7 +54,7 @@ class ScrubbingSettings(BaseModel):
 
 class Settings(BaseSettings):
     name: str = "wizard"
-    version: str = "1.1.0"
+    version: str = "1.1.1"
     db: str = str(Path.home() / ".wizard" / "wizard.db")
     jira: JiraSettings = Field(default_factory=JiraSettings)
     notion: NotionSettings = Field(default_factory=NotionSettings)

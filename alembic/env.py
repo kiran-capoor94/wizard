@@ -5,16 +5,16 @@ from logging.config import fileConfig
 from alembic import context
 from sqlmodel import SQLModel
 
-# Ensure project root is on sys.path so src/ is importable
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure src/ is on sys.path so wizard package is importable
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-from src.database import engine  # noqa: E402
-import src.models  # noqa: F401, E402 — registers Task, Meeting, MeetingTasks with SQLModel.metadata
+from wizard.database import engine  # noqa: E402
+import wizard.models  # noqa: F401, E402 — registers Task, Meeting, MeetingTasks with SQLModel.metadata
 
 config.set_main_option("sqlalchemy.url", str(engine.url))
 

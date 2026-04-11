@@ -1,4 +1,4 @@
-from src.security import SecurityService
+from wizard.security import SecurityService
 
 
 def test_email_is_redacted():
