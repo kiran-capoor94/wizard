@@ -175,12 +175,19 @@ class NoteDetail(BaseModel):
         )
 
 
+class DailyPageResult(BaseModel):
+    page_id: str
+    created: bool
+    archived_count: int
+
+
 class SessionStartResponse(BaseModel):
     session_id: int
     open_tasks: list[TaskContext]
     blocked_tasks: list[TaskContext]
     unsummarised_meetings: list[MeetingContext]
     sync_results: list[SourceSyncStatus]
+    daily_page: DailyPageResult | None = None
 
 
 class TaskStartResponse(BaseModel):

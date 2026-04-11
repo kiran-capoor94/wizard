@@ -1,4 +1,5 @@
 import base64
+import datetime
 import logging
 import re
 
@@ -131,6 +132,12 @@ def _extract_jira_key(url: str | None) -> str | None:
     return match.group(1) if match else None
 
 
+def _today_title() -> str:
+    """Build today's daily page title, e.g. 'Friday 11 April 2026'."""
+    today = datetime.date.today()
+    return f"{today:%A} {today.day} {today:%B %Y}"
+
+
 def _extract_krisp_id(url: str | None) -> str | None:
     """Extract meeting ID from last path segment of a Krisp URL."""
     if not url:
@@ -150,9 +157,9 @@ def _extract_krisp_id(url: str | None) -> str | None:
 
 class NotionClient:
     def __init__(
-        self, token: str, daily_page_id: str, tasks_db_id: str, meetings_db_id: str
+        self, token: str, sisu_work_page_id: str, tasks_db_id: str, meetings_db_id: str
     ):
-        self._daily_page_id = daily_page_id
+        self._sisu_work_page_id = sisu_work_page_id
         self._tasks_db_id = tasks_db_id
         self._meetings_db_id = meetings_db_id
         self._client = NotionSdkClient(auth=token) if token else None
@@ -166,6 +173,90 @@ class NotionClient:
         """Query a database by ID using data_sources API (v3.0)."""
         client = self._require_client()
         return client.data_sources.query(data_source_id=database_id, **kwargs)
+
+    def _list_sisu_work_children(self) -> list[dict]:
+        """Return non-archived child_page blocks under the SISU Work page."""
+        self._require_client()
+        blocks = collect_paginated_api(
+            self._client.blocks.children.list,
+            block_id=self._sisu_work_page_id,
+        )
+        return [
+            block
+            for block in blocks
+            if block.get("type") == "child_page" and not block.get("archived", False)
+        ]
+
+    def find_daily_page(self, title: str) -> str | None:
+        """Find a child page of SISU Work matching the given title."""
+        try:
+            for block in self._list_sisu_work_children():
+                if block.get("child_page", {}).get("title") == title:
+                    return block["id"]
+            return None
+        except Exception as e:
+            logger.warning("Notion find_daily_page failed: %s", e)
+            return None
+
+    def create_daily_page(self, title: str) -> str | None:
+        """Create a child page under SISU Work with title and empty Session Summary."""
+        client = self._require_client()
+        try:
+            response = client.pages.create(
+                parent={"page_id": self._sisu_work_page_id},
+                properties={
+                    "title": [{"text": {"content": title}}],
+                    "Session Summary": {"rich_text": [{"text": {"content": ""}}]},
+                },
+            )
+            return response.get("id")
+        except APIResponseError as e:
+            logger.warning("Notion create_daily_page failed: %s", e)
+            return None
+
+    def archive_page(self, page_id: str) -> bool:
+        """Archive a Notion page by ID."""
+        client = self._require_client()
+        try:
+            client.pages.update(page_id=page_id, archived=True)
+            return True
+        except APIResponseError as e:
+            logger.warning("Notion archive_page failed: %s", e)
+            return False
+
+    def ensure_daily_page(self) -> "DailyPageResult":
+        """Find or create today's daily page. Archive stale daily pages."""
+        from .schemas import DailyPageResult
+
+        title = _today_title()
+        children = self._list_sisu_work_children()
+
+        page_id: str | None = None
+        stale_ids: list[str] = []
+        for block in children:
+            block_title = block.get("child_page", {}).get("title", "")
+            if block_title == title:
+                page_id = block["id"]
+            else:
+                stale_ids.append(block["id"])
+
+        created = False
+        if page_id is None:
+            page_id = self.create_daily_page(title)
+            if page_id is None:
+                raise ConfigurationError(
+                    f"Failed to create daily page '{title}' under SISU Work"
+                )
+            created = True
+
+        archived_count = 0
+        for stale_id in stale_ids:
+            if self.archive_page(stale_id):
+                archived_count += 1
+
+        return DailyPageResult(
+            page_id=page_id, created=created, archived_count=archived_count
+        )
 
     def fetch_tasks(self) -> list[NotionTaskData]:
         """Query Tasks DB, return normalised NotionTaskData models."""
@@ -322,13 +413,12 @@ class NotionClient:
             logger.warning("Notion update_meeting_summary failed: %s", e)
             return False
 
-    def update_daily_page(self, summary: str) -> bool:
-        """Update Session Summary property on daily page."""
+    def update_daily_page(self, page_id: str, summary: str) -> bool:
+        """Update Session Summary property on a daily page."""
         client = self._require_client()
-
         try:
             client.pages.update(
-                page_id=self._daily_page_id,
+                page_id=page_id,
                 properties={
                     "Session Summary": {"rich_text": [{"text": {"content": summary}}]}
                 },
