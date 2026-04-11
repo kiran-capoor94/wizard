@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 class JsonConfigSettingsSource(PydanticBaseSettingsSource):
     def get_field_value(
         self,
-        field,
-        field_name,  # noqa: ARG002
+        field,  # noqa: ARG002
+        field_name,
     ) -> tuple[Any, str, bool]:
         return None, field_name, False
 
