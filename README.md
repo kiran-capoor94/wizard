@@ -23,3 +23,30 @@ wizard setup
 `wizard setup` creates `~/.wizard/`, scaffolds `config.json`, installs skills, and registers the MCP server with Claude Code and Claude Desktop.
 
 See [Configuration](#configuration) for Jira and Notion setup.
+
+## How It Works
+
+Wizard is built around a **session lifecycle** that keeps your agent grounded across work sessions.
+
+1. **Session Start** — Wizard syncs tasks from Jira and meetings from Notion, creates a session, and returns what needs attention.
+2. **Work** — As you investigate tasks and review meetings, Wizard stores notes that compound across sessions. Each time you revisit a task, you get everything from before.
+3. **Write-back** — Status changes and summaries push back to Jira and Notion so your external tools stay in sync.
+4. **Session End** — Wizard persists a session summary and updates your daily Notion page.
+
+Context compounds. The more you use Wizard, the less ramp-up time each session costs. Your agent starts where you left off, not from scratch.
+
+## MCP Tools
+
+Wizard exposes 9 tools via the [Model Context Protocol](https://modelcontextprotocol.io/). The MCP server self-describes its tools, so this is just for orientation.
+
+| Tool | Description |
+|------|-------------|
+| `session_start` | Sync all sources, return open/blocked tasks and unsummarised meetings |
+| `session_end` | Persist session summary, update daily Notion page |
+| `task_start` | Get full task context + all prior notes |
+| `create_task` | Create a new task, optionally linked to a meeting |
+| `update_task_status` | Update status locally + write back to Jira/Notion |
+| `save_note` | Scrub PII and persist investigation/decision/learning notes |
+| `get_meeting` | Retrieve transcript and linked open tasks |
+| `save_meeting_summary` | Store summary, create note, update Notion |
+| `ingest_meeting` | Accept raw meeting data (e.g. from Krisp), scrub and store |
