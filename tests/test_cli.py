@@ -168,3 +168,42 @@ def test_doctor_reports_missing_wizard_home(tmp_path):
 
     assert result.exit_code == 1
     assert "not found" in result.output.lower() or "missing" in result.output.lower()
+
+
+# --- setup MCP registration tests ---
+
+
+def test_setup_registers_mcp_in_claude_configs(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    code_cfg = tmp_path / "claude.json"
+    desktop_cfg = tmp_path / "desktop_config.json"
+    code_cfg.write_text(json.dumps({}))
+    desktop_cfg.write_text(json.dumps({}))
+
+    with _fresh_app(wizard_dir) as ctx:
+        with (
+            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
+            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
+        ):
+            result = runner.invoke(ctx.app, ["setup"])
+
+    assert result.exit_code == 0
+    code_data = json.loads(code_cfg.read_text())
+    assert "wizard" in code_data.get("mcpServers", {})
+    assert "Claude Code" in result.output
+
+
+def test_setup_skips_mcp_when_config_missing(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    code_cfg = tmp_path / "claude.json"  # does not exist
+    desktop_cfg = tmp_path / "desktop_config.json"  # does not exist
+
+    with _fresh_app(wizard_dir) as ctx:
+        with (
+            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
+            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
+        ):
+            result = runner.invoke(ctx.app, ["setup"])
+
+    assert result.exit_code == 0
+    assert not code_cfg.exists()
