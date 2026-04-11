@@ -193,8 +193,12 @@ def uninstall(
         typer.echo(f"  Removed wizard MCP from {name}")
 
     if has_wizard_dir:
-        shutil.rmtree(WIZARD_HOME)
-        typer.echo(f"  Removed {WIZARD_HOME}")
+        try:
+            shutil.rmtree(WIZARD_HOME)
+            typer.echo(f"  Removed {WIZARD_HOME}")
+        except OSError as e:
+            typer.echo(f"  Failed to remove {WIZARD_HOME}: {e}", err=True)
+            raise typer.Exit(code=1)
 
     # Step 4: Summary
-    typer.echo("Wizard uninstalled. Run `pip uninstall wizard` to remove the package.")
+    typer.echo("Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package.")
