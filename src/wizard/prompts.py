@@ -75,36 +75,46 @@ def meeting_summarisation(meeting_data: str) -> list[Message]:
     ]
 
 
-def session_wrapup() -> str:
+def session_wrapup() -> list[Message]:
     """Guides session end."""
-    return (
-        "You're ending a Wizard session. Before closing:\n\n"
-        "1. Summarise what was accomplished this session\n"
-        "2. List what's still open or in progress\n"
-        "3. Note any status changes made to tasks\n"
-        "4. Highlight anything that needs attention next session\n\n"
-        "Keep it brief — this summary is for continuity between sessions. "
-        "Focus on what changed and what matters next."
-    )
+    return [
+        Message(
+            role="user",
+            content=(
+                "You're ending a Wizard session. Before closing:\n\n"
+                "1. Summarise what was accomplished this session\n"
+                "2. List what's still open or in progress\n"
+                "3. Note any status changes made to tasks\n"
+                "4. Highlight anything that needs attention next session\n\n"
+                "Keep it brief — this summary is for continuity between sessions. "
+                "Focus on what changed and what matters next."
+            ),
+        ),
+    ]
 
 
-def user_elicitation() -> str:
+def user_elicitation() -> list[Message]:
     """Meta-prompt: when and how to ask the user for direction."""
-    return (
-        "When working with Wizard session data, follow these rules for user interaction:\n\n"
-        "Ask the user when:\n"
-        "- Multiple tasks have similar priority and you need to choose which to work on\n"
-        "- A blocked task's blocker is ambiguous and you need context\n"
-        "- A meeting summary needs domain-specific interpretation\n"
-        "- You're unsure whether to change a task's status\n"
-        "- The triage order isn't obvious from priority alone\n\n"
-        "Don't ask when:\n"
-        "- There's one clear highest-priority item\n"
-        "- The next step is obvious from prior notes\n"
-        "- You're just recording findings as notes\n\n"
-        "Prefer giving the user a concrete recommendation with your reasoning, "
-        "then asking for confirmation, over open-ended questions."
-    )
+    return [
+        Message(
+            role="user",
+            content=(
+                "When working with Wizard session data, follow these rules for user interaction:\n\n"
+                "Ask the user when:\n"
+                "- Multiple tasks have similar priority and you need to choose which to work on\n"
+                "- A blocked task's blocker is ambiguous and you need context\n"
+                "- A meeting summary needs domain-specific interpretation\n"
+                "- You're unsure whether to change a task's status\n"
+                "- The triage order isn't obvious from priority alone\n\n"
+                "Don't ask when:\n"
+                "- There's one clear highest-priority item\n"
+                "- The next step is obvious from prior notes\n"
+                "- You're just recording findings as notes\n\n"
+                "Prefer giving the user a concrete recommendation with your reasoning, "
+                "then asking for confirmation, over open-ended questions."
+            ),
+        ),
+    ]
 
 
 # ---------------------------------------------------------------------------
