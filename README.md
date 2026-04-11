@@ -50,3 +50,32 @@ Wizard exposes 9 tools via the [Model Context Protocol](https://modelcontextprot
 | `get_meeting` | Retrieve transcript and linked open tasks |
 | `save_meeting_summary` | Store summary, create note, update Notion |
 | `ingest_meeting` | Accept raw meeting data (e.g. from Krisp), scrub and store |
+
+## Architecture
+
+```mermaid
+graph TD
+    A[Claude Code / Claude Desktop] --> B[FastMCP Server]
+    B --> C[Tools]
+    B --> D[Prompts]
+    B --> E[Resources]
+    C --> F[Services]
+    C --> G[Security]
+    F --> H[Repositories]
+    G --> I[PII Scrubbing]
+    H --> J[(Jira)]
+    H --> K[(Notion)]
+    H --> L[(SQLite)]
+```
+
+**MCP Layer** — FastMCP server exposing tools, prompts, and resources. Tools are the write path, resources are the read path, prompts guide agent behaviour.
+
+**Services** — `SyncService` handles bidirectional upsert. External sources win on metadata (name, priority, due date), but local wins on status — you don't want a sync to overwrite a status you deliberately set to BLOCKED.
+
+**Security** — PII scrubbing on all ingested content before it touches disk. Regex-based with an allowlist for org-specific identifiers you want to preserve. Why scrub before storage instead of on read? Data at rest should never contain PII. Defence in depth.
+
+**Repositories** — Query layer over SQLModel/SQLite. Supports compounding context — prior notes are automatically retrieved when you revisit a task.
+
+**Integrations** — Jira REST API (basic auth) and Notion SDK. Graceful error handling so a single integration failure doesn't block the session.
+
+**Why SQLite?** Local-first, zero infrastructure, ships with Python. Wizard is a personal tool — it doesn't need Postgres.
