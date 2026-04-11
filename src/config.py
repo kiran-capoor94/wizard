@@ -41,7 +41,7 @@ class JiraSettings(BaseModel):
 
 
 class NotionSettings(BaseModel):
-    daily_page_id: str = ""
+    sisu_work_page_id: str = ""
     tasks_db_id: str = ""
     meetings_db_id: str = ""
     token: str = ""

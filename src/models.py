@@ -111,6 +111,7 @@ class WizardSession(TimestampMixin, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     summary: str | None = None
+    daily_page_id: str | None = None
     notes: list["Note"] = Relationship(back_populates="session")
 
 

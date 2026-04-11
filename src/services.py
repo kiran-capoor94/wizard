@@ -290,10 +290,13 @@ class WriteBackService:
         )
 
     def push_session_summary(self, session: WizardSession) -> WriteBackStatus:
+        if not session.daily_page_id:
+            return WriteBackStatus(ok=False, error="Session has no daily_page_id")
         if not session.summary:
             return WriteBackStatus(ok=False, error="Session has no summary")
+        page_id = session.daily_page_id
         summary = session.summary
         return self._call(
-            lambda: self._notion.update_daily_page(summary),
+            lambda: self._notion.update_daily_page(page_id, summary),
             "WriteBack push_session_summary",
         )

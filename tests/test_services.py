@@ -153,13 +153,37 @@ def test_push_session_summary_calls_notion_daily_page(db_session):
     notion.update_daily_page.return_value = True
 
     svc = WriteBackService(jira=jira, notion=notion)
-    session = WizardSession(summary="today's session summary")
+    session = WizardSession(summary="today's session summary", daily_page_id="page-abc")
 
     result = svc.push_session_summary(session)
 
     assert result.ok is True
     assert result.error is None
-    notion.update_daily_page.assert_called_once_with("today's session summary")
+    notion.update_daily_page.assert_called_once_with("page-abc", "today's session summary")
+
+
+def test_push_session_summary_uses_session_daily_page_id():
+    from src.services import WriteBackService
+    from src.models import WizardSession
+    from src.integrations import JiraClient, NotionClient
+    mock_notion = MagicMock(spec=NotionClient)
+    mock_notion.update_daily_page.return_value = True
+    service = WriteBackService(jira=MagicMock(spec=JiraClient), notion=mock_notion)
+    session = WizardSession(id=1, summary="Good session", daily_page_id="page-xyz")
+    result = service.push_session_summary(session)
+    assert result.ok is True
+    mock_notion.update_daily_page.assert_called_once_with("page-xyz", "Good session")
+
+
+def test_push_session_summary_fails_without_daily_page_id():
+    from src.services import WriteBackService
+    from src.models import WizardSession
+    from src.integrations import JiraClient, NotionClient
+    service = WriteBackService(jira=MagicMock(spec=JiraClient), notion=MagicMock(spec=NotionClient))
+    session = WizardSession(id=1, summary="Good session", daily_page_id=None)
+    result = service.push_session_summary(session)
+    assert result.ok is False
+    assert "daily_page_id" in result.error.lower()
 
 
 # ============================================================================

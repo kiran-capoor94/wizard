@@ -5,15 +5,26 @@ import pytest
 from tests.helpers import mock_session
 
 
-def _patch_tools(db_session, sync=None, wb=None):
+def _make_notion_mock(notion=None):
+    """Build a notion_client mock. Default: ensure_daily_page raises (non-fatal path)."""
+    if notion is not None:
+        return notion
+    mock = MagicMock()
+    mock.ensure_daily_page.side_effect = Exception("notion not configured in tests")
+    return mock
+
+
+def _patch_tools(db_session, sync=None, wb=None, notion=None):
     """Patch tools module dependencies with test doubles. Returns (patches, sync_mock, wb_mock)."""
     sync_mock = sync or MagicMock()
     wb_mock = wb or MagicMock()
+    notion_mock = _make_notion_mock(notion)
 
     patches = {
         "get_session": mock_session(db_session),
         "sync_service": lambda: sync_mock,
         "writeback": lambda: wb_mock,
+        "notion_client": lambda: notion_mock,
     }
     return patches, sync_mock, wb_mock
 
@@ -67,6 +78,48 @@ def test_session_start_surfaces_sync_errors(db_session):
     assert jira_sync.ok is False
     assert jira_sync.error == "Jira token not configured"
     assert result.sync_results[1].ok is True
+
+
+def test_session_start_resolves_daily_page(db_session):
+    from src.tools import session_start
+    from src.schemas import DailyPageResult
+    from src.models import WizardSession
+
+    notion_mock = MagicMock()
+    notion_mock.ensure_daily_page.return_value = DailyPageResult(
+        page_id="today-page-id",
+        created=True,
+        archived_count=1,
+    )
+
+    patches, sync_mock, _ = _patch_tools(db_session, notion=notion_mock)
+    sync_mock.sync_all = MagicMock(return_value=[])
+
+    with patch.multiple("src.tools", **patches):
+        result = session_start()
+
+    assert result.daily_page is not None
+    assert result.daily_page.page_id == "today-page-id"
+    assert result.daily_page.created is True
+
+    session = db_session.get(WizardSession, result.session_id)
+    assert session.daily_page_id == "today-page-id"
+
+
+def test_session_start_daily_page_failure_is_non_fatal(db_session):
+    from src.tools import session_start
+
+    notion_mock = MagicMock()
+    notion_mock.ensure_daily_page.side_effect = Exception("notion API down")
+
+    patches, sync_mock, _ = _patch_tools(db_session, notion=notion_mock)
+    sync_mock.sync_all = MagicMock(return_value=[])
+
+    with patch.multiple("src.tools", **patches):
+        result = session_start()
+
+    assert result.session_id is not None
+    assert result.daily_page is None
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +341,7 @@ def test_session_end_saves_summary_note(db_session):
     wb_mock = MagicMock()
     wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
 
-    session = WizardSession()
+    session = WizardSession(daily_page_id="test-daily-page")
     db_session.add(session)
     db_session.commit()
     db_session.refresh(session)
@@ -303,10 +356,15 @@ def test_session_end_saves_summary_note(db_session):
         )
 
     assert result.note_id is not None
+    assert result.notion_write_back.ok is True
 
     saved = db_session.get(Note, result.note_id)
     assert saved.note_type == NoteType.SESSION_SUMMARY
     assert saved.session_id == session_id
+
+    wb_mock.push_session_summary.assert_called_once()
+    called_session = wb_mock.push_session_summary.call_args[0][0]
+    assert called_session.daily_page_id == "test-daily-page"
 
 
 # ---------------------------------------------------------------------------
