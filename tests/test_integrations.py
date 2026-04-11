@@ -108,7 +108,7 @@ def test_jira_raises_configuration_error_on_update_when_no_token():
 
 @respx.mock
 def test_jira_fetch_open_tasks_returns_list():
-    respx.get("https://jira.example.com/rest/api/2/search").mock(
+    respx.post("https://jira.example.com/rest/api/3/search/jql").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -120,7 +120,7 @@ def test_jira_fetch_open_tasks_returns_list():
                             "status": {"name": "In Progress"},
                             "priority": {"name": "High"},
                             "issuetype": {"name": "Bug"},
-                            "self": "https://jira.example.com/rest/api/2/issue/ENG-1",
+                            "self": "https://jira.example.com/rest/api/3/issue/ENG-1",
                         },
                     }
                 ]
@@ -140,7 +140,7 @@ def test_jira_fetch_open_tasks_returns_list():
 
 @respx.mock
 def test_jira_fetch_open_tasks_returns_empty_on_http_error():
-    respx.get("https://jira.example.com/rest/api/2/search").mock(
+    respx.post("https://jira.example.com/rest/api/3/search/jql").mock(
         return_value=httpx.Response(500)
     )
     client = make_jira_client()
@@ -151,7 +151,17 @@ def test_jira_fetch_open_tasks_returns_empty_on_http_error():
 
 @respx.mock
 def test_jira_update_task_status_returns_true_on_success():
-    respx.post("https://jira.example.com/rest/api/2/issue/ENG-1/transitions").mock(
+    respx.get("https://jira.example.com/rest/api/3/issue/ENG-1/transitions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "transitions": [
+                    {"id": "31", "name": "Done"},
+                ]
+            },
+        )
+    )
+    respx.post("https://jira.example.com/rest/api/3/issue/ENG-1/transitions").mock(
         return_value=httpx.Response(204)
     )
     client = make_jira_client()
@@ -162,7 +172,17 @@ def test_jira_update_task_status_returns_true_on_success():
 
 @respx.mock
 def test_jira_update_task_status_returns_false_on_http_error():
-    respx.post("https://jira.example.com/rest/api/2/issue/ENG-1/transitions").mock(
+    respx.get("https://jira.example.com/rest/api/3/issue/ENG-1/transitions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "transitions": [
+                    {"id": "31", "name": "Done"},
+                ]
+            },
+        )
+    )
+    respx.post("https://jira.example.com/rest/api/3/issue/ENG-1/transitions").mock(
         return_value=httpx.Response(500)
     )
     client = make_jira_client()
