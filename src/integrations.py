@@ -134,7 +134,8 @@ def _extract_jira_key(url: str | None) -> str | None:
 
 def _today_title() -> str:
     """Build today's daily page title, e.g. 'Friday 11 April 2026'."""
-    return datetime.date.today().strftime("%A %-d %B %Y")
+    today = datetime.date.today()
+    return f"{today:%A} {today.day} {today:%B %Y}"
 
 
 def _extract_krisp_id(url: str | None) -> str | None:
