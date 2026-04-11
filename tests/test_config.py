@@ -64,6 +64,13 @@ def test_notion_has_db_ids(tmp_path, monkeypatch):
     assert settings.notion.meetings_db_id == "def-456"
 
 
+def test_notion_has_sisu_work_page_id():
+    from src.config import NotionSettings
+    s = NotionSettings()
+    assert hasattr(s, "sisu_work_page_id")
+    assert s.sisu_work_page_id == ""
+
+
 def test_krisp_settings_removed(tmp_path, monkeypatch):
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps({"db": ":memory:"}))
