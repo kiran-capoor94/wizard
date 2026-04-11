@@ -32,7 +32,7 @@ def notion_client() -> NotionClient:
     logger.debug("Creating NotionClient singleton")
     return NotionClient(
         token=settings.notion.token,
-        daily_page_id=settings.notion.daily_page_id,
+        sisu_work_page_id=settings.notion.sisu_work_page_id,
         tasks_db_id=settings.notion.tasks_db_id,
         meetings_db_id=settings.notion.meetings_db_id,
     )
