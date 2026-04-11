@@ -91,3 +91,50 @@ def test_setup_is_idempotent(tmp_path):
         result = runner.invoke(ctx.app, ["setup"])
 
     assert result.exit_code == 0
+
+
+# --- sync command tests ---
+
+from unittest.mock import MagicMock
+
+
+def test_sync_calls_sync_all(db_session):
+    from tests.helpers import mock_session
+
+    sync_mock = MagicMock()
+    sync_mock.sync_all.return_value = []
+
+    with (
+        patch("wizard.deps.sync_service", return_value=sync_mock),
+        patch("wizard.database.get_session", mock_session(db_session)),
+    ):
+        from wizard.cli.main import app
+
+        result = runner.invoke(app, ["sync"])
+
+    assert result.exit_code == 0
+    sync_mock.sync_all.assert_called_once()
+
+
+def test_sync_reports_results(db_session):
+    from wizard.schemas import SourceSyncStatus
+    from tests.helpers import mock_session
+
+    sync_mock = MagicMock()
+    sync_mock.sync_all.return_value = [
+        SourceSyncStatus(source="jira", ok=True),
+        SourceSyncStatus(source="notion_tasks", ok=False, error="timeout"),
+    ]
+
+    with (
+        patch("wizard.deps.sync_service", return_value=sync_mock),
+        patch("wizard.database.get_session", mock_session(db_session)),
+    ):
+        from wizard.cli.main import app
+
+        result = runner.invoke(app, ["sync"])
+
+    assert result.exit_code == 0
+    assert "jira" in result.output.lower()
+    assert "notion_tasks" in result.output.lower()
+    assert "timeout" in result.output.lower()

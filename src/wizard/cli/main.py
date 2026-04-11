@@ -56,3 +56,20 @@ def setup() -> None:
         typer.echo("No skills found in package — skipping skill install")
 
     typer.echo("Setup complete.")
+
+
+@app.command()
+def sync() -> None:
+    """Run Jira and Notion sync manually (outside a session)."""
+    from wizard.database import get_session
+    from wizard.deps import sync_service
+
+    svc = sync_service()
+    with get_session() as session:
+        results = svc.sync_all(session)
+
+    for r in results:
+        status = "ok" if r.ok else f"FAILED: {r.error}"
+        typer.echo(f"  {r.source}: {status}")
+
+    typer.echo("Sync complete.")
