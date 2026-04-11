@@ -51,3 +51,48 @@ def register_wizard_mcp() -> list[str]:
         registered.append(name)
 
     return registered
+
+
+def find_wizard_mcp_targets() -> list[str]:
+    """Return config target names that currently have a wizard MCP entry."""
+    found: list[str] = []
+    for name, path in _config_targets().items():
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+            if "wizard" in data.get("mcpServers", {}):
+                found.append(name)
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return found
+
+
+def deregister_wizard_mcp() -> list[str]:
+    """Remove the wizard MCP server from all Claude config files.
+
+    Returns the list of target names where deregistration succeeded.
+    """
+    deregistered: list[str] = []
+
+    for name, path in _config_targets().items():
+        if not path.exists():
+            continue
+
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("%s is not valid JSON — skipping", path)
+            continue
+
+        mcp_servers = data.get("mcpServers", {})
+        if "wizard" not in mcp_servers:
+            continue
+
+        del mcp_servers["wizard"]
+        if not mcp_servers:
+            del data["mcpServers"]
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        deregistered.append(name)
+
+    return deregistered
