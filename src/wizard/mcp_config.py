@@ -1,6 +1,8 @@
 import json
-import sys
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Walk from src/wizard/mcp_config.py -> project root
 _PROJECT_DIR = Path(__file__).resolve().parents[2]
@@ -40,7 +42,7 @@ def register_wizard_mcp() -> list[str]:
         try:
             data = json.loads(path.read_text())
         except (json.JSONDecodeError, ValueError):
-            print(f"  Warning: {path} is not valid JSON -- skipping", file=sys.stderr)
+            logger.warning("%s is not valid JSON — skipping", path)
             continue
 
         data.setdefault("mcpServers", {})
