@@ -4,7 +4,7 @@ from fastmcp.exceptions import ToolError
 from sqlmodel import select
 
 from .database import get_session
-from .deps import meeting_repo, note_repo, security, sync_service, task_repo, writeback
+from .deps import meeting_repo, note_repo, notion_client, security, sync_service, task_repo, writeback
 from .mcp_instance import mcp
 from .models import (
     Meeting,
@@ -51,17 +51,31 @@ def session_start() -> SessionStartResponse:
 
         sync_results = sync_service().sync_all(db)
 
+        daily_page = None
+        try:
+            daily_page = notion_client().ensure_daily_page()
+            session.daily_page_id = daily_page.page_id
+            db.add(session)
+            db.flush()
+        except Exception as e:
+            logger.warning("ensure_daily_page failed: %s", e)
+
         return SessionStartResponse(
             session_id=session.id,
             open_tasks=task_repo().get_open_task_contexts(db),
             blocked_tasks=task_repo().get_blocked_task_contexts(db),
             unsummarised_meetings=meeting_repo().get_unsummarised_contexts(db),
             sync_results=sync_results,
+            daily_page=daily_page,
         )
 
 
 def task_start(task_id: int) -> TaskStartResponse:
-    """Returns full task context + all prior notes for compounding context."""
+    """Returns full task context + all prior notes for compounding context.
+
+    task_id: integer task ID from the open_tasks or blocked_tasks list
+    returned by session_start. Call session_start first to get available IDs.
+    """
     logger.info("task_start task_id=%d", task_id)
     try:
         with get_session() as db:
@@ -137,7 +151,11 @@ def update_task_status(
 
 
 def get_meeting(meeting_id: int) -> GetMeetingResponse:
-    """Returns meeting transcript and linked open tasks."""
+    """Returns meeting transcript and linked open tasks.
+
+    meeting_id: integer meeting ID from the unsummarised_meetings list
+    returned by session_start. Call session_start first to get available IDs.
+    """
     logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
         with get_session() as db:

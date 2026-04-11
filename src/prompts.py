@@ -1,16 +1,6 @@
-from pydantic import BaseModel
+from fastmcp.prompts import Message
 
 from .mcp_instance import mcp
-
-
-class Message(BaseModel):
-    """Lightweight prompt message.
-
-    FastMCP accepts any object with ``role`` and ``content`` attributes.
-    """
-
-    role: str
-    content: str
 
 
 def session_triage(session_data: str) -> list[Message]:
