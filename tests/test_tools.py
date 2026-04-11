@@ -341,7 +341,7 @@ def test_session_end_saves_summary_note(db_session):
     wb_mock = MagicMock()
     wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
 
-    session = WizardSession()
+    session = WizardSession(daily_page_id="test-daily-page")
     db_session.add(session)
     db_session.commit()
     db_session.refresh(session)
@@ -356,10 +356,15 @@ def test_session_end_saves_summary_note(db_session):
         )
 
     assert result.note_id is not None
+    assert result.notion_write_back.ok is True
 
     saved = db_session.get(Note, result.note_id)
     assert saved.note_type == NoteType.SESSION_SUMMARY
     assert saved.session_id == session_id
+
+    wb_mock.push_session_summary.assert_called_once()
+    called_session = wb_mock.push_session_summary.call_args[0][0]
+    assert called_session.daily_page_id == "test-daily-page"
 
 
 # ---------------------------------------------------------------------------
