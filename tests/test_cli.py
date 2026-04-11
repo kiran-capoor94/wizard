@@ -207,3 +207,119 @@ def test_setup_skips_mcp_when_config_missing(tmp_path):
 
     assert result.exit_code == 0
     assert not code_cfg.exists()
+
+
+# --- uninstall command tests ---
+
+
+def test_uninstall_removes_wizard_dir_and_mcp(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+    (wizard_dir / "wizard.db").write_text("")
+    skills = wizard_dir / "skills" / "test-skill"
+    skills.mkdir(parents=True)
+
+    code_cfg = tmp_path / "claude.json"
+    desktop_cfg = tmp_path / "desktop_config.json"
+    code_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
+    desktop_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
+
+    with _fresh_app(wizard_dir) as ctx:
+        with (
+            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
+            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
+        ):
+            result = runner.invoke(ctx.app, ["uninstall", "--yes"])
+
+    assert result.exit_code == 0
+    assert not wizard_dir.exists()
+    assert "wizard" not in json.loads(code_cfg.read_text()).get("mcpServers", {})
+    assert "wizard" not in json.loads(desktop_cfg.read_text()).get("mcpServers", {})
+
+
+def test_uninstall_nothing_to_do(tmp_path):
+    wizard_dir = tmp_path / ".wizard"  # does not exist
+    code_cfg = tmp_path / "claude.json"  # does not exist
+    desktop_cfg = tmp_path / "desktop_config.json"  # does not exist
+
+    with _fresh_app(wizard_dir) as ctx:
+        with (
+            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
+            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
+        ):
+            result = runner.invoke(ctx.app, ["uninstall", "--yes"])
+
+    assert result.exit_code == 0
+    assert "nothing to uninstall" in result.output.lower()
+
+
+def test_uninstall_aborts_without_confirmation(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+
+    with _fresh_app(wizard_dir) as ctx:
+        with (
+            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
+            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
+        ):
+            result = runner.invoke(ctx.app, ["uninstall"], input="n\n")
+
+    assert result.exit_code == 0
+    assert wizard_dir.exists()  # nothing deleted
+
+
+def test_uninstall_proceeds_with_confirmation(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+
+    with _fresh_app(wizard_dir) as ctx:
+        with (
+            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
+            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
+        ):
+            result = runner.invoke(ctx.app, ["uninstall"], input="y\n")
+
+    assert result.exit_code == 0
+    assert not wizard_dir.exists()
+
+
+def test_uninstall_partial_state(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+    # No wizard.db, no skills, no MCP registrations
+
+    code_cfg = tmp_path / "claude.json"
+    code_cfg.write_text(json.dumps({"mcpServers": {"other": {}}}))  # no wizard entry
+
+    with _fresh_app(wizard_dir) as ctx:
+        with (
+            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
+            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope.json"),
+        ):
+            result = runner.invoke(ctx.app, ["uninstall", "--yes"])
+
+    assert result.exit_code == 0
+    assert not wizard_dir.exists()
+    # Other MCP entries preserved
+    assert json.loads(code_cfg.read_text()) == {"mcpServers": {"other": {}}}
+
+
+def test_uninstall_is_idempotent(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+
+    with _fresh_app(wizard_dir) as ctx:
+        with (
+            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
+            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
+        ):
+            runner.invoke(ctx.app, ["uninstall", "--yes"])
+            result = runner.invoke(ctx.app, ["uninstall", "--yes"])
+
+    assert result.exit_code == 0
+    assert "nothing to uninstall" in result.output.lower()
