@@ -1,0 +1,28 @@
+---
+description: Save a reasoning artifact — investigation findings, decisions, documentation, or learnings anchored to a task
+---
+
+# Save Note
+
+Use after any investigation, decision, or learning worth preserving across sessions.
+
+## When to save
+
+- After investigating a bug or system behaviour
+- After making an architectural or design decision
+- After documenting how something works
+- After learning something non-obvious that will help next session
+
+## How
+
+Call `save_note` with:
+- `task_id` — the task this note belongs to (required — every note is anchored to a task)
+- `note_type` — one of: `investigation`, `decision`, `docs`, `learnings`
+- `content` — the reasoning to preserve. Be specific. Include file paths, function names, error messages, and conclusions. Future sessions will read this cold.
+
+## Note types
+
+- **investigation** — what you looked at, what you found, what you ruled out
+- **decision** — what was decided and why, including rejected alternatives
+- **docs** — how something works, for reference
+- **learnings** — surprising findings, gotchas, things to watch out for
