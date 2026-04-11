@@ -9,16 +9,17 @@ from notion_client.errors import APIResponseError
 from notion_client.helpers import collect_paginated_api
 
 from .schemas import (
+    DailyPageResult,
     JiraTaskData,
+    NotionDate,
     NotionMeetingData,
-    NotionTaskData,
-    NotionTitle,
+    NotionMultiSelect,
     NotionRichText,
     NotionSelect,
-    NotionMultiSelect,
-    NotionUrl,
-    NotionDate,
     NotionStatus,
+    NotionTaskData,
+    NotionTitle,
+    NotionUrl,
 )
 
 HTTPX_TIMEOUT = httpx.Timeout(10.0)
@@ -88,9 +89,6 @@ class JiraClient:
                 e,
                 e.response.text[:500],
             )
-            return []
-        except httpx.HTTPError as e:
-            logger.warning("Jira fetch_open_tasks failed: %s", e)
             return []
         except httpx.HTTPError as e:
             logger.warning("Jira fetch_open_tasks failed: %s", e)
@@ -172,13 +170,13 @@ class NotionClient:
     def _query_database(self, database_id: str, **kwargs) -> dict:
         """Query a database by ID using data_sources API (v3.0)."""
         client = self._require_client()
-        return client.data_sources.query(data_source_id=database_id, **kwargs)
+        return client.data_sources.query(data_source_id=database_id, **kwargs)  # pyright: ignore[reportReturnType]
 
     def _list_sisu_work_children(self) -> list[dict]:
         """Return non-archived child_page blocks under the SISU Work page."""
-        self._require_client()
+        client = self._require_client()
         blocks = collect_paginated_api(
-            self._client.blocks.children.list,
+            client.blocks.children.list,
             block_id=self._sisu_work_page_id,
         )
         return [
@@ -209,7 +207,7 @@ class NotionClient:
                     "Session Summary": {"rich_text": [{"text": {"content": ""}}]},
                 },
             )
-            return response.get("id")
+            return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
         except APIResponseError as e:
             logger.warning("Notion create_daily_page failed: %s", e)
             return None
@@ -224,9 +222,8 @@ class NotionClient:
             logger.warning("Notion archive_page failed: %s", e)
             return False
 
-    def ensure_daily_page(self) -> "DailyPageResult":
+    def ensure_daily_page(self) -> DailyPageResult:
         """Find or create today's daily page. Archive stale daily pages."""
-        from .schemas import DailyPageResult
 
         title = _today_title()
         children = self._list_sisu_work_children()
