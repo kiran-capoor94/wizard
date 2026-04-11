@@ -1,7 +1,12 @@
 import json
 from unittest.mock import patch
 
-from wizard.mcp_config import deregister_wizard_mcp, get_mcp_server_entry, register_wizard_mcp
+from wizard.mcp_config import (
+    deregister_wizard_mcp,
+    find_wizard_mcp_targets,
+    get_mcp_server_entry,
+    register_wizard_mcp,
+)
 
 
 def test_get_mcp_server_entry_returns_uv_command():
@@ -76,6 +81,28 @@ def test_register_skips_invalid_json(tmp_path):
     assert len(results) == 0
     # File must not be corrupted
     assert code_cfg.read_text() == "not json{{{"
+
+
+def test_find_targets_returns_names_with_wizard_entry(tmp_path):
+    code_cfg, desktop_cfg, p1, p2 = _patch_config_paths(tmp_path)
+    code_cfg.write_text(json.dumps({"mcpServers": {"wizard": {}}}))
+    desktop_cfg.write_text(json.dumps({"mcpServers": {"other": {}}}))
+
+    with p1, p2:
+        results = find_wizard_mcp_targets()
+
+    assert results == ["Claude Code"]
+
+
+def test_find_targets_skips_missing_and_invalid(tmp_path):
+    code_cfg, desktop_cfg, p1, p2 = _patch_config_paths(tmp_path)
+    code_cfg.write_text("broken{")
+    # desktop_cfg doesn't exist
+
+    with p1, p2:
+        results = find_wizard_mcp_targets()
+
+    assert results == []
 
 
 def test_deregister_removes_wizard_entry(tmp_path):
