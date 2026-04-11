@@ -35,7 +35,7 @@ def test_get_for_task_by_source_id(db_session):
     from wizard.models import Note, NoteType
     from wizard.repositories import NoteRepository
     repo = NoteRepository()
-    note = Note(note_type=NoteType.DECISION, content="from notion", source_id="AUTH-123")
+    note = Note(note_type=NoteType.DECISION, content="from notion", source_id="AUTH-123", source_type="JIRA")
     repo.save(db_session, note)
 
     results = repo.get_for_task(db_session, task_id=None, source_id="AUTH-123")
@@ -53,7 +53,7 @@ def test_get_for_task_or_semantics(db_session):
     db_session.refresh(task)
 
     note1 = Note(note_type=NoteType.INVESTIGATION, content="by task_id", task_id=task.id)
-    note2 = Note(note_type=NoteType.DECISION, content="by source_id", source_id="AUTH-123")
+    note2 = Note(note_type=NoteType.DECISION, content="by source_id", source_id="AUTH-123", source_type="JIRA")
     repo.save(db_session, note1)
     repo.save(db_session, note2)
 
@@ -91,6 +91,72 @@ def test_get_for_task_returns_empty_when_no_match(db_session):
     repo = NoteRepository()
     results = repo.get_for_task(db_session, task_id=999, source_id=None)
     assert results == []
+
+
+def test_get_for_task_source_type_guard_excludes_non_jira(db_session):
+    """source_id match requires source_type == 'JIRA' — prevents UUID collisions."""
+    from wizard.models import Note, NoteType
+    from wizard.repositories import NoteRepository
+    repo = NoteRepository()
+
+    # Note with matching source_id but wrong source_type — must be excluded
+    note = Note(
+        note_type=NoteType.DECISION,
+        content="notion-only note",
+        source_id="AUTH-999",
+        source_type="NOTION",
+    )
+    repo.save(db_session, note)
+
+    results = repo.get_for_task(db_session, task_id=None, source_id="AUTH-999")
+    assert len(results) == 0
+
+
+def test_get_for_task_source_type_guard_includes_jira(db_session):
+    """source_id match with source_type == 'JIRA' is included."""
+    from wizard.models import Note, NoteType
+    from wizard.repositories import NoteRepository
+    repo = NoteRepository()
+
+    note = Note(
+        note_type=NoteType.INVESTIGATION,
+        content="jira note",
+        source_id="PD-42",
+        source_type="JIRA",
+    )
+    repo.save(db_session, note)
+
+    results = repo.get_for_task(db_session, task_id=None, source_id="PD-42")
+    assert len(results) == 1
+    assert results[0].source_type == "JIRA"
+
+
+def test_save_note_propagates_source_type_from_task(db_session):
+    """save_note copies source_type from the task onto the note."""
+    from unittest.mock import MagicMock, patch
+    from wizard.tools import save_note
+    from wizard.models import Task, Note, NoteType
+    from sqlmodel import select
+    from tests.helpers import mock_session
+
+    task = Task(name="auth fix", source_id="PD-10", source_type="JIRA")
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    patches = {
+        "get_session": mock_session(db_session),
+    }
+    with patch.multiple("wizard.tools", **patches):
+        result = save_note(
+            task_id=task.id,
+            note_type=NoteType.INVESTIGATION,
+            content="found the bug",
+        )
+
+    note = db_session.get(Note, result.note_id)
+    assert note.source_id == "PD-10"
+    assert note.source_type == "JIRA"
 
 
 # ---------------------------------------------------------------------------

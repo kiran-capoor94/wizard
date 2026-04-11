@@ -170,7 +170,9 @@ class NotionClient:
     def _query_database(self, database_id: str, **kwargs) -> dict:
         """Query a database by ID using data_sources API (v3.0)."""
         client = self._require_client()
-        return client.data_sources.query(data_source_id=database_id, **kwargs)  # pyright: ignore[reportReturnType]
+        return client.data_sources.query(
+            data_source_id=database_id, **kwargs
+        )  # pyright: ignore[reportReturnType]
 
     def _list_sisu_work_children(self) -> list[dict]:
         """Return non-archived child_page blocks under the SISU Work page."""
