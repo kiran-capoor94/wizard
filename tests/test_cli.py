@@ -138,3 +138,32 @@ def test_sync_reports_results(db_session):
     assert "jira" in result.output.lower()
     assert "notion_tasks" in result.output.lower()
     assert "timeout" in result.output.lower()
+
+
+# --- doctor command tests ---
+
+
+def test_doctor_checks_wizard_home(tmp_path):
+    import json
+
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text(json.dumps({"db": ":memory:"}))
+
+    with patch("wizard.cli.main.WIZARD_HOME", wizard_dir):
+        from wizard.cli.main import app
+
+        result = runner.invoke(app, ["doctor"])
+
+    assert "config" in result.output.lower()
+
+
+def test_doctor_reports_missing_wizard_home(tmp_path):
+    wizard_dir = tmp_path / ".wizard"  # does not exist
+
+    with patch("wizard.cli.main.WIZARD_HOME", wizard_dir):
+        from wizard.cli.main import app
+
+        result = runner.invoke(app, ["doctor"])
+
+    assert "not found" in result.output.lower() or "missing" in result.output.lower()
