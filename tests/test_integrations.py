@@ -4,7 +4,7 @@ import respx
 from unittest.mock import patch, MagicMock
 from notion_client.errors import APIResponseError
 
-from src.schemas import (
+from wizard.schemas import (
     NotionTitle, NotionRichText, NotionSelect, NotionMultiSelect,
     NotionUrl, NotionDate, NotionStatus,
 )
@@ -77,7 +77,7 @@ class TestNotionStatus:
 
 
 def make_jira_client(base_url="https://jira.example.com", token="tok", project_key="ENG"):
-    from src.integrations import JiraClient
+    from wizard.integrations import JiraClient
     return JiraClient(base_url=base_url, token=token, project_key=project_key)
 
 
@@ -93,14 +93,14 @@ def test_jira_client_is_configured_when_token_provided():
 
 
 def test_jira_raises_configuration_error_on_fetch_when_no_token():
-    from src.integrations import ConfigurationError
+    from wizard.integrations import ConfigurationError
     client = make_jira_client(token="")
     with pytest.raises(ConfigurationError):
         client.fetch_open_tasks()
 
 
 def test_jira_raises_configuration_error_on_update_when_no_token():
-    from src.integrations import ConfigurationError
+    from wizard.integrations import ConfigurationError
     client = make_jira_client(token="")
     with pytest.raises(ConfigurationError):
         client.update_task_status("ENG-1", "done")
@@ -201,7 +201,7 @@ def make_notion_client(
     tasks_db_id="db-tasks",
     meetings_db_id="db-meetings"
 ):
-    from src.integrations import NotionClient
+    from wizard.integrations import NotionClient
     return NotionClient(
         token=token,
         sisu_work_page_id=sisu_work_page_id,
@@ -229,7 +229,7 @@ def test_notion_fetch_tasks_returns_typed_models():
         }
     ]
 
-    with patch("src.integrations.collect_paginated_api", return_value=mock_pages):
+    with patch("wizard.integrations.collect_paginated_api", return_value=mock_pages):
         client = make_notion_client()
         tasks = client.fetch_tasks()
 
@@ -258,7 +258,7 @@ def test_notion_fetch_tasks_handles_missing_properties():
         }
     ]
 
-    with patch("src.integrations.collect_paginated_api", return_value=mock_pages):
+    with patch("wizard.integrations.collect_paginated_api", return_value=mock_pages):
         client = make_notion_client()
         tasks = client.fetch_tasks()
 
@@ -274,7 +274,7 @@ def test_notion_fetch_tasks_handles_missing_properties():
 
 def test_notion_fetch_tasks_raises_error_without_token():
     """fetch_tasks should raise ConfigurationError if no token"""
-    from src.integrations import ConfigurationError, NotionClient
+    from wizard.integrations import ConfigurationError, NotionClient
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.fetch_tasks()
@@ -283,7 +283,7 @@ def test_notion_fetch_tasks_raises_error_without_token():
 def test_notion_fetch_tasks_returns_empty_on_api_error():
     """fetch_tasks should return [] on Notion API error (non-fatal)"""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.collect_paginated_api", side_effect=error):
+    with patch("wizard.integrations.collect_paginated_api", side_effect=error):
         client = make_notion_client()
         tasks = client.fetch_tasks()
 
@@ -312,7 +312,7 @@ def test_notion_fetch_meetings_returns_typed_models():
         }
     ]
 
-    with patch("src.integrations.collect_paginated_api", return_value=mock_pages):
+    with patch("wizard.integrations.collect_paginated_api", return_value=mock_pages):
         client = make_notion_client()
         meetings = client.fetch_meetings()
 
@@ -340,7 +340,7 @@ def test_notion_fetch_meetings_handles_missing_properties():
         }
     ]
 
-    with patch("src.integrations.collect_paginated_api", return_value=mock_pages):
+    with patch("wizard.integrations.collect_paginated_api", return_value=mock_pages):
         client = make_notion_client()
         meetings = client.fetch_meetings()
 
@@ -355,7 +355,7 @@ def test_notion_fetch_meetings_handles_missing_properties():
 
 def test_notion_fetch_meetings_raises_error_without_token():
     """fetch_meetings should raise ConfigurationError if no token"""
-    from src.integrations import ConfigurationError, NotionClient
+    from wizard.integrations import ConfigurationError, NotionClient
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.fetch_meetings()
@@ -364,7 +364,7 @@ def test_notion_fetch_meetings_raises_error_without_token():
 def test_notion_fetch_meetings_returns_empty_on_api_error():
     """fetch_meetings should return [] on Notion API error (non-fatal)"""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.collect_paginated_api", side_effect=error):
+    with patch("wizard.integrations.collect_paginated_api", side_effect=error):
         client = make_notion_client()
         meetings = client.fetch_meetings()
 
@@ -382,7 +382,7 @@ def test_notion_create_task_page_returns_page_id():
         "object": "page"
     }
 
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.create.return_value = mock_response
@@ -403,7 +403,7 @@ def test_notion_create_task_page_requires_name_and_status():
     """create_task_page requires name and status"""
     client = make_notion_client()
 
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.create.return_value = {"id": "test-id"}
@@ -424,7 +424,7 @@ def test_notion_create_task_page_requires_name_and_status():
 def test_notion_create_task_page_returns_none_on_api_error():
     """create_task_page should return None on Notion API error"""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.create.side_effect = error
@@ -437,7 +437,7 @@ def test_notion_create_task_page_returns_none_on_api_error():
 
 def test_notion_create_task_page_raises_error_without_token():
     """create_task_page should raise ConfigurationError if no token"""
-    from src.integrations import ConfigurationError, NotionClient
+    from wizard.integrations import ConfigurationError, NotionClient
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.create_task_page(name="Task", status="Backlog")
@@ -454,7 +454,7 @@ def test_notion_create_meeting_page_returns_page_id():
         "object": "page"
     }
 
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.create.return_value = mock_response
@@ -474,7 +474,7 @@ def test_notion_create_meeting_page_requires_title_and_category():
     """create_meeting_page requires title and category"""
     client = make_notion_client()
 
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.create.return_value = {"id": "test-id"}
@@ -495,7 +495,7 @@ def test_notion_create_meeting_page_requires_title_and_category():
 def test_notion_create_meeting_page_returns_none_on_api_error():
     """create_meeting_page should return None on Notion API error"""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.create.side_effect = error
@@ -508,7 +508,7 @@ def test_notion_create_meeting_page_returns_none_on_api_error():
 
 def test_notion_create_meeting_page_raises_error_without_token():
     """create_meeting_page should raise ConfigurationError if no token"""
-    from src.integrations import ConfigurationError, NotionClient
+    from wizard.integrations import ConfigurationError, NotionClient
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.create_meeting_page(title="Meeting", category="Planning")
@@ -518,7 +518,7 @@ def test_notion_create_meeting_page_raises_error_without_token():
 
 def test_notion_update_task_status_returns_true_on_success():
     """update_task_status should return True on success"""
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.update.return_value = {}
@@ -532,7 +532,7 @@ def test_notion_update_task_status_returns_true_on_success():
 def test_notion_update_task_status_returns_false_on_api_error():
     """update_task_status should return False on Notion API error"""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.update.side_effect = error
@@ -545,7 +545,7 @@ def test_notion_update_task_status_returns_false_on_api_error():
 
 def test_notion_update_task_status_raises_error_without_token():
     """update_task_status should raise ConfigurationError if no token"""
-    from src.integrations import ConfigurationError, NotionClient
+    from wizard.integrations import ConfigurationError, NotionClient
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.update_task_status("task-id", "Done")
@@ -557,7 +557,7 @@ def test_notion_update_meeting_summary_returns_true_on_success():
     """update_meeting_summary should return True on success"""
     client = make_notion_client()
 
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.update.return_value = {}
@@ -571,7 +571,7 @@ def test_notion_update_meeting_summary_returns_true_on_success():
 def test_notion_update_meeting_summary_returns_false_on_api_error():
     """update_meeting_summary should return False on Notion API error"""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.update.side_effect = error
@@ -584,7 +584,7 @@ def test_notion_update_meeting_summary_returns_false_on_api_error():
 
 def test_notion_update_meeting_summary_raises_error_without_token():
     """update_meeting_summary should raise ConfigurationError if no token"""
-    from src.integrations import ConfigurationError, NotionClient
+    from wizard.integrations import ConfigurationError, NotionClient
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.update_meeting_summary("meeting-id", "Summary")
@@ -594,7 +594,7 @@ def test_notion_update_meeting_summary_raises_error_without_token():
 
 def test_notion_update_daily_page_returns_true_on_success():
     """update_daily_page should return True on success"""
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.update.return_value = {}
@@ -608,7 +608,7 @@ def test_notion_update_daily_page_returns_true_on_success():
 def test_notion_update_daily_page_returns_false_on_api_error():
     """update_daily_page should return False on Notion API error"""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.update.side_effect = error
@@ -621,7 +621,7 @@ def test_notion_update_daily_page_returns_false_on_api_error():
 
 def test_notion_update_daily_page_raises_error_without_token():
     """update_daily_page should raise ConfigurationError if no token"""
-    from src.integrations import ConfigurationError, NotionClient
+    from wizard.integrations import ConfigurationError, NotionClient
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.update_daily_page("page-123", "summary")
@@ -630,10 +630,10 @@ def test_notion_update_daily_page_raises_error_without_token():
 def test_notion_update_daily_page_with_explicit_page_id():
     """update_daily_page should call pages.update with the given page_id, not instance state"""
     from unittest.mock import MagicMock, patch
-    with patch("src.integrations.NotionSdkClient") as MockClient:
+    with patch("wizard.integrations.NotionSdkClient") as MockClient:
         mock_instance = MagicMock()
         MockClient.return_value = mock_instance
-        from src.integrations import NotionClient
+        from wizard.integrations import NotionClient
         client = NotionClient(
             token="tok", sisu_work_page_id="parent-abc",
             tasks_db_id="db1", meetings_db_id="db2",
@@ -648,7 +648,7 @@ def test_notion_update_daily_page_with_explicit_page_id():
 
 def test_extract_jira_key_from_url():
     """_extract_jira_key should extract issue key from Jira URL"""
-    from src.integrations import _extract_jira_key
+    from wizard.integrations import _extract_jira_key
 
     assert _extract_jira_key("https://org.atlassian.net/browse/ENG-123") == "ENG-123"
     assert _extract_jira_key("https://jira.company.com/browse/PROJ-456") == "PROJ-456"
@@ -659,7 +659,7 @@ def test_extract_jira_key_from_url():
 
 def test_extract_krisp_id_from_url():
     """_extract_krisp_id should extract last path segment from Krisp URL"""
-    from src.integrations import _extract_krisp_id
+    from wizard.integrations import _extract_krisp_id
 
     assert _extract_krisp_id("https://krisp.ai/m/abc123") == "abc123"
     assert _extract_krisp_id("https://krisp.ai/m/abc123/") == "abc123"
@@ -683,7 +683,7 @@ def _make_child_page_block(block_id: str, title: str, archived: bool = False) ->
 
 def test_notion_find_daily_page_returns_id_when_found():
     """find_daily_page returns the page_id of the matching child page."""
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_instance = MagicMock()
         mock_notion_class.return_value = mock_instance
         mock_instance.blocks.children.list.return_value = {
@@ -701,7 +701,7 @@ def test_notion_find_daily_page_returns_id_when_found():
 
 def test_notion_find_daily_page_returns_none_when_not_found():
     """find_daily_page returns None when no child page matches the title."""
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_instance = MagicMock()
         mock_notion_class.return_value = mock_instance
         mock_instance.blocks.children.list.return_value = {
@@ -719,7 +719,7 @@ def test_notion_find_daily_page_returns_none_when_not_found():
 
 def test_notion_create_daily_page_returns_page_id():
     """create_daily_page calls pages.create with correct args and returns page_id."""
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_instance = MagicMock()
         mock_notion_class.return_value = mock_instance
         mock_instance.pages.create.return_value = {"id": "new-daily-id"}
@@ -740,7 +740,7 @@ def test_notion_create_daily_page_returns_page_id():
 def test_notion_create_daily_page_returns_none_on_api_error():
     """create_daily_page returns None on APIResponseError."""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_instance = MagicMock()
         mock_notion_class.return_value = mock_instance
         mock_instance.pages.create.side_effect = error
@@ -753,7 +753,7 @@ def test_notion_create_daily_page_returns_none_on_api_error():
 
 def test_notion_archive_page_returns_true_on_success():
     """archive_page calls pages.update with archived=True and returns True."""
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_instance = MagicMock()
         mock_notion_class.return_value = mock_instance
         mock_instance.pages.update.return_value = {}
@@ -770,7 +770,7 @@ def test_notion_archive_page_returns_true_on_success():
 def test_notion_archive_page_returns_false_on_error():
     """archive_page returns False on APIResponseError."""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_instance = MagicMock()
         mock_notion_class.return_value = mock_instance
         mock_instance.pages.update.side_effect = error
@@ -783,8 +783,8 @@ def test_notion_archive_page_returns_false_on_error():
 
 def test_notion_ensure_daily_page_finds_existing():
     """ensure_daily_page returns existing page without creating, archived_count=0."""
-    with patch("src.integrations._today_title", return_value="Friday 11 April 2026"):
-        with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations._today_title", return_value="Friday 11 April 2026"):
+        with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
             mock_instance = MagicMock()
             mock_notion_class.return_value = mock_instance
             mock_instance.blocks.children.list.return_value = {
@@ -804,8 +804,8 @@ def test_notion_ensure_daily_page_finds_existing():
 
 def test_notion_ensure_daily_page_creates_and_archives():
     """ensure_daily_page creates today's page and archives 1 stale page."""
-    with patch("src.integrations._today_title", return_value="Friday 11 April 2026"):
-        with patch("src.integrations.NotionSdkClient") as mock_notion_class:
+    with patch("wizard.integrations._today_title", return_value="Friday 11 April 2026"):
+        with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
             mock_instance = MagicMock()
             mock_notion_class.return_value = mock_instance
             mock_instance.blocks.children.list.return_value = {
