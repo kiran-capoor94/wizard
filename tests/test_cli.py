@@ -166,4 +166,5 @@ def test_doctor_reports_missing_wizard_home(tmp_path):
 
         result = runner.invoke(app, ["doctor"])
 
+    assert result.exit_code == 1
     assert "not found" in result.output.lower() or "missing" in result.output.lower()
