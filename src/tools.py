@@ -61,7 +61,11 @@ def session_start() -> SessionStartResponse:
 
 
 def task_start(task_id: int) -> TaskStartResponse:
-    """Returns full task context + all prior notes for compounding context."""
+    """Returns full task context + all prior notes for compounding context.
+
+    task_id: integer task ID from the open_tasks or blocked_tasks list
+    returned by session_start. Call session_start first to get available IDs.
+    """
     logger.info("task_start task_id=%d", task_id)
     try:
         with get_session() as db:
@@ -137,7 +141,11 @@ def update_task_status(
 
 
 def get_meeting(meeting_id: int) -> GetMeetingResponse:
-    """Returns meeting transcript and linked open tasks."""
+    """Returns meeting transcript and linked open tasks.
+
+    meeting_id: integer meeting ID from the unsummarised_meetings list
+    returned by session_start. Call session_start first to get available IDs.
+    """
     logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
         with get_session() as db:
