@@ -1,6 +1,6 @@
 import logging
 
-from sqlmodel import Session, case, col, func, select, or_
+from sqlmodel import Session, and_, case, col, func, select, or_
 
 from .models import (
     Meeting,
@@ -31,7 +31,10 @@ def _latest_note_subquery():
         .where(
             or_(
                 Note.task_id == Task.id,
-                Note.source_id == Task.source_id,
+                and_(
+                    Note.source_id == Task.source_id,
+                    Note.source_type == "JIRA",
+                ),
             )
         )
         .correlate(Task)
@@ -114,7 +117,9 @@ class TaskRepository:
         if task.id is not None:
             conditions.append(Note.task_id == task.id)
         if task.source_id is not None:
-            conditions.append(Note.source_id == task.source_id)
+            conditions.append(
+                and_(Note.source_id == task.source_id, Note.source_type == "JIRA")
+            )
         if not conditions:
             return None
         stmt = (
@@ -178,7 +183,9 @@ class NoteRepository:
         if task_id is not None:
             conditions.append(Note.task_id == task_id)
         if source_id is not None:
-            conditions.append(Note.source_id == source_id)
+            conditions.append(
+                and_(Note.source_id == source_id, Note.source_type == "JIRA")
+            )
         if not conditions:
             return []
         stmt = (

@@ -25,17 +25,19 @@ def test_meeting_summarisation_returns_messages():
     assert "test meeting data" in result[1].content.text
 
 
-def test_session_wrapup_returns_string():
+def test_session_wrapup_returns_messages():
     from wizard.prompts import session_wrapup
 
     result = session_wrapup()
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert isinstance(result, list)
+    assert len(result) >= 1
+    assert "ending a Wizard session" in result[0].content.text
 
 
-def test_user_elicitation_returns_string():
+def test_user_elicitation_returns_messages():
     from wizard.prompts import user_elicitation
 
     result = user_elicitation()
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert isinstance(result, list)
+    assert len(result) >= 1
+    assert "Ask the user when" in result[0].content.text
