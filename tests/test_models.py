@@ -4,7 +4,7 @@ import pytest
 
 
 def test_created_at_is_not_frozen_at_module_load(db_session):
-    from src.models import Task
+    from wizard.models import Task
 
     t1 = Task(name="first")
     db_session.add(t1)
@@ -22,7 +22,7 @@ def test_created_at_is_not_frozen_at_module_load(db_session):
 
 
 def test_task_has_updated_at_field(db_session):
-    from src.models import Task
+    from wizard.models import Task
 
     task = Task(name="foo")
     db_session.add(task)
@@ -33,7 +33,7 @@ def test_task_has_updated_at_field(db_session):
 
 
 def test_updated_at_changes_on_update(db_session):
-    from src.models import Task
+    from wizard.models import Task
 
     task = Task(name="foo")
     db_session.add(task)
@@ -52,7 +52,7 @@ def test_updated_at_changes_on_update(db_session):
 
 
 def test_task_can_be_created_without_due_date(db_session):
-    from src.models import Task
+    from wizard.models import Task
 
     task = Task(name="no deadline")
     db_session.add(task)
@@ -63,7 +63,7 @@ def test_task_can_be_created_without_due_date(db_session):
 
 
 def test_meeting_tasks_relationship(db_session):
-    from src.models import Meeting, MeetingTasks, Task
+    from wizard.models import Meeting, MeetingTasks, Task
 
     meeting = Meeting(title="standup", content="standup notes")
     task = Task(name="action item")
@@ -85,7 +85,7 @@ def test_meeting_tasks_relationship(db_session):
 
 
 def test_task_meetings_relationship(db_session):
-    from src.models import Meeting, MeetingTasks, Task
+    from wizard.models import Meeting, MeetingTasks, Task
 
     meeting = Meeting(title="planning", content="planning notes")
     task = Task(name="action item")
@@ -109,14 +109,14 @@ def test_task_meetings_relationship(db_session):
 def test_invalid_enum_value_rejected():
     from pydantic import ValidationError
 
-    from src.models import Task
+    from wizard.models import Task
 
     with pytest.raises(ValidationError):
         Task(name="test", priority="invalid_value")  # pyright: ignore[reportArgumentType]
 
 
 def test_task_has_notion_id(db_session):
-    from src.models import Task
+    from wizard.models import Task
     task = Task(name="test")
     db_session.add(task)
     db_session.commit()
@@ -125,7 +125,7 @@ def test_task_has_notion_id(db_session):
 
 
 def test_meeting_has_title_and_notion_id(db_session):
-    from src.models import Meeting
+    from wizard.models import Meeting
     meeting = Meeting(title="standup", content="notes")
     db_session.add(meeting)
     db_session.commit()
@@ -135,7 +135,7 @@ def test_meeting_has_title_and_notion_id(db_session):
 
 
 def test_note_has_meeting_id(db_session):
-    from src.models import Note, NoteType
+    from wizard.models import Note, NoteType
     note = Note(note_type=NoteType.INVESTIGATION, content="investigating")
     db_session.add(note)
     db_session.commit()
@@ -144,7 +144,7 @@ def test_note_has_meeting_id(db_session):
 
 
 def test_note_has_session_summary_type(db_session):
-    from src.models import Note, NoteType, WizardSession
+    from wizard.models import Note, NoteType, WizardSession
     session = WizardSession()
     db_session.add(session)
     db_session.commit()
@@ -158,7 +158,7 @@ def test_note_has_session_summary_type(db_session):
 
 def test_wizard_session_table_name(db_session):
     from sqlalchemy import inspect
-    from src.database import engine
+    from wizard.database import engine
     inspector = inspect(engine)
     tables = inspector.get_table_names()
     assert "wizardsession" in tables
@@ -166,7 +166,7 @@ def test_wizard_session_table_name(db_session):
 
 
 def test_meeting_category_has_general(db_session):
-    from src.models import Meeting, MeetingCategory
+    from wizard.models import Meeting, MeetingCategory
     meeting = Meeting(title="misc", content="...", category=MeetingCategory.GENERAL)
     db_session.add(meeting)
     db_session.commit()
