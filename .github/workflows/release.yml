@@ -1,0 +1,75 @@
+name: Release — bump version and tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  bump-and-tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip if version bump commit
+        id: guard
+        run: |
+          msg=$(git log -1 --pretty=%s)
+          if [[ "$msg" == chore:\ bump\ version* ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Get merged PR title
+        if: steps.guard.outputs.skip != 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          title=$(gh pr list --search "$COMMIT_SHA" --state merged --json title --jq '.[0].title // ""')
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+      - name: Get commits since last tag
+        if: steps.guard.outputs.skip != 'true'
+        id: commits
+        run: |
+          last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$last_tag" ]; then
+            git log --oneline > /tmp/commits.txt
+          else
+            git log "${last_tag}..HEAD" --oneline > /tmp/commits.txt
+          fi
+
+      - name: Run bump script
+        if: steps.guard.outputs.skip != 'true'
+        id: bump
+        env:
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+        run: |
+          new_version=$(python scripts/bump_version.py < /tmp/commits.txt)
+          echo "version=$new_version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit, tag, and push
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml src/wizard/config.py
+          git commit -m "chore: bump version to v${NEW_VERSION}"
+          git tag "v${NEW_VERSION}"
+          git push origin main --tags
