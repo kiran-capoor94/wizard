@@ -22,7 +22,7 @@ WIZARD_HOME = Path.home() / ".wizard"
 
 _DEFAULT_CONFIG = {
     "jira": {"base_url": "", "project_key": "", "token": "", "email": ""},
-    "notion": {"token": "", "daily_page_id": "", "tasks_db_id": "", "meetings_db_id": ""},
+    "notion": {"token": "", "daily_page_id": "", "sisu_work_page_id": "", "tasks_db_id": "", "meetings_db_id": ""},
     "scrubbing": {"enabled": True, "allowlist": []},
 }
 
