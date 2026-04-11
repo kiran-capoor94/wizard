@@ -1,7 +1,7 @@
 import json
 from unittest.mock import patch
 
-from wizard.mcp_config import get_mcp_server_entry, register_wizard_mcp
+from wizard.mcp_config import deregister_wizard_mcp, get_mcp_server_entry, register_wizard_mcp
 
 
 def test_get_mcp_server_entry_returns_uv_command():
@@ -76,3 +76,53 @@ def test_register_skips_invalid_json(tmp_path):
     assert len(results) == 0
     # File must not be corrupted
     assert code_cfg.read_text() == "not json{{{"
+
+
+def test_deregister_removes_wizard_entry(tmp_path):
+    code_cfg, desktop_cfg, p1, p2 = _patch_config_paths(tmp_path)
+    code_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}, "other": {}}}))
+    desktop_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
+
+    with p1, p2:
+        results = deregister_wizard_mcp()
+
+    code_data = json.loads(code_cfg.read_text())
+    assert "wizard" not in code_data["mcpServers"]
+    assert "other" in code_data["mcpServers"]
+
+    desktop_data = json.loads(desktop_cfg.read_text())
+    assert "mcpServers" not in desktop_data  # empty mcpServers removed
+
+    assert len(results) == 2
+
+
+def test_deregister_noop_when_no_wizard_entry(tmp_path):
+    code_cfg, desktop_cfg, p1, p2 = _patch_config_paths(tmp_path)
+    code_cfg.write_text(json.dumps({"mcpServers": {"other": {}}}))
+
+    with p1, p2:
+        results = deregister_wizard_mcp()
+
+    assert len(results) == 0
+    # File unchanged
+    assert json.loads(code_cfg.read_text()) == {"mcpServers": {"other": {}}}
+
+
+def test_deregister_skips_missing_file(tmp_path):
+    _code_cfg, _desktop_cfg, p1, p2 = _patch_config_paths(tmp_path)
+
+    with p1, p2:
+        results = deregister_wizard_mcp()
+
+    assert len(results) == 0
+
+
+def test_deregister_skips_invalid_json(tmp_path):
+    code_cfg, _desktop_cfg, p1, p2 = _patch_config_paths(tmp_path)
+    code_cfg.write_text("broken}")
+
+    with p1, p2:
+        results = deregister_wizard_mcp()
+
+    assert len(results) == 0
+    assert code_cfg.read_text() == "broken}"
