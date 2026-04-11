@@ -13,24 +13,25 @@ def db_session(monkeypatch, tmp_path):
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(config_file))
 
     for mod in [
-        "src.config",
-        "src.database",
-        "src.deps",
-        "src.integrations",
-        "src.models",
-        "src.repositories",
-        "src.schemas",
-        "src.services",
-        "src.tools",
-        "src.resources",
+        "wizard.config",
+        "wizard.database",
+        "wizard.deps",
+        "wizard.integrations",
+        "wizard.models",
+        "wizard.repositories",
+        "wizard.schemas",
+        "wizard.services",
+        "wizard.tools",
+        "wizard.resources",
+        "wizard.cli.main",
     ]:
         monkeypatch.delitem(sys.modules, mod, raising=False)
 
     SQLModel.metadata.clear()
     SQLModel._sa_registry.dispose(cascade=True)
 
-    from src.database import engine
-    import src.models  # noqa: F401 — registers models with SQLModel.metadata
+    from wizard.database import engine
+    import wizard.models  # noqa: F401 — registers models with SQLModel.metadata
 
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
