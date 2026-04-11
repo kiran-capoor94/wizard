@@ -73,11 +73,14 @@ def test_setup_copies_skills(tmp_path):
 
 def test_setup_handles_missing_skills_source(tmp_path):
     wizard_dir = tmp_path / ".wizard"
+    fake_skills = tmp_path / "nonexistent_skills"
 
     with _fresh_app(wizard_dir) as ctx:
-        result = runner.invoke(ctx.app, ["setup"])
+        with patch("wizard.cli.main._package_skills_dir", return_value=fake_skills):
+            result = runner.invoke(ctx.app, ["setup"])
 
     assert result.exit_code == 0
+    assert not (wizard_dir / "skills").exists()
 
 
 def test_setup_is_idempotent(tmp_path):
