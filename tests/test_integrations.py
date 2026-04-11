@@ -594,15 +594,13 @@ def test_notion_update_meeting_summary_raises_error_without_token():
 
 def test_notion_update_daily_page_returns_true_on_success():
     """update_daily_page should return True on success"""
-    client = make_notion_client()
-
     with patch("src.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
         mock_notion_class.return_value = mock_client_instance
         mock_client_instance.pages.update.return_value = {}
 
         client = make_notion_client()
-        result = client.update_daily_page("session summary text")
+        result = client.update_daily_page("page-123", "session summary text")
 
     assert result is True
 
@@ -616,7 +614,7 @@ def test_notion_update_daily_page_returns_false_on_api_error():
         mock_client_instance.pages.update.side_effect = error
 
         client = make_notion_client()
-        result = client.update_daily_page("summary")
+        result = client.update_daily_page("page-123", "summary")
 
     assert result is False
 
@@ -626,7 +624,26 @@ def test_notion_update_daily_page_raises_error_without_token():
     from src.integrations import ConfigurationError, NotionClient
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
-        client.update_daily_page("summary")
+        client.update_daily_page("page-123", "summary")
+
+
+def test_notion_update_daily_page_with_explicit_page_id():
+    """update_daily_page should call pages.update with the given page_id, not instance state"""
+    from unittest.mock import MagicMock, patch
+    with patch("src.integrations.NotionSdkClient") as MockClient:
+        mock_instance = MagicMock()
+        MockClient.return_value = mock_instance
+        from src.integrations import NotionClient
+        client = NotionClient(
+            token="tok", sisu_work_page_id="parent-abc",
+            tasks_db_id="db1", meetings_db_id="db2",
+        )
+        result = client.update_daily_page("page-123", "Session went well")
+    assert result is True
+    mock_instance.pages.update.assert_called_once_with(
+        page_id="page-123",
+        properties={"Session Summary": {"rich_text": [{"text": {"content": "Session went well"}}]}},
+    )
 
 
 def test_extract_jira_key_from_url():
