@@ -502,6 +502,42 @@ def test_session_end_session_state_saved_true_on_happy_path(db_session):
     assert result.session_state_saved is True
 
 
+def test_session_end_session_state_saved_false_when_write_fails(db_session):
+    from unittest.mock import patch as _patch
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import WriteBackStatus, SessionState
+
+    wb_mock = MagicMock()
+    wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    state = SessionState(
+        intent="test",
+        working_set=[],
+        state_delta="none",
+        open_loops=[],
+        next_actions=[],
+        closure_status="clean",
+    )
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        with _patch("wizard.schemas.SessionState.model_dump_json", side_effect=RuntimeError("disk full")):
+            result = session_end(
+                session_id=session.id,
+                summary="wrapped up",
+                session_state=state,
+            )
+
+    assert result.session_state_saved is False
+
+
 # ---------------------------------------------------------------------------
 # ingest_meeting
 # ---------------------------------------------------------------------------
