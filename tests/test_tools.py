@@ -367,6 +367,40 @@ def test_session_end_saves_summary_note(db_session):
     assert called_session.daily_page_id == "test-daily-page"
 
 
+def test_session_end_session_state_saved_true_on_happy_path(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import WriteBackStatus, SessionState
+
+    wb_mock = MagicMock()
+    wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    state = SessionState(
+        intent="finish auth refactor",
+        working_set=[1, 2],
+        state_delta="Completed token refresh logic",
+        open_loops=["rate limiting"],
+        next_actions=["write tests"],
+        closure_status="clean",
+    )
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        result = session_end(
+            session_id=session.id,
+            summary="wrapped up",
+            session_state=state,
+        )
+
+    assert result.session_state_saved is True
+
+
 # ---------------------------------------------------------------------------
 # ingest_meeting
 # ---------------------------------------------------------------------------
