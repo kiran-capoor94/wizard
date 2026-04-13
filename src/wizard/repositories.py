@@ -262,6 +262,20 @@ class TaskStateRepository:
         db.refresh(state)
         return state
 
+    def on_status_changed(self, db: Session, task_id: int) -> TaskState:
+        """Set last_status_change_at = now. Touches NO other field —
+        status change is administrative, not cognitive. stale_days
+        deliberately does not reset."""
+        task = db.get(Task, task_id)
+        if task is None:
+            raise ValueError(f"Task {task_id} not found")
+        state = self._get_or_create(db, task)
+        state.last_status_change_at = _dt.datetime.now()
+        db.add(state)
+        db.flush()
+        db.refresh(state)
+        return state
+
     def _get_or_create(self, db: Session, task: Task) -> TaskState:
         """Defensive helper: returns the TaskState for `task`, creating one
         with zero counts if missing. Used internally by on_note_saved and
