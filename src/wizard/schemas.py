@@ -200,7 +200,9 @@ class MeetingContext(BaseModel):
     title: str
     category: MeetingCategory
     created_at: datetime.datetime
-    has_summary: bool  # False means call get_meeting to summarise
+    already_summarised: bool      # was: has_summary
+    source_url: str | None = None
+    source_type: str | None = None
 
 
 class NoteDetail(BaseModel):
