@@ -1,7 +1,23 @@
 import datetime
-from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import NoteType, TaskCategory, TaskPriority, TaskStatus, MeetingCategory
+
+
+class SessionState(BaseModel):
+    """Six-field structured session state written by session_end (M2)
+    and read by resume_session (M3). Stored as JSON in
+    wizardsession.session_state. Defined here in M1 so M2 can lift it
+    verbatim without a duplicate schema."""
+
+    intent: str
+    working_set: list[int] = Field(default_factory=list)
+    state_delta: str
+    open_loops: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    closure_status: Literal["clean", "interrupted", "blocked"]
 
 # --- Integration response models (typed outputs from Jira/Notion clients) ---
 
@@ -199,6 +215,7 @@ class TaskStartResponse(BaseModel):
 
 class SaveNoteResponse(BaseModel):
     note_id: int
+    mental_model: str | None = None
 
 
 class UpdateTaskStatusResponse(BaseModel):
@@ -206,6 +223,7 @@ class UpdateTaskStatusResponse(BaseModel):
     new_status: TaskStatus
     jira_write_back: WriteBackStatus
     notion_write_back: WriteBackStatus
+    task_state_updated: bool = True
 
 
 class GetMeetingResponse(BaseModel):
