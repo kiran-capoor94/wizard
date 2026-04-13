@@ -451,3 +451,13 @@ class TestTaskStateRepository:
         result = repo.on_status_changed(db_session, task.id)
         assert result.task_id == task.id
         assert result.last_status_change_at is not None
+
+
+def test_task_state_repo_singleton_is_cached():
+    from wizard.deps import task_state_repo
+    from wizard.repositories import TaskStateRepository
+    task_state_repo.cache_clear()
+    a = task_state_repo()
+    b = task_state_repo()
+    assert a is b
+    assert isinstance(a, TaskStateRepository)
