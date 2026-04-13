@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sys
 import tomllib
@@ -9,6 +10,8 @@ from typing import Literal
 import tomli_w
 
 from .integrations import ConfigurationError
+
+logger = logging.getLogger(__name__)
 
 _WIZARD_DIR = Path.home() / ".wizard"
 _REGISTERED_AGENTS_PATH = _WIZARD_DIR / "registered_agents.json"
@@ -127,7 +130,8 @@ def _register_toml(cfg: AgentConfig) -> None:
     cfg.config_path.parent.mkdir(parents=True, exist_ok=True)
     if cfg.config_path.exists():
         try:
-            data = tomllib.loads(cfg.config_path.read_text())
+            with open(cfg.config_path, "rb") as f:
+                data = tomllib.load(f)
         except tomllib.TOMLDecodeError as exc:
             raise ConfigurationError(f"Malformed TOML in {cfg.config_path}: {exc}") from exc
     else:
@@ -143,7 +147,8 @@ def _deregister_toml(cfg: AgentConfig) -> None:
     if not cfg.config_path.exists():
         return
     try:
-        data = tomllib.loads(cfg.config_path.read_text())
+        with open(cfg.config_path, "rb") as f:
+            data = tomllib.load(f)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigurationError(f"Malformed TOML in {cfg.config_path}: {exc}") from exc
     mcp_section = data.get(cfg.mcp_key, {})
@@ -198,11 +203,12 @@ def scan_all_registered() -> list[str]:
             continue
         try:
             if cfg.format == "toml":
-                data = tomllib.loads(cfg.config_path.read_text())
+                with open(cfg.config_path, "rb") as f:
+                    data = tomllib.load(f)
             else:
                 data = json.loads(cfg.config_path.read_text())
             if "wizard" in data.get(cfg.mcp_key, {}):
                 found.append(agent_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("scan_all_registered: could not check %s for agent %s: %s", cfg.config_path, agent_id, exc)
     return found
