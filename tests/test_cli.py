@@ -463,7 +463,7 @@ def test_setup_interactive_prompt_invalid_selection(tmp_path):
 
 
 def test_setup_reconfigure_notion_runs_discovery(tmp_path):
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import patch
     import json
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
