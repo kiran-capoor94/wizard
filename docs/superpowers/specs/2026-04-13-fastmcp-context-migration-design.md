@@ -222,7 +222,8 @@ class MockContext:
         return self._state.get(key, default)
     async def delete_state(self, key: str) -> None: self._state.pop(key, None)
     async def elicit(self, message: str, response_type=None):
-        from fastmcp.client.elicitation import AcceptedElicitation, DeclinedElicitation
+        from fastmcp.server.elicitation import AcceptedElicitation
+        from mcp.server.elicitation import DeclinedElicitation
         if not self._supports_elicit:
             raise RuntimeError("Client does not support elicitation")
         if self._elicit_response is None:

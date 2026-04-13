@@ -122,7 +122,8 @@ class MockContext:
         self._state.pop(key, None)
 
     async def elicit(self, message: str, response_type=None):
-        from fastmcp.client.elicitation import AcceptedElicitation, DeclinedElicitation
+        from fastmcp.server.elicitation import AcceptedElicitation
+        from mcp.server.elicitation import DeclinedElicitation
 
         if not self._supports_elicit:
             raise RuntimeError("Client does not support elicitation")
@@ -1309,7 +1310,6 @@ After `task = task_repo().get_by_id(db, task_id)` and before building the `Note`
 ```python
 if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
     try:
-        from fastmcp.client.elicitation import AcceptedElicitation
         result = await ctx.elicit(
             "Optional: summarise what you now understand in 1-2 sentences (mental model). "
             "Press Enter to skip.",
@@ -1328,7 +1328,6 @@ After `task_state_repo().on_status_changed(db, task.id)` and before the write-ba
 ```python
 if new_status == TaskStatus.DONE:
     try:
-        from fastmcp.client.elicitation import AcceptedElicitation
         elicit_result = await ctx.elicit(
             "Task closed. What was the outcome? (1-2 sentences, or press Enter to skip)",
             response_type=str,

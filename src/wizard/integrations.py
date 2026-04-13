@@ -423,9 +423,7 @@ class NotionClient:
                         "object": "block",
                         "type": "paragraph",
                         "paragraph": {
-                            "rich_text": [
-                                {"type": "text", "text": {"content": text}}
-                            ]
+                            "rich_text": [{"type": "text", "text": {"content": text}}]
                         },
                     }
                 ],
