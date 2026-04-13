@@ -30,9 +30,17 @@ class AgentConfig:
 
 def _claude_desktop_config_path() -> Path:
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+        return (
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "Claude"
+            / "claude_desktop_config.json"
+        )
     elif sys.platform == "win32":
-        appdata = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming")))
+        appdata = Path(
+            os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))
+        )
         return appdata / "Claude" / "claude_desktop_config.json"
     else:
         return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
@@ -101,7 +109,9 @@ def _register_json(cfg: AgentConfig) -> None:
         try:
             data = json.loads(cfg.config_path.read_text())
         except (json.JSONDecodeError, ValueError) as exc:
-            raise ConfigurationError(f"Malformed JSON in {cfg.config_path}: {exc}") from exc
+            raise ConfigurationError(
+                f"Malformed JSON in {cfg.config_path}: {exc}"
+            ) from exc
     else:
         data = {}
 
@@ -133,7 +143,9 @@ def _register_toml(cfg: AgentConfig) -> None:
             with open(cfg.config_path, "rb") as f:
                 data = tomllib.load(f)
         except tomllib.TOMLDecodeError as exc:
-            raise ConfigurationError(f"Malformed TOML in {cfg.config_path}: {exc}") from exc
+            raise ConfigurationError(
+                f"Malformed TOML in {cfg.config_path}: {exc}"
+            ) from exc
     else:
         data = {}
 
@@ -210,5 +222,10 @@ def scan_all_registered() -> list[str]:
             if "wizard" in data.get(cfg.mcp_key, {}):
                 found.append(agent_id)
         except Exception as exc:
-            logger.debug("scan_all_registered: could not check %s for agent %s: %s", cfg.config_path, agent_id, exc)
+            logger.debug(
+                "scan_all_registered: could not check %s for agent %s: %s",
+                cfg.config_path,
+                agent_id,
+                exc,
+            )
     return found

@@ -130,3 +130,26 @@ def test_analytics_cli_week_option(tmp_path, monkeypatch):
         runner = CliRunner()
         result = runner.invoke(app, ["analytics", "--week"])
     assert result.exit_code == 0
+
+
+def test_analytics_cli_from_to_range(tmp_path, monkeypatch):
+    from unittest.mock import patch
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(tmp_path / "wizard.db"))
+    db_path = tmp_path / "wizard.db"
+    db_path.touch()
+
+    with patch("wizard.cli.main.analytics_module") as mock_analytics, \
+         patch("wizard.cli.main.get_db_session") as mock_db:
+        mock_db.return_value.__enter__ = lambda s: s
+        mock_db.return_value.__exit__ = lambda s, *a: None
+        mock_analytics.query_sessions.return_value = {"session_count": 0, "avg_duration_minutes": 0.0, "total_tool_calls": 0}
+        mock_analytics.query_notes.return_value = {"total": 0, "by_type": {}, "mental_models_captured": 0, "mental_model_coverage": 0.0}
+        mock_analytics.query_tasks.return_value = {"worked": 0, "avg_notes_per_task": 0.0, "stale_count": 0}
+        mock_analytics.query_compounding.return_value = 0.0
+        mock_analytics.format_table.return_value = "table output"
+        from typer.testing import CliRunner
+        from wizard.cli.main import app
+        runner = CliRunner()
+        result = runner.invoke(app, ["analytics", "--from", "2026-01-01", "--to", "2026-01-07"])
+    assert result.exit_code == 0
