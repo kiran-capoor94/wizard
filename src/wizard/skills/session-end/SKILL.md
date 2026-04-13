@@ -1,19 +1,55 @@
----
-description: End a wizard session — summarise what changed, what is still open, and what matters next session
----
-
 # Session End
 
-Run at the end of every coding session.
+Use this skill at the end of every work session to save a structured summary and close the session cleanly.
+
+## What this does
+
+- Collects six structured fields from the engineer
+- Calls `session_end` with all eight parameters
+- Persists a `SessionState` JSON object to the session record
+- Writes the session summary to the Notion daily page
+- Clears the session context so the next session starts clean
 
 ## Steps
 
-1. Review what was accomplished this session
-2. Write a summary covering:
-   - **What changed** — files modified, features added, bugs fixed
-   - **What is still open** — tasks in progress, blockers, unfinished items
-   - **What matters next session** — where to pick up, what to investigate, what is time-sensitive
-3. Call `session_end` with:
-   - `session_id` (from session_start)
-   - `summary` — the structured summary
-4. The summary is persisted as a SESSION_SUMMARY note and written to the Notion daily page
+**1. Ask the engineer for a session summary.** One or two sentences covering what was done.
+
+**2. Collect the six structured fields.**
+
+Ask each in turn (you may batch them if the engineer is terse):
+
+- **intent**: What was the primary goal of this session? (One sentence.)
+- **working_set**: Which task IDs were actively worked on? (List of integers from `session_start` output.)
+- **state_delta**: What changed since the last session? (One sentence — status changes, blockers resolved, new discoveries.)
+- **open_loops**: What's unresolved and needs follow-up? (List of strings, or empty list.)
+- **next_actions**: What are the concrete next steps? (List of strings, or empty list.)
+- **closure_status**: How did the session end? One of: `clean` (finished what was planned), `interrupted` (cut short), `blocked` (stuck on something).
+
+**3. Call session_end with all eight parameters:**
+
+```python
+session_end(
+    session_id=<from session_start>,
+    summary="<summary>",
+    intent="<intent>",
+    working_set=[<task_id>, ...],
+    state_delta="<state_delta>",
+    open_loops=["<loop>", ...],
+    next_actions=["<action>", ...],
+    closure_status="<clean|interrupted|blocked>",
+)
+```
+
+**4. Surface the confirmation.** The response includes echo fields — show the engineer:
+
+- Session ID closed
+- Closure status
+- Number of open loops and next actions
+- Whether Notion write-back succeeded
+
+## Notes
+
+- `working_set` is task IDs (integers), not task names.
+- `open_loops` and `next_actions` can be empty lists — do not prompt unnecessarily.
+- If the engineer is in a hurry, `closure_status="interrupted"` is fine and `open_loops`/`next_actions` can be `[]`.
+- The `summary` field is scrubbed for PII before storage. The six structured fields are stored as-is in `session_state` JSON — remind the engineer not to include real names, emails, or patient data in open_loops/next_actions.

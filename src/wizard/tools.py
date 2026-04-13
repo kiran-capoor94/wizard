@@ -333,14 +333,35 @@ async def save_meeting_summary(
         raise ToolError(str(e)) from e
 
 
-async def session_end(ctx: Context, session_id: int, summary: str) -> SessionEndResponse:
-    """Persists session summary note and attempts Notion daily page write-back."""
+async def session_end(
+    ctx: Context,
+    session_id: int,
+    summary: str,
+    intent: str,
+    working_set: list[int],
+    state_delta: str,
+    open_loops: list[str],
+    next_actions: list[str],
+    closure_status: Literal["clean", "interrupted", "blocked"],
+) -> SessionEndResponse:
+    """Persists session summary + six-field SessionState to WizardSession. Writes Notion daily page."""
     logger.info("session_end session_id=%d", session_id)
     with get_session() as db:
         await _log_tool_call(db, "session_end", session_id=session_id)
         session = db.get(WizardSession, session_id)
         if session is None:
+            await ctx.error(f"Session {session_id} not found")
             raise ToolError(f"Session {session_id} not found")
+
+        state = SessionState(
+            intent=intent,
+            working_set=working_set,
+            state_delta=state_delta,
+            open_loops=open_loops,
+            next_actions=next_actions,
+            closure_status=closure_status,
+        )
+        session.session_state = state.model_dump_json()
 
         clean_summary = security().scrub(summary).clean
         session.summary = clean_summary
@@ -360,9 +381,18 @@ async def session_end(ctx: Context, session_id: int, summary: str) -> SessionEnd
         wb_result = writeback().push_session_summary(session)
 
         await ctx.delete_state("current_session_id")
+        await ctx.info(
+            f"Session {session.id} closed. Status: {closure_status}. "
+            f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
+        )
+
         return SessionEndResponse(
             note_id=saved.id,
             notion_write_back=wb_result,
+            closure_status=closure_status,
+            open_loops_count=len(open_loops),
+            next_actions_count=len(next_actions),
+            intent=intent,
         )
 
 
