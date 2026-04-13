@@ -1,7 +1,7 @@
 import datetime as _dt
 import logging
 
-from sqlmodel import Session, and_, case, col, func, select, or_
+from sqlmodel import Session, and_, case, col, exists, func, select, or_
 
 from .models import (
     Meeting,
@@ -11,6 +11,7 @@ from .models import (
     TaskPriority,
     TaskState,
     TaskStatus,
+    WizardSession,
 )
 from .schemas import MeetingContext, TaskContext
 
@@ -281,3 +282,21 @@ class TaskStateRepository:
             task.id,
         )
         return self.create_for_task(db, task)
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+
+def find_latest_session_with_notes(db: Session) -> WizardSession | None:
+    """Most recent WizardSession that has at least one associated Note."""
+    subq = select(Note).where(Note.session_id == WizardSession.id).exists()
+    stmt = (
+        select(WizardSession)
+        .where(subq)
+        .order_by(WizardSession.created_at.desc())
+        .limit(1)
+    )
+    results = db.execute(stmt).scalars().all()
+    return results[0] if results else None
