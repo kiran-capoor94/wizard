@@ -104,3 +104,21 @@ def test_note_detail_from_model_mental_model_none_when_absent():
     )
     detail = NoteDetail.from_model(note)
     assert detail.mental_model is None
+
+
+def test_meeting_context_has_already_summarised_field():
+    from wizard.schemas import MeetingContext, MeetingCategory
+    import datetime
+
+    ctx = MeetingContext(
+        id=1,
+        title="Planning",
+        category=MeetingCategory.PLANNING,
+        created_at=datetime.datetime(2026, 4, 10),
+        already_summarised=True,
+        source_url="https://example.com",
+        source_type="KRISP",
+    )
+    assert ctx.already_summarised is True
+    assert ctx.source_url == "https://example.com"
+    assert ctx.source_type == "KRISP"
