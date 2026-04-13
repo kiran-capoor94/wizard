@@ -47,22 +47,11 @@ def _latest_note_subquery():
 
 
 def _task_context_from_row(
-    task: Task, last_worked_at, latest_note: Note | None
+    task: Task,
+    task_state: TaskState | None,
+    latest_note: Note | None = None,
 ) -> TaskContext:
-    assert task.id is not None
-    return TaskContext(
-        id=task.id,
-        name=task.name,
-        status=task.status,
-        priority=task.priority,
-        category=task.category,
-        due_date=task.due_date,
-        source_id=task.source_id,
-        source_url=task.source_url,
-        last_note_type=latest_note.note_type if latest_note else None,
-        last_note_preview=latest_note.content[:300] if latest_note else None,
-        last_worked_at=last_worked_at,
-    )
+    return TaskContext.from_model(task, task_state, latest_note)
 
 
 # ---------------------------------------------------------------------------
@@ -101,19 +90,17 @@ class TaskRepository:
         rows = db.exec(stmt).all()
 
         results: list[TaskContext] = []
-        for task, lw_at in rows:
+        for task, _lw_at in rows:
+            task_state = db.get(TaskState, task.id)
             latest = self._latest_note_for(db, task)
-            results.append(_task_context_from_row(task, lw_at, latest))
+            results.append(_task_context_from_row(task, task_state, latest))
         return results
 
     def build_task_context(self, db: Session, task: Task) -> TaskContext:
         """Build a single TaskContext for a known task."""
+        task_state = db.get(TaskState, task.id)
         latest = self._latest_note_for(db, task)
-        return _task_context_from_row(
-            task,
-            latest.created_at if latest else None,
-            latest,
-        )
+        return _task_context_from_row(task, task_state, latest)
 
     def _latest_note_for(self, db: Session, task: Task) -> Note | None:
         conditions = []
