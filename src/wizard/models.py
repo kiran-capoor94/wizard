@@ -112,6 +112,14 @@ class WizardSession(TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
     summary: str | None = None
     daily_page_id: str | None = None
+    session_state: str | None = Field(
+        default=None,
+        description=(
+            "JSON-serialised SessionState (see schemas.SessionState). "
+            "Null until session_end (M2) populates it. "
+            "Read by resume_session (M3)."
+        ),
+    )
     notes: list["Note"] = Relationship(back_populates="session")
 
 

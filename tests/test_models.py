@@ -243,3 +243,34 @@ class TestNoteMentalModel:
         db_session.flush()
         db_session.refresh(note)
         assert note.mental_model is None
+
+
+# --- Task 3: WizardSession.session_state ---
+
+
+class TestWizardSessionState:
+    def test_session_state_defaults_to_none(self, db_session):
+        from wizard.models import WizardSession
+
+        session = WizardSession()
+        db_session.add(session)
+        db_session.flush()
+        db_session.refresh(session)
+        assert session.session_state is None
+
+    def test_session_state_round_trips_json(self, db_session):
+        from wizard.models import WizardSession
+        from wizard.schemas import SessionState
+
+        state = SessionState(
+            intent="x",
+            state_delta="y",
+            closure_status="clean",
+        )
+        session = WizardSession(session_state=state.model_dump_json())
+        db_session.add(session)
+        db_session.flush()
+        db_session.refresh(session)
+        assert session.session_state is not None
+        loaded = SessionState.model_validate_json(session.session_state)
+        assert loaded == state
