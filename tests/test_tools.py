@@ -414,6 +414,7 @@ def test_save_meeting_summary_tasks_linked_count(db_session):
     db_session.refresh(meeting)
     db_session.refresh(task1)
     db_session.refresh(task2)
+    assert session.id is not None
     assert meeting.id is not None
     assert task1.id is not None
     assert task2.id is not None
@@ -772,6 +773,7 @@ def test_task_start_logs_tool_call_without_session_id(db_session):
     db_session.add(task)
     db_session.flush()
     db_session.refresh(task)
+    assert task.id is not None
 
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
@@ -792,6 +794,7 @@ def test_session_end_logs_tool_call_with_session_id(db_session):
     db_session.add(session)
     db_session.flush()
     db_session.refresh(session)
+    assert session.id is not None
 
     patches, _, wb_mock = _patch_tools(db_session)
     from wizard.schemas import WriteBackStatus
@@ -837,6 +840,7 @@ def test_tool_call_sequence_within_session(db_session):
     db_session.add(task)
     db_session.flush()
     db_session.refresh(task)
+    assert task.id is not None
 
     patches, sync_mock, wb_mock = _patch_tools(db_session)
     sync_mock.sync_all = MagicMock(return_value=[])
@@ -1199,3 +1203,26 @@ def test_rewind_task_not_found_raises_tool_error(db_session):
     with patch.multiple("wizard.tools", **patches):
         with pytest.raises(ToolError, match="Task 9999 not found"):
             rewind_task(task_id=9999)
+
+
+def test_rewind_task_raises_tool_error_for_missing_task_state(db_session):
+    from fastmcp.exceptions import ToolError
+    from wizard.models import Task, TaskCategory, TaskPriority, TaskStatus
+    from wizard.tools import rewind_task
+
+    task = Task(
+        name="No State Task",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        category=TaskCategory.ISSUE,
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+    # Deliberately do NOT create a TaskState row
+
+    assert task.id is not None
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        with pytest.raises(ToolError, match="TaskState missing for task"):
+            rewind_task(task_id=task.id)
