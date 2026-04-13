@@ -6,6 +6,7 @@ from sqlmodel import Session, and_, case, col, func, select, or_
 from .models import (
     Meeting,
     Note,
+    NoteType,
     Task,
     TaskPriority,
     TaskState,
@@ -227,3 +228,47 @@ class TaskStateRepository:
         db.flush()
         db.refresh(state)
         return state
+
+    def on_note_saved(self, db: Session, task_id: int) -> TaskState:
+        """Re-query notes for the task (dual-lookup: by task_id OR by Jira
+        source_id) and recompute note_count, decision_count, last_note_at,
+        last_touched_at, stale_days. Does NOT touch last_status_change_at."""
+        task = db.get(Task, task_id)
+        if task is None:
+            raise ValueError(f"Task {task_id} not found")
+
+        state = self._get_or_create(db, task)
+
+        conditions: list = [Note.task_id == task_id]
+        if task.source_id is not None:
+            conditions.append(
+                and_(Note.source_id == task.source_id, Note.source_type == "JIRA")
+            )
+        notes = list(db.exec(select(Note).where(or_(*conditions))).all())
+
+        state.note_count = len(notes)
+        state.decision_count = sum(
+            1 for n in notes if n.note_type == NoteType.DECISION
+        )
+        state.last_note_at = (
+            max(n.created_at for n in notes) if notes else None
+        )
+        state.last_touched_at = (
+            state.last_note_at if state.last_note_at is not None else task.created_at
+        )
+        state.stale_days = (_dt.datetime.now() - state.last_touched_at).days
+        db.add(state)
+        db.flush()
+        db.refresh(state)
+        return state
+
+    def _get_or_create(self, db: Session, task: Task) -> TaskState:
+        """Defensive helper: returns the TaskState for `task`, creating one
+        with zero counts if missing. Used internally by on_note_saved and
+        on_status_changed to handle the gap window between deploy and
+        backfill, or any task created before the migration ran."""
+        assert task.id is not None
+        state = db.get(TaskState, task.id)
+        if state is not None:
+            return state
+        return self.create_for_task(db, task)
