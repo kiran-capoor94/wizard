@@ -465,6 +465,24 @@ def test_create_task_creates_and_links(db_session):
     assert link is not None
 
 
+def test_create_task_creates_paired_task_state(db_session):
+    from wizard.tools import create_task
+    from wizard.models import TaskState
+    from wizard.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_to_notion.return_value = WriteBackStatus(ok=True)
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        response = create_task(name="new task")
+
+    state = db_session.get(TaskState, response.task_id)
+    assert state is not None
+    assert state.note_count == 0
+    assert state.decision_count == 0
+
+
 # ---------------------------------------------------------------------------
 # End-to-end compounding loop (design spec Section 10)
 # ---------------------------------------------------------------------------
@@ -672,3 +690,151 @@ def test_tool_call_sequence_within_session(db_session):
     assert rows[0].session_id == s.session_id
     assert rows[1].session_id is None
     assert rows[2].session_id == s.session_id
+
+
+# ---------------------------------------------------------------------------
+# save_note — mental_model and TaskState wiring
+# ---------------------------------------------------------------------------
+
+def test_save_note_stores_mental_model_when_provided(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Note, NoteType, Task
+
+    task = Task(name="t")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        response = save_note(
+            task_id=task.id,
+            note_type=NoteType.INVESTIGATION,
+            content="findings",
+            mental_model="Race condition between token refresh and request",
+        )
+
+    note = db_session.get(Note, response.note_id)
+    assert note is not None
+    assert note.mental_model == "Race condition between token refresh and request"
+    assert response.mental_model == note.mental_model
+
+
+def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Note, NoteType, Task
+
+    task = Task(name="t")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        response = save_note(
+            task_id=task.id,
+            note_type=NoteType.DOCS,
+            content="ref material",
+        )
+
+    note = db_session.get(Note, response.note_id)
+    assert note is not None
+    assert note.mental_model is None
+    assert response.mental_model is None
+
+
+def test_save_note_updates_task_state(db_session):
+    from wizard.tools import save_note
+    from wizard.models import NoteType, Task, TaskState
+    from wizard.deps import task_state_repo
+
+    task = Task(name="t")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    # Pre-create the TaskState row so we can refresh it from the same session.
+    task_state_repo().create_for_task(db_session, task)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        save_note(task_id=task.id, note_type=NoteType.DECISION, content="d")
+
+    state = db_session.get(TaskState, task.id)
+    db_session.refresh(state)
+    assert state is not None
+    assert state.note_count == 1
+    assert state.decision_count == 1
+    assert state.last_note_at is not None
+
+
+# ---------------------------------------------------------------------------
+# update_task_status — TaskState wiring
+# ---------------------------------------------------------------------------
+
+def test_update_task_status_records_last_status_change_at(db_session):
+    import datetime as _dt
+    from wizard.tools import update_task_status
+    from wizard.models import Task, TaskState, TaskStatus
+    from wizard.schemas import WriteBackStatus
+    from wizard.deps import task_state_repo
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+
+    task = Task(name="t", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+    task_state_repo().create_for_task(db_session, task)
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        update_task_status(task_id=task.id, new_status=TaskStatus.IN_PROGRESS)
+
+    state = db_session.get(TaskState, task.id)
+    db_session.refresh(state)
+    assert state is not None
+    assert state.last_status_change_at is not None
+    delta = _dt.datetime.now() - state.last_status_change_at
+    assert delta.total_seconds() < 5
+
+
+def test_update_task_status_does_not_reset_stale_days(db_session):
+    from wizard.tools import update_task_status
+    from wizard.models import Task, TaskState, TaskStatus
+    from wizard.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+
+    task = Task(name="t", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    state = TaskState(
+        task_id=task.id,
+        last_touched_at=task.created_at,
+        stale_days=7,
+        note_count=3,
+        decision_count=1,
+    )
+    db_session.add(state)
+    db_session.commit()
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        update_task_status(task_id=task.id, new_status=TaskStatus.DONE)
+
+    db_session.refresh(state)
+    assert state.stale_days == 7
+    assert state.note_count == 3
+    assert state.decision_count == 1
