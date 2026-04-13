@@ -324,3 +324,20 @@ class Signal(BaseModel):
 
 class MissingResponse(BaseModel):
     signals: list[Signal]
+
+
+class ResumedTaskNotes(BaseModel):
+    task: TaskContext
+    notes: list[NoteDetail]
+    latest_mental_model: str | None
+
+
+class ResumeSessionResponse(BaseModel):
+    session_id: int
+    resumed_from_session_id: int
+    session_state: SessionState | None
+    working_set_tasks: list[TaskContext]
+    prior_notes: list[ResumedTaskNotes]
+    unsummarised_meetings: list[MeetingContext]
+    sync_results: list[SourceSyncStatus]
+    daily_page: DailyPageResult | None

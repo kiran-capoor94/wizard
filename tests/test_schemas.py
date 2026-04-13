@@ -175,3 +175,33 @@ def test_missing_response_empty_signals():
 
     resp = MissingResponse(signals=[])
     assert resp.signals == []
+
+
+def test_resumed_task_notes_round_trip():
+    from wizard.models import Task, TaskPriority, TaskCategory, TaskStatus
+    from wizard.schemas import ResumedTaskNotes, TaskContext
+
+    task = Task(id=5, name="T5", status=TaskStatus.TODO,
+                priority=TaskPriority.LOW, category=TaskCategory.ISSUE)
+    ctx = TaskContext.from_model(task, None)
+    rtn = ResumedTaskNotes(task=ctx, notes=[], latest_mental_model=None)
+    assert rtn.notes == []
+    assert rtn.latest_mental_model is None
+
+
+def test_resume_session_response_round_trip():
+    from wizard.models import Task, TaskPriority, TaskCategory, TaskStatus
+    from wizard.schemas import ResumeSessionResponse, TaskContext
+
+    resp = ResumeSessionResponse(
+        session_id=2,
+        resumed_from_session_id=1,
+        session_state=None,
+        working_set_tasks=[],
+        prior_notes=[],
+        unsummarised_meetings=[],
+        sync_results=[],
+        daily_page=None,
+    )
+    assert resp.session_id == 2
+    assert resp.session_state is None
