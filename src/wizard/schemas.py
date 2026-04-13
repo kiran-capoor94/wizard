@@ -215,6 +215,7 @@ class TaskStartResponse(BaseModel):
 
 class SaveNoteResponse(BaseModel):
     note_id: int
+    mental_model: str | None = None
 
 
 class UpdateTaskStatusResponse(BaseModel):
