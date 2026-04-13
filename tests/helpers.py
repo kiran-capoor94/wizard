@@ -1,4 +1,7 @@
 from contextlib import contextmanager
+from typing import cast
+
+from fastmcp import Context
 
 
 def mock_session(db_session):
@@ -12,7 +15,7 @@ def mock_session(db_session):
     return _inner
 
 
-class MockContext:
+class _MockContextImpl:
     """Minimal FastMCP Context double for async tool tests.
 
     Records all ctx.* calls so tests can assert on them.
@@ -58,10 +61,23 @@ class MockContext:
         self._state.pop(key, None)
 
     async def elicit(self, _message: str, _response_type=None):
-        from fastmcp.server.context import AcceptedElicitation, DeclinedElicitation
+        from fastmcp.server.elicitation import AcceptedElicitation
+        from mcp.server.elicitation import DeclinedElicitation
 
         if not self._supports_elicit:
             raise RuntimeError("Client does not support elicitation")
         if self._elicit_response is None:
             return DeclinedElicitation()
         return AcceptedElicitation(data=self._elicit_response)
+
+
+def MockContext(
+    elicit_response: str | None = None,
+    supports_elicit: bool = True,
+) -> Context:
+    """Factory that returns a MockContext cast to Context for use in async tool tests."""
+    impl = _MockContextImpl(
+        elicit_response=elicit_response,
+        supports_elicit=supports_elicit,
+    )
+    return cast(Context, impl)
