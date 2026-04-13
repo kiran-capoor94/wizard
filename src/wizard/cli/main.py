@@ -9,6 +9,8 @@ import typer
 from wizard import agent_registration
 from wizard import notion_discovery  # for --reconfigure-notion; enables patching
 from notion_client import Client as NotionSdkClient  # for --reconfigure-notion; enables patching
+from wizard.cli import analytics as analytics_module  # enables patching
+from wizard.database import get_session as get_db_session  # enables patching
 
 logger = logging.getLogger(__name__)
 
@@ -398,3 +400,56 @@ def uninstall(
             raise typer.Exit(code=1)
 
     typer.echo("Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package.")
+
+
+@app.command()
+def analytics(
+    day: bool = typer.Option(False, "--day", help="Show today's analytics"),
+    week: bool = typer.Option(False, "--week", help="Show last 7 days (default)"),
+    from_date: Optional[str] = typer.Option(None, "--from", help="Start date YYYY-MM-DD"),
+    to_date: Optional[str] = typer.Option(None, "--to", help="End date YYYY-MM-DD"),
+) -> None:
+    """Show wizard usage analytics."""
+    import datetime
+    import os
+    from wizard.config import settings
+
+    today = datetime.date.today()
+
+    options_set = sum([day, week, bool(from_date), bool(to_date)])
+    if options_set > 1:
+        typer.echo("Options --day, --week, --from/--to are mutually exclusive.", err=True)
+        raise typer.Exit(1)
+
+    if day:
+        start = today
+        end = today
+    elif from_date or to_date:
+        try:
+            start = datetime.date.fromisoformat(from_date) if from_date else today - datetime.timedelta(days=7)
+            end = datetime.date.fromisoformat(to_date) if to_date else today
+        except ValueError as exc:
+            typer.echo(f"Invalid date format: {exc}", err=True)
+            raise typer.Exit(1)
+    else:
+        start = today - datetime.timedelta(days=7)
+        end = today
+
+    db_path = Path(os.environ.get("WIZARD_DB", settings.db))
+    if not db_path.exists():
+        typer.echo("Database not found. Run 'wizard setup' first.", err=True)
+        raise typer.Exit(1)
+
+    with get_db_session() as db:
+        sessions_data = analytics_module.query_sessions(db, start, end)
+        notes_data = analytics_module.query_notes(db, start, end)
+        tasks_data = analytics_module.query_tasks(db, start, end)
+        compounding = analytics_module.query_compounding(db, start, end)
+
+    combined = {
+        "sessions": sessions_data,
+        "notes": notes_data,
+        "tasks": tasks_data,
+        "compounding": compounding,
+    }
+    typer.echo(analytics_module.format_table(combined, start, end))
