@@ -752,7 +752,7 @@ def test_save_note_stores_mental_model_when_provided(db_session):
     note = db_session.get(Note, response.note_id)
     assert note is not None
     assert note.mental_model == "Race condition between token refresh and request"
-    assert response.mental_model == note.mental_model
+    assert response.mental_model_saved is True
 
 
 def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
@@ -776,7 +776,51 @@ def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
     note = db_session.get(Note, response.note_id)
     assert note is not None
     assert note.mental_model is None
-    assert response.mental_model is None
+    assert response.mental_model_saved is False
+
+
+def test_save_note_mental_model_saved_true_when_model_provided(db_session):
+    from wizard.tools import save_note
+    from wizard.models import NoteType, Task
+
+    task = Task(name="t2")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = save_note(
+            task_id=task.id,
+            note_type=NoteType.INVESTIGATION,
+            content="some investigation",
+            mental_model="State machine pattern",
+        )
+
+    assert result.mental_model_saved is True
+
+
+def test_save_note_mental_model_saved_false_when_model_absent(db_session):
+    from wizard.tools import save_note
+    from wizard.models import NoteType, Task
+
+    task = Task(name="t3")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = save_note(
+            task_id=task.id,
+            note_type=NoteType.DOCS,
+            content="some docs",
+            mental_model=None,
+        )
+
+    assert result.mental_model_saved is False
 
 
 def test_save_note_updates_task_state(db_session):
