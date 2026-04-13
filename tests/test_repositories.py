@@ -271,3 +271,43 @@ def test_unsummarised_contexts(db_session):
     assert len(contexts) == 1
     assert contexts[0].title == "standup"
     assert contexts[0].has_summary is False
+
+
+# ---------------------------------------------------------------------------
+# TaskStateRepository
+# ---------------------------------------------------------------------------
+
+class TestTaskStateRepository:
+    def test_create_for_task_initialises_zero_state(self, db_session):
+        from wizard.models import Task, TaskState
+        from wizard.repositories import TaskStateRepository
+        task = Task(name="t")
+        db_session.add(task)
+        db_session.flush()
+        assert task.id is not None
+
+        repo = TaskStateRepository()
+        state = repo.create_for_task(db_session, task)
+
+        assert state.task_id == task.id
+        assert state.note_count == 0
+        assert state.decision_count == 0
+        assert state.last_note_at is None
+        assert state.last_status_change_at is None
+        assert state.last_touched_at == task.created_at
+        assert state.stale_days >= 0
+
+    def test_create_for_task_persists_row(self, db_session):
+        from wizard.models import Task, TaskState
+        from wizard.repositories import TaskStateRepository
+        task = Task(name="t")
+        db_session.add(task)
+        db_session.flush()
+        assert task.id is not None
+
+        repo = TaskStateRepository()
+        repo.create_for_task(db_session, task)
+
+        loaded = db_session.get(TaskState, task.id)
+        assert loaded is not None
+        assert loaded.task_id == task.id
