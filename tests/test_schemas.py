@@ -31,6 +31,31 @@ def test_task_context_from_model_populates_task_state_fields():
     assert ctx.last_worked_at == datetime.datetime(2026, 4, 10)
 
 
+def test_task_context_from_model_with_latest_note_populates_preview_fields():
+    from wizard.models import Note, NoteType, Task, TaskPriority, TaskCategory, TaskStatus
+    from wizard.schemas import TaskContext
+
+    task = Task(
+        id=3,
+        name="T3",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        category=TaskCategory.ISSUE,
+        notion_id=None,
+    )
+    note = Note(
+        id=10,
+        note_type=NoteType.DECISION,
+        content="A" * 400,  # longer than 300 chars
+        source_id=None,
+    )
+    ctx = TaskContext.from_model(task, None, latest_note=note)
+    assert ctx.last_note_type == NoteType.DECISION
+    assert ctx.last_note_preview is not None
+    assert ctx.last_note_preview == "A" * 300  # truncated at 300
+    assert len(ctx.last_note_preview) == 300
+
+
 def test_task_context_from_model_null_task_state_uses_defaults():
     from wizard.models import Task, TaskPriority, TaskCategory, TaskStatus
     from wizard.schemas import TaskContext
