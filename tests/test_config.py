@@ -98,5 +98,5 @@ def test_notion_schema_defaults():
 def test_notion_settings_has_schema():
     from wizard.config import NotionSettings, NotionSchemaSettings
     notion = NotionSettings()
-    assert hasattr(notion, "schema")
-    assert isinstance(notion.schema, NotionSchemaSettings)
+    assert hasattr(notion, "notion_schema")
+    assert isinstance(notion.notion_schema, NotionSchemaSettings)
