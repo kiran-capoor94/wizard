@@ -1,6 +1,5 @@
-import json
 from pathlib import Path
-from unittest.mock import patch, call
+from unittest.mock import patch
 
 from wizard.mcp_config import (
     CLAUDE_CODE_CONFIG,
@@ -78,7 +77,7 @@ def test_find_wizard_mcp_targets_returns_empty_when_none_registered():
     assert result == []
 
 
-def test_register_is_idempotent_via_delegation(tmp_path):
+def test_register_is_idempotent_via_delegation():
     """Idempotency is guaranteed by agent_registration.register — verify it is called."""
     with patch("wizard.mcp_config.agent_registration") as mock_ar:
         register_wizard_mcp()
