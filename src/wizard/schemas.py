@@ -245,6 +245,10 @@ class SaveMeetingSummaryResponse(BaseModel):
 class SessionEndResponse(BaseModel):
     note_id: int
     notion_write_back: WriteBackStatus
+    closure_status: str | None = None
+    open_loops_count: int = 0
+    next_actions_count: int = 0
+    intent: str | None = None
 
 
 class IngestMeetingResponse(BaseModel):
