@@ -25,7 +25,7 @@ Shipping the schema separately keeps each downstream PR small and reviewable. Th
 
 ### 1. Schema changes (one Alembic migration)
 
-**New table — `taskstate`** (one-to-one with `task`):
+**New table — `task_state`** (one-to-one with `task`):
 
 | Column                  | Type                       | Nullable | Notes                                                                                               |
 | ----------------------- | -------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
@@ -47,10 +47,10 @@ No additional indexes — `task_id` is the PK, all other queries fan out from it
 
 ### 2. Backfill
 
-The migration's `upgrade()` runs the schema changes, then performs a one-time backfill of `taskstate` rows for every existing `task`. Backfill uses raw SQL via `op.get_bind().execute(text(...))` rather than ORM models — this isolates the migration from any future change to `models.py` (an Alembic best practice; the migration must be replayable forever even if the models class is renamed or removed):
+The migration's `upgrade()` runs the schema changes, then performs a one-time backfill of `task_state` rows for every existing `task`. Backfill uses raw SQL via `op.get_bind().execute(text(...))` rather than ORM models — this isolates the migration from any future change to `models.py` (an Alembic best practice; the migration must be replayable forever even if the models class is renamed or removed):
 
 ```python
-# In upgrade(), after create_table('taskstate'):
+# In upgrade(), after create_table('task_state'):
 bind = op.get_bind()
 now = datetime.datetime.now()
 tasks = bind.execute(text("SELECT id, source_id, created_at FROM task")).fetchall()
@@ -66,7 +66,7 @@ for t in tasks:
     last_touched = last_note_at or t.created_at
     stale = (now - last_touched).days
     bind.execute(text("""
-        INSERT INTO taskstate
+        INSERT INTO task_state
           (task_id, note_count, decision_count, last_note_at,
            last_status_change_at, last_touched_at, stale_days,
            created_at, updated_at)
@@ -81,7 +81,7 @@ for t in tasks:
 
 ### 3. Models (`src/wizard/models.py`)
 
-- Add `TaskState(TimestampMixin, table=True)` with the columns above. Set `__tablename__ = "taskstate"` explicitly — matches the existing convention (`task`, `meeting`, `note`, `wizardsession`, `toolcall`, `meetingtasks` are all lowercase with no underscore between words). All TaskState column names use `snake_case` (`note_count`, `decision_count`, `last_note_at`, etc.) — also matches existing convention.
+- Add `TaskState(TimestampMixin, table=True)` with the columns above. Set `__tablename__ = "task_state"` explicitly — `snake_case` is the Python convention. (Existing tables `wizardsession`, `toolcall`, `meetingtasks` are pre-convention deviations; new tables follow `snake_case`. Renaming the legacy tables is tracked as future work in M4 sub-project H alongside the cascade retrofit, since both require the SQLite table-rebuild dance.) All column names also use `snake_case` (`note_count`, `decision_count`, `last_note_at`, etc.).
 - PK = `task_id`, declared as `Field(foreign_key="task.id", primary_key=True, sa_column_kwargs={"ondelete": "CASCADE"})`. Cascade is at the FK level only — no ORM-level `cascade="..."` declarations.
 - No `Relationship` declarations on `Task` ↔ `TaskState`. Access is always through `TaskStateRepository`, never via lazy attribute traversal. Keeping the relationship out of the model avoids accidental N+1 loads from `task.task_state` and matches the existing style for ToolCall (which also has no back-relationship on WizardSession).
 - Add `mental_model: str | None = Field(default=None)` to `Note`.
@@ -177,10 +177,10 @@ Add `task_state_repo()` as an `lru_cache` singleton matching the existing reposi
 
 **`tests/test_tools.py`** (extend):
 
-- `create_task` returns a response and a corresponding `taskstate` row exists with `note_count == 0`.
-- `save_note` with `mental_model="..."` stores it on the Note and updates `taskstate`.
-- `save_note` without `mental_model` still updates `taskstate`, leaves Note.mental_model as null.
-- `update_task_status` updates `taskstate.last_status_change_at` but not `stale_days`.
+- `create_task` returns a response and a corresponding `task_state` row exists with `note_count == 0`.
+- `save_note` with `mental_model="..."` stores it on the Note and updates `task_state`.
+- `save_note` without `mental_model` still updates `task_state`, leaves Note.mental_model as null.
+- `update_task_status` updates `task_state.last_status_change_at` but not `stale_days`.
 
 **`tests/test_models.py`** (extend):
 
@@ -190,7 +190,7 @@ Add `task_state_repo()` as an `lru_cache` singleton matching the existing reposi
 **Migration smoke test** (new — `tests/test_migration_data_layer.py`):
 
 - Use the existing `tests/conftest.py` engine fixture or create a scratch engine.
-- Apply migrations up to the previous head (`15146de1d71a`), seed two tasks (one with notes including a decision, one without), apply this new migration, then assert: a `taskstate` row exists for each task with the correct backfilled `note_count`, `decision_count`, `last_note_at`, `stale_days`.
+- Apply migrations up to the previous head (`15146de1d71a`), seed two tasks (one with notes including a decision, one without), apply this new migration, then assert: a `task_state` row exists for each task with the correct backfilled `note_count`, `decision_count`, `last_note_at`, `stale_days`.
 - Apply `downgrade()` and assert the table and columns are gone.
 
 ### 9. Migration name
@@ -252,7 +252,7 @@ Add `task_state_repo()` as an `lru_cache` singleton matching the existing reposi
 | 1 | `last_status_change_at` left null on backfill — no historical reconstruction. |
 | 2 | `mental_model` soft cap **1500 chars** at the application display layer; no DB constraint. |
 | 3 | `session_state` stored as TEXT, parsed via Pydantic at the application layer. |
-| 4 | `taskstate.task_id` uses `ON DELETE CASCADE`. **Policy going forward:** all new FK columns must declare `ON DELETE CASCADE` unless an explicit reason to do otherwise is documented in the spec that introduces them. |
+| 4 | `task_state.task_id` uses `ON DELETE CASCADE`. **Policy going forward:** all new FK columns must declare `ON DELETE CASCADE` unless an explicit reason to do otherwise is documented in the spec that introduces them. |
 
 ### Cascade policy — implications
 
