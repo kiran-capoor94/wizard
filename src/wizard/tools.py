@@ -436,6 +436,7 @@ def rewind_task(task_id: int) -> RewindResponse:
                 mental_model=n.mental_model,
             )
             for n in notes_asc
+            if n.id is not None
         ]
 
         total_notes = len(notes_asc)
