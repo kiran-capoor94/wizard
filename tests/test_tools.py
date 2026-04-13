@@ -465,6 +465,24 @@ def test_create_task_creates_and_links(db_session):
     assert link is not None
 
 
+def test_create_task_creates_paired_task_state(db_session):
+    from wizard.tools import create_task
+    from wizard.models import TaskState
+    from wizard.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_to_notion.return_value = WriteBackStatus(ok=True)
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        response = create_task(name="new task")
+
+    state = db_session.get(TaskState, response.task_id)
+    assert state is not None
+    assert state.note_count == 0
+    assert state.decision_count == 0
+
+
 # ---------------------------------------------------------------------------
 # End-to-end compounding loop (design spec Section 10)
 # ---------------------------------------------------------------------------
