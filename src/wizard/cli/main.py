@@ -38,7 +38,6 @@ _AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex"
 
 
 def _run_notion_discovery(config_path: Path) -> None:
-    from wizard.config import NotionSchemaSettings
     from wizard.integrations import ConfigurationError
 
     if not config_path.exists():
