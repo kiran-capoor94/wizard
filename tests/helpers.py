@@ -75,9 +75,24 @@ def MockContext(
     elicit_response: str | None = None,
     supports_elicit: bool = True,
 ) -> Context:
-    """Factory that returns a MockContext cast to Context for use in async tool tests."""
+    """Factory that returns a MockContext cast to Context for use in async tool tests.
+
+    When you need to assert on recorded calls (progress_calls, info_calls, etc.),
+    create the impl first and cast separately:
+
+        impl = _MockContextImpl()
+        ctx = mock_ctx(impl)
+        ...
+        assert impl.progress_calls == [(0, 3, "Syncing Jira...")]
+    """
     impl = _MockContextImpl(
         elicit_response=elicit_response,
         supports_elicit=supports_elicit,
     )
+    return cast(Context, impl)
+
+
+def mock_ctx(impl: _MockContextImpl) -> Context:
+    """Cast a _MockContextImpl to Context. Use when you need both the tool-compatible
+    ctx and access to recorded calls (progress_calls, info_calls, etc.)."""
     return cast(Context, impl)
