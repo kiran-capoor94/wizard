@@ -181,9 +181,12 @@ def uninstall(
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
 ) -> None:
     """Remove all Wizard runtime state and MCP registration."""
-    from wizard.mcp_config import deregister_wizard_mcp, find_wizard_mcp_targets
+    # Read which agents are registered
+    registered = agent_registration.read_registered_agents()
+    if not registered:
+        registered = agent_registration.scan_all_registered()
 
-    # Step 1: Gather what exists
+    # Gather which wizard files exist
     wizard_files = {
         "wizard.db": "all notes, sessions, meetings",
         "config.json": None,
@@ -195,16 +198,14 @@ def uninstall(
         if path.exists():
             existing_files.append((name, desc))
 
-    mcp_targets = find_wizard_mcp_targets()
-
     has_wizard_dir = WIZARD_HOME.exists()
-    has_anything = has_wizard_dir or bool(mcp_targets)
+    has_anything = has_wizard_dir or bool(registered)
 
     if not has_anything:
         typer.echo("Nothing to uninstall.")
         return
 
-    # Step 2: Confirmation prompt
+    # Confirmation
     if not yes:
         typer.echo("This will permanently delete:")
         for name, desc in existing_files:
@@ -212,18 +213,23 @@ def uninstall(
             typer.echo(f"  ~/.wizard/{name}{suffix}")
         if has_wizard_dir and not existing_files:
             typer.echo("  ~/.wizard/")
-        for path in mcp_targets:
-            typer.echo(f"  wizard MCP entry in {path}")
+        for aid in registered:
+            typer.echo(f"  wizard MCP entry for {aid}")
         typer.echo("")
         confirm = typer.prompt("Are you sure? [y/N]", default="N", show_default=False)
         if confirm.lower() != "y":
             typer.echo("Aborted.")
             return
 
-    # Step 3: Execute
-    deregister_wizard_mcp()
-    typer.echo("  Removed wizard MCP from Claude Code")
+    # Deregister all agents
+    for aid in registered:
+        try:
+            agent_registration.deregister(aid)
+            typer.echo(f"  Removed wizard MCP from {aid}")
+        except Exception as exc:
+            typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
 
+    # Remove wizard directory
     if has_wizard_dir:
         try:
             shutil.rmtree(WIZARD_HOME)
@@ -232,5 +238,4 @@ def uninstall(
             typer.echo(f"  Failed to remove {WIZARD_HOME}: {e}", err=True)
             raise typer.Exit(code=1)
 
-    # Step 4: Summary
     typer.echo("Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package.")
