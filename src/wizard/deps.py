@@ -35,6 +35,7 @@ def notion_client() -> NotionClient:
         sisu_work_page_id=settings.notion.sisu_work_page_id,
         tasks_db_id=settings.notion.tasks_db_id,
         meetings_db_id=settings.notion.meetings_db_id,
+        schema=settings.notion.notion_schema,
     )
 
 
