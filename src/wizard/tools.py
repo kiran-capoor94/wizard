@@ -246,11 +246,11 @@ def save_meeting_summary(
             db.flush()
             wb_result = writeback().push_meeting_summary(meeting)
 
-            linked_task_ids = [t.id for t in meeting.tasks if t.id is not None]
+            linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
             return SaveMeetingSummaryResponse(
                 note_id=saved.id,
-                linked_task_ids=linked_task_ids,
+                tasks_linked=len(linked_ids),
                 notion_write_back=wb_result,
             )
     except ValueError as e:
