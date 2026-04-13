@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.helpers import mock_session
+from tests.helpers import MockContext, _MockContextImpl, mock_ctx, mock_session
 
 
 def _make_notion_mock(notion=None):
@@ -33,13 +33,16 @@ def _patch_tools(db_session, sync=None, wb=None, notion=None):
 # session_start
 # ---------------------------------------------------------------------------
 
-def test_session_start_creates_session(db_session):
+async def test_session_start_creates_session(db_session):
     from wizard.tools import session_start
+    ctx = MockContext()
     patches, sync_mock, _ = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
-        result = session_start()
+        result = await session_start(ctx)
 
     assert result.session_id is not None
     assert result.open_tasks is not None
@@ -48,29 +51,32 @@ def test_session_start_creates_session(db_session):
     assert result.sync_results is not None
 
 
-def test_session_start_calls_sync(db_session):
+async def test_session_start_calls_sync(db_session):
     from wizard.tools import session_start
+    ctx = MockContext()
     patches, sync_mock, _ = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
-        session_start()
+        await session_start(ctx)
 
-    sync_mock.sync_all.assert_called_once()
+    sync_mock.sync_jira.assert_called_once()
+    sync_mock.sync_notion_tasks.assert_called_once()
+    sync_mock.sync_notion_meetings.assert_called_once()
 
 
-def test_session_start_surfaces_sync_errors(db_session):
+async def test_session_start_surfaces_sync_errors(db_session):
     from wizard.tools import session_start
-    from wizard.schemas import SourceSyncStatus
+    ctx = MockContext()
     patches, sync_mock, _ = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[
-        SourceSyncStatus(source="jira", ok=False, error="Jira token not configured"),
-        SourceSyncStatus(source="notion_tasks", ok=True),
-        SourceSyncStatus(source="notion_meetings", ok=True),
-    ])
+    sync_mock.sync_jira = MagicMock(side_effect=Exception("Jira token not configured"))
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
-        result = session_start()
+        result = await session_start(ctx)
 
     assert len(result.sync_results) == 3
     jira_sync = result.sync_results[0]
@@ -80,11 +86,12 @@ def test_session_start_surfaces_sync_errors(db_session):
     assert result.sync_results[1].ok is True
 
 
-def test_session_start_resolves_daily_page(db_session):
+async def test_session_start_resolves_daily_page(db_session):
     from wizard.tools import session_start
     from wizard.schemas import DailyPageResult
     from wizard.models import WizardSession
 
+    ctx = MockContext()
     notion_mock = MagicMock()
     notion_mock.ensure_daily_page.return_value = DailyPageResult(
         page_id="today-page-id",
@@ -93,10 +100,12 @@ def test_session_start_resolves_daily_page(db_session):
     )
 
     patches, sync_mock, _ = _patch_tools(db_session, notion=notion_mock)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
-        result = session_start()
+        result = await session_start(ctx)
 
     assert result.daily_page is not None
     assert result.daily_page.page_id == "today-page-id"
@@ -106,17 +115,20 @@ def test_session_start_resolves_daily_page(db_session):
     assert session.daily_page_id == "today-page-id"
 
 
-def test_session_start_daily_page_failure_is_non_fatal(db_session):
+async def test_session_start_daily_page_failure_is_non_fatal(db_session):
     from wizard.tools import session_start
 
+    ctx = MockContext()
     notion_mock = MagicMock()
     notion_mock.ensure_daily_page.side_effect = Exception("notion API down")
 
     patches, sync_mock, _ = _patch_tools(db_session, notion=notion_mock)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
-        result = session_start()
+        result = await session_start(ctx)
 
     assert result.session_id is not None
     assert result.daily_page is None
@@ -126,7 +138,7 @@ def test_session_start_daily_page_failure_is_non_fatal(db_session):
 # task_start
 # ---------------------------------------------------------------------------
 
-def test_task_start_returns_compounding_true_when_prior_notes(db_session):
+async def test_task_start_returns_compounding_true_when_prior_notes(db_session):
     from wizard.models import Task, TaskStatus, Note, NoteType
     from wizard.tools import task_start
 
@@ -140,15 +152,16 @@ def test_task_start_returns_compounding_true_when_prior_notes(db_session):
     db_session.add(note)
     db_session.commit()
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        result = task_start(task_id=task.id)
+        result = await task_start(ctx, task_id=task.id)
 
     assert result.compounding is True
     assert len(result.prior_notes) == 1
 
 
-def test_task_start_returns_compounding_false_when_no_notes(db_session):
+async def test_task_start_returns_compounding_false_when_no_notes(db_session):
     from wizard.models import Task, TaskStatus
     from wizard.tools import task_start
 
@@ -158,27 +171,29 @@ def test_task_start_returns_compounding_false_when_no_notes(db_session):
     db_session.refresh(task)
     assert task.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        result = task_start(task_id=task.id)
+        result = await task_start(ctx, task_id=task.id)
 
     assert result.compounding is False
 
 
-def test_task_start_raises_when_task_not_found(db_session):
+async def test_task_start_raises_when_task_not_found(db_session):
     from fastmcp.exceptions import ToolError
     from wizard.tools import task_start
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         with pytest.raises(ToolError, match="Task 999 not found"):
-            task_start(task_id=999)
+            await task_start(ctx, task_id=999)
 
 
 # ---------------------------------------------------------------------------
 # save_note
 # ---------------------------------------------------------------------------
 
-def test_save_note_scrubs_and_persists(db_session):
+async def test_save_note_scrubs_and_persists(db_session):
     from wizard.tools import save_note
     from wizard.models import Task, Note, NoteType
 
@@ -188,9 +203,11 @@ def test_save_note_scrubs_and_persists(db_session):
     db_session.refresh(task)
     assert task.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        result = save_note(
+        result = await save_note(
+            ctx,
             task_id=task.id,
             note_type=NoteType.INVESTIGATION,
             content="john@example.com found a bug",
@@ -207,7 +224,7 @@ def test_save_note_scrubs_and_persists(db_session):
 # update_task_status
 # ---------------------------------------------------------------------------
 
-def test_update_task_status_persists_and_writebacks(db_session):
+async def test_update_task_status_persists_and_writebacks(db_session):
     from wizard.tools import update_task_status
     from wizard.models import Task, TaskStatus
     from wizard.schemas import WriteBackStatus
@@ -225,9 +242,10 @@ def test_update_task_status_persists_and_writebacks(db_session):
     assert task.id is not None
     task_id = task.id
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = update_task_status(task_id=task_id, new_status=TaskStatus.DONE)
+        result = await update_task_status(ctx, task_id=task_id, new_status=TaskStatus.DONE)
 
     assert result.new_status == TaskStatus.DONE
     assert result.jira_write_back.ok is True
@@ -238,7 +256,7 @@ def test_update_task_status_persists_and_writebacks(db_session):
     assert task_fresh.status == TaskStatus.DONE
 
 
-def test_update_task_status_dual_writeback(db_session):
+async def test_update_task_status_dual_writeback(db_session):
     from wizard.tools import update_task_status
     from wizard.models import Task, TaskStatus
     from wizard.schemas import WriteBackStatus
@@ -253,9 +271,10 @@ def test_update_task_status_dual_writeback(db_session):
     db_session.refresh(task)
     assert task.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = update_task_status(task_id=task.id, new_status=TaskStatus.DONE)
+        result = await update_task_status(ctx, task_id=task.id, new_status=TaskStatus.DONE)
 
     assert result.jira_write_back.ok is True
     assert result.notion_write_back.ok is True
@@ -265,7 +284,7 @@ def test_update_task_status_dual_writeback(db_session):
 # get_meeting
 # ---------------------------------------------------------------------------
 
-def test_get_meeting_returns_content_and_open_tasks(db_session):
+async def test_get_meeting_returns_content_and_open_tasks(db_session):
     from wizard.tools import get_meeting
     from wizard.models import Task, TaskStatus, Meeting, MeetingTasks
 
@@ -283,9 +302,10 @@ def test_get_meeting_returns_content_and_open_tasks(db_session):
     db_session.add(link)
     db_session.commit()
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        result = get_meeting(meeting_id=meeting.id)
+        result = await get_meeting(ctx, meeting_id=meeting.id)
 
     assert result.meeting_id == meeting.id
     assert result.already_summarised is False
@@ -296,7 +316,7 @@ def test_get_meeting_returns_content_and_open_tasks(db_session):
 # save_meeting_summary
 # ---------------------------------------------------------------------------
 
-def test_save_meeting_summary_scrubs_and_persists(db_session):
+async def test_save_meeting_summary_scrubs_and_persists(db_session):
     from wizard.tools import save_meeting_summary
     from wizard.models import WizardSession, Meeting, Note
     from wizard.schemas import WriteBackStatus
@@ -314,9 +334,11 @@ def test_save_meeting_summary_scrubs_and_persists(db_session):
     assert session.id is not None
     assert meeting.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = save_meeting_summary(
+        result = await save_meeting_summary(
+            ctx,
             meeting_id=meeting.id,
             session_id=session.id,
             summary="patient 943 476 5919 was discussed",
@@ -333,7 +355,7 @@ def test_save_meeting_summary_scrubs_and_persists(db_session):
 # session_end
 # ---------------------------------------------------------------------------
 
-def test_session_end_saves_summary_note(db_session):
+async def test_session_end_saves_summary_note(db_session):
     from wizard.tools import session_end
     from wizard.models import WizardSession, Note, NoteType
     from wizard.schemas import WriteBackStatus
@@ -348,11 +370,19 @@ def test_session_end_saves_summary_note(db_session):
     assert session.id is not None
     session_id = session.id
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = session_end(
+        result = await session_end(
+            ctx,
             session_id=session_id,
             summary="wrapped up today's work",
+            intent="wrapped up",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
         )
 
     assert result.note_id is not None
@@ -371,7 +401,7 @@ def test_session_end_saves_summary_note(db_session):
 # ingest_meeting
 # ---------------------------------------------------------------------------
 
-def test_ingest_meeting_creates_meeting(db_session):
+async def test_ingest_meeting_creates_meeting(db_session):
     from wizard.tools import ingest_meeting
     from wizard.models import Meeting, MeetingCategory
     from wizard.schemas import WriteBackStatus
@@ -381,9 +411,11 @@ def test_ingest_meeting_creates_meeting(db_session):
         ok=True, page_id="notion-meeting-page-id",
     )
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = ingest_meeting(
+        result = await ingest_meeting(
+            ctx,
             title="Sprint Planning",
             content="john@example.com reported a bug",
             source_id="krisp-abc",
@@ -398,7 +430,7 @@ def test_ingest_meeting_creates_meeting(db_session):
     assert "[EMAIL_1]" in meeting.content
 
 
-def test_ingest_meeting_dedup_by_source_id(db_session):
+async def test_ingest_meeting_dedup_by_source_id(db_session):
     from wizard.tools import ingest_meeting
     from wizard.models import Meeting
     from wizard.schemas import WriteBackStatus
@@ -413,9 +445,10 @@ def test_ingest_meeting_dedup_by_source_id(db_session):
     db_session.commit()
     db_session.refresh(existing)
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = ingest_meeting(title="New", content="new", source_id="krisp-abc")
+        result = await ingest_meeting(ctx, title="New", content="new", source_id="krisp-abc")
 
     assert result.already_existed is True
     assert result.meeting_id == existing.id
@@ -425,7 +458,7 @@ def test_ingest_meeting_dedup_by_source_id(db_session):
 # create_task
 # ---------------------------------------------------------------------------
 
-def test_create_task_creates_and_links(db_session):
+async def test_create_task_creates_and_links(db_session):
     from wizard.tools import create_task
     from wizard.models import Meeting, Task, TaskStatus, TaskPriority, MeetingTasks
     from wizard.schemas import WriteBackStatus
@@ -442,9 +475,11 @@ def test_create_task_creates_and_links(db_session):
     db_session.refresh(meeting)
     meeting_id = meeting.id
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = create_task(
+        result = await create_task(
+            ctx,
             name="Fix john@example.com auth bug",
             priority=TaskPriority.HIGH,
             meeting_id=meeting_id,
@@ -465,7 +500,7 @@ def test_create_task_creates_and_links(db_session):
     assert link is not None
 
 
-def test_create_task_creates_paired_task_state(db_session):
+async def test_create_task_creates_paired_task_state(db_session):
     from wizard.tools import create_task
     from wizard.models import TaskState
     from wizard.schemas import WriteBackStatus
@@ -473,9 +508,10 @@ def test_create_task_creates_paired_task_state(db_session):
     wb_mock = MagicMock()
     wb_mock.push_task_to_notion.return_value = WriteBackStatus(ok=True)
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        response = create_task(name="new task")
+        response = await create_task(ctx, name="new task")
 
     state = db_session.get(TaskState, response.task_id)
     assert state is not None
@@ -487,7 +523,7 @@ def test_create_task_creates_paired_task_state(db_session):
 # End-to-end compounding loop (design spec Section 10)
 # ---------------------------------------------------------------------------
 
-def test_compounding_loop_across_two_sessions(db_session):
+async def test_compounding_loop_across_two_sessions(db_session):
     """Proves the full compounding context loop:
     session 1: session_start -> task_start -> save_note -> update_task_status -> session_end
     session 2: session_start -> task_start returns compounding=True with prior notes
@@ -515,33 +551,46 @@ def test_compounding_loop_across_two_sessions(db_session):
     )
     wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
     sync_mock = MagicMock()
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, sync=sync_mock, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
         # --- Session 1 ---
-        s1 = session_start()
+        s1 = await session_start(ctx)
         session_id = s1.session_id
 
         # task_start -- no prior notes yet
-        ts1 = task_start(task_id=task_id)
+        ts1 = await task_start(ctx, task_id=task_id)
         assert ts1.compounding is False
 
         # save_note
-        save_note(task_id=task_id, note_type=NoteType.INVESTIGATION, content="Found the root cause")
+        await save_note(ctx, task_id=task_id, note_type=NoteType.INVESTIGATION, content="Found the root cause")
 
         # update_task_status
-        update_task_status(task_id=task_id, new_status=TaskStatus.IN_PROGRESS)
+        await update_task_status(ctx, task_id=task_id, new_status=TaskStatus.IN_PROGRESS)
 
         # session_end
-        session_end(session_id=session_id, summary="Investigated auth bug")
+        await session_end(
+            ctx,
+            session_id=session_id,
+            summary="Investigated auth bug",
+            intent="investigate auth",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
 
         # --- Session 2 ---
-        s2 = session_start()
+        s2 = await session_start(ctx)
         assert s2.session_id != session_id
 
         # task_start -- should see prior notes now
-        ts2 = task_start(task_id=task_id)
+        ts2 = await task_start(ctx, task_id=task_id)
         assert ts2.compounding is True
         assert len(ts2.prior_notes) >= 1
         assert ts2.notes_by_type["investigation"] >= 1
@@ -575,16 +624,19 @@ def test_fastmcp_serializes_pydantic_models():
 # ToolCall telemetry
 # ---------------------------------------------------------------------------
 
-def test_session_start_logs_tool_call(db_session):
+async def test_session_start_logs_tool_call(db_session):
     from wizard.tools import session_start
     from wizard.models import ToolCall
     from sqlmodel import select
 
+    ctx = MockContext()
     patches, sync_mock, _ = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
-        result = session_start()
+        result = await session_start(ctx)
 
     rows = db_session.exec(select(ToolCall)).all()
     assert len(rows) == 1
@@ -592,7 +644,7 @@ def test_session_start_logs_tool_call(db_session):
     assert rows[0].session_id == result.session_id
 
 
-def test_task_start_logs_tool_call_without_session_id(db_session):
+async def test_task_start_logs_tool_call_without_session_id(db_session):
     from wizard.tools import task_start
     from wizard.models import Task, ToolCall
     from sqlmodel import select
@@ -601,10 +653,12 @@ def test_task_start_logs_tool_call_without_session_id(db_session):
     db_session.add(task)
     db_session.flush()
     db_session.refresh(task)
+    assert task.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        task_start(task_id=task.id)
+        await task_start(ctx, task_id=task.id)
 
     rows = db_session.exec(select(ToolCall)).all()
     assert len(rows) == 1
@@ -612,7 +666,7 @@ def test_task_start_logs_tool_call_without_session_id(db_session):
     assert rows[0].session_id is None
 
 
-def test_session_end_logs_tool_call_with_session_id(db_session):
+async def test_session_end_logs_tool_call_with_session_id(db_session):
     from wizard.tools import session_end
     from wizard.models import WizardSession, ToolCall
     from sqlmodel import select
@@ -621,13 +675,25 @@ def test_session_end_logs_tool_call_with_session_id(db_session):
     db_session.add(session)
     db_session.flush()
     db_session.refresh(session)
+    assert session.id is not None
 
+    ctx = MockContext()
     patches, _, wb_mock = _patch_tools(db_session)
     from wizard.schemas import WriteBackStatus
     wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
 
     with patch.multiple("wizard.tools", **patches):
-        session_end(session_id=session.id, summary="done")
+        await session_end(
+            ctx,
+            session_id=session.id,
+            summary="done",
+            intent="done",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
 
     rows = db_session.exec(select(ToolCall)).all()
     assert len(rows) == 1
@@ -635,11 +701,12 @@ def test_session_end_logs_tool_call_with_session_id(db_session):
     assert rows[0].session_id == session.id
 
 
-def test_ingest_meeting_logs_tool_call_without_session_id(db_session):
+async def test_ingest_meeting_logs_tool_call_without_session_id(db_session):
     from wizard.tools import ingest_meeting
     from wizard.models import ToolCall
     from sqlmodel import select
 
+    ctx = MockContext()
     patches, _, wb_mock = _patch_tools(db_session)
     from wizard.schemas import WriteBackStatus
     wb_mock.push_meeting_to_notion = MagicMock(
@@ -647,7 +714,7 @@ def test_ingest_meeting_logs_tool_call_without_session_id(db_session):
     )
 
     with patch.multiple("wizard.tools", **patches):
-        ingest_meeting(title="standup", content="transcript here")
+        await ingest_meeting(ctx, title="standup", content="transcript here")
 
     rows = db_session.exec(select(ToolCall)).all()
     assert len(rows) == 1
@@ -655,7 +722,7 @@ def test_ingest_meeting_logs_tool_call_without_session_id(db_session):
     assert rows[0].session_id is None
 
 
-def test_tool_call_sequence_within_session(db_session):
+async def test_tool_call_sequence_within_session(db_session):
     """session_start -> save_note -> session_end produces ordered ToolCall rows."""
     from wizard.tools import session_start, save_note, session_end
     from wizard.models import Task, ToolCall, NoteType
@@ -666,21 +733,36 @@ def test_tool_call_sequence_within_session(db_session):
     db_session.add(task)
     db_session.flush()
     db_session.refresh(task)
+    assert task.id is not None
 
+    ctx = MockContext()
     patches, sync_mock, wb_mock = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
     wb_mock.push_session_summary = MagicMock(
         return_value=WriteBackStatus(ok=True)
     )
 
     with patch.multiple("wizard.tools", **patches):
-        s = session_start()
-        save_note(
+        s = await session_start(ctx)
+        await save_note(
+            ctx,
             task_id=task.id,
             note_type=NoteType.INVESTIGATION,
             content="finding",
         )
-        session_end(session_id=s.session_id, summary="wrap up")
+        await session_end(
+            ctx,
+            session_id=s.session_id,
+            summary="wrap up",
+            intent="wrap up",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
 
     rows = db_session.exec(
         select(ToolCall).order_by(col(ToolCall.called_at))
@@ -688,7 +770,7 @@ def test_tool_call_sequence_within_session(db_session):
     names = [r.tool_name for r in rows]
     assert names == ["session_start", "save_note", "session_end"]
     assert rows[0].session_id == s.session_id
-    assert rows[1].session_id is None
+    assert rows[1].session_id == s.session_id  # ctx state carries session_id into save_note
     assert rows[2].session_id == s.session_id
 
 
@@ -696,7 +778,7 @@ def test_tool_call_sequence_within_session(db_session):
 # save_note — mental_model and TaskState wiring
 # ---------------------------------------------------------------------------
 
-def test_save_note_stores_mental_model_when_provided(db_session):
+async def test_save_note_stores_mental_model_when_provided(db_session):
     from wizard.tools import save_note
     from wizard.models import Note, NoteType, Task
 
@@ -706,9 +788,11 @@ def test_save_note_stores_mental_model_when_provided(db_session):
     db_session.refresh(task)
     assert task.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        response = save_note(
+        response = await save_note(
+            ctx,
             task_id=task.id,
             note_type=NoteType.INVESTIGATION,
             content="findings",
@@ -721,7 +805,7 @@ def test_save_note_stores_mental_model_when_provided(db_session):
     assert response.mental_model == note.mental_model
 
 
-def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
+async def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
     from wizard.tools import save_note
     from wizard.models import Note, NoteType, Task
 
@@ -731,9 +815,11 @@ def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
     db_session.refresh(task)
     assert task.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        response = save_note(
+        response = await save_note(
+            ctx,
             task_id=task.id,
             note_type=NoteType.DOCS,
             content="ref material",
@@ -745,7 +831,7 @@ def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
     assert response.mental_model is None
 
 
-def test_save_note_updates_task_state(db_session):
+async def test_save_note_updates_task_state(db_session):
     from wizard.tools import save_note
     from wizard.models import NoteType, Task, TaskState
     from wizard.deps import task_state_repo
@@ -759,9 +845,10 @@ def test_save_note_updates_task_state(db_session):
     # Pre-create the TaskState row so we can refresh it from the same session.
     task_state_repo().create_for_task(db_session, task)
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        save_note(task_id=task.id, note_type=NoteType.DECISION, content="d")
+        await save_note(ctx, task_id=task.id, note_type=NoteType.DECISION, content="d")
 
     state = db_session.get(TaskState, task.id)
     db_session.refresh(state)
@@ -775,7 +862,7 @@ def test_save_note_updates_task_state(db_session):
 # update_task_status — TaskState wiring
 # ---------------------------------------------------------------------------
 
-def test_update_task_status_records_last_status_change_at(db_session):
+async def test_update_task_status_records_last_status_change_at(db_session):
     import datetime as _dt
     from wizard.tools import update_task_status
     from wizard.models import Task, TaskState, TaskStatus
@@ -793,9 +880,10 @@ def test_update_task_status_records_last_status_change_at(db_session):
     assert task.id is not None
     task_state_repo().create_for_task(db_session, task)
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        update_task_status(task_id=task.id, new_status=TaskStatus.IN_PROGRESS)
+        await update_task_status(ctx, task_id=task.id, new_status=TaskStatus.IN_PROGRESS)
 
     state = db_session.get(TaskState, task.id)
     db_session.refresh(state)
@@ -805,7 +893,7 @@ def test_update_task_status_records_last_status_change_at(db_session):
     assert delta.total_seconds() < 5
 
 
-def test_update_task_status_does_not_reset_stale_days(db_session):
+async def test_update_task_status_does_not_reset_stale_days(db_session):
     from wizard.tools import update_task_status
     from wizard.models import Task, TaskState, TaskStatus
     from wizard.schemas import WriteBackStatus
@@ -830,11 +918,394 @@ def test_update_task_status_does_not_reset_stale_days(db_session):
     db_session.add(state)
     db_session.commit()
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        update_task_status(task_id=task.id, new_status=TaskStatus.DONE)
+        await update_task_status(ctx, task_id=task.id, new_status=TaskStatus.DONE)
 
     db_session.refresh(state)
     assert state.stale_days == 7
     assert state.note_count == 3
     assert state.decision_count == 1
+
+
+# --- session threading ---
+
+async def test_session_start_sets_current_session_id_in_ctx_state(db_session):
+    from wizard.tools import session_start
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
+
+    ctx = MockContext()
+    with patch.multiple("wizard.tools", **patches):
+        result = await session_start(ctx)
+
+    assert await ctx.get_state("current_session_id") == result.session_id
+
+
+async def test_save_note_uses_session_id_from_ctx_state_when_set(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext()
+    await ctx.set_state("current_session_id", 42)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(ctx, task_id=task.id, note_type=NoteType.DOCS, content="content")
+
+    note = db_session.get(Note, result.note_id)
+    assert note.session_id == 42
+
+
+async def test_save_note_session_id_null_when_no_ctx_state(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext()  # no set_state called
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(ctx, task_id=task.id, note_type=NoteType.DOCS, content="content")
+
+    note = db_session.get(Note, result.note_id)
+    assert note.session_id is None
+
+
+async def test_session_end_clears_current_session_id_from_ctx_state(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import WriteBackStatus
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    ctx = MockContext()
+    await ctx.set_state("current_session_id", session.id)
+
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
+
+    with patch.multiple("wizard.tools", **patches):
+        await session_end(
+            ctx,
+            session_id=session.id,
+            summary="done",
+            intent="done",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
+
+    assert await ctx.get_state("current_session_id") is None
+
+
+# --- progress ---
+
+async def test_session_start_reports_progress(db_session):
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
+
+    impl = _MockContextImpl()
+    ctx = mock_ctx(impl)
+    with patch.multiple("wizard.tools", **patches):
+        from wizard.tools import session_start
+        await session_start(ctx)
+
+    assert len(impl.progress_calls) == 4
+    assert impl.progress_calls[0] == (0, 3, "Syncing Jira...")
+    assert impl.progress_calls[1] == (1, 3, "Syncing Notion tasks...")
+    assert impl.progress_calls[2] == (2, 3, "Syncing Notion meetings...")
+    assert impl.progress_calls[3] == (3, 3, "Sync complete.")
+
+
+# --- elicitation: save_note ---
+
+async def test_save_note_elicits_mental_model_for_investigation(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="I now understand the root cause is X")
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(
+            ctx, task_id=task.id, note_type=NoteType.INVESTIGATION, content="looked at logs"
+        )
+
+    note = db_session.get(Note, result.note_id)
+    assert note.mental_model == "I now understand the root cause is X"
+
+
+async def test_save_note_elicits_mental_model_for_decision(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="We chose approach B for simplicity")
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(
+            ctx, task_id=task.id, note_type=NoteType.DECISION, content="chose B"
+        )
+
+    note = db_session.get(Note, result.note_id)
+    assert note.mental_model == "We chose approach B for simplicity"
+
+
+async def test_save_note_does_not_elicit_for_docs_notes(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="should not be used")
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(ctx, task_id=task.id, note_type=NoteType.DOCS, content="docs")
+
+    note = db_session.get(Note, result.note_id)
+    # DOCS note: elicit should NOT have been called, mental_model stays None
+    assert note.mental_model is None
+
+
+async def test_save_note_mental_model_param_skips_elicitation(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="this should not win")
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(
+            ctx,
+            task_id=task.id,
+            note_type=NoteType.INVESTIGATION,
+            content="investigation",
+            mental_model="caller provided this",
+        )
+
+    note = db_session.get(Note, result.note_id)
+    assert note.mental_model == "caller provided this"
+
+
+async def test_save_note_handles_elicit_failure_gracefully(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(supports_elicit=False)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(
+            ctx, task_id=task.id, note_type=NoteType.INVESTIGATION, content="investigation"
+        )
+
+    assert result.note_id is not None  # tool succeeded despite elicit failure
+
+
+# --- elicitation: update_task_status ---
+
+async def test_update_task_status_elicits_outcome_when_done(db_session):
+    from wizard.tools import update_task_status
+    from wizard.models import Task, TaskStatus
+    from wizard.schemas import WriteBackStatus
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS, notion_id="notion-page-123")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="Shipped the fix to production.")
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+    wb_mock.append_task_outcome.return_value = WriteBackStatus(ok=True)
+
+    with patch.multiple("wizard.tools", **patches):
+        await update_task_status(ctx, task_id=task.id, new_status=TaskStatus.DONE)
+
+    wb_mock.append_task_outcome.assert_called_once()
+    call_args = wb_mock.append_task_outcome.call_args
+    assert "Shipped the fix" in call_args[0][1]
+
+
+async def test_update_task_status_does_not_elicit_for_in_progress(db_session):
+    from wizard.tools import update_task_status
+    from wizard.models import Task, TaskStatus
+    from wizard.schemas import WriteBackStatus
+
+    task = Task(name="task", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="should not be called")
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+
+    with patch.multiple("wizard.tools", **patches):
+        await update_task_status(ctx, task_id=task.id, new_status=TaskStatus.IN_PROGRESS)
+
+    wb_mock.append_task_outcome.assert_not_called()
+
+
+# --- session_end expansion ---
+
+async def test_session_end_persists_session_state(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import SessionState, WriteBackStatus
+    import json
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    ctx = MockContext()
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
+
+    with patch.multiple("wizard.tools", **patches):
+        result = await session_end(
+            ctx,
+            session_id=session.id,
+            summary="good session",
+            intent="shipped the auth fix",
+            working_set=[1, 2],
+            state_delta="ENG-42 now done",
+            open_loops=["follow up with team"],
+            next_actions=["write tests for ENG-50"],
+            closure_status="clean",
+        )
+
+    db_session.refresh(session)
+    assert session.session_state is not None
+    state = SessionState.model_validate_json(session.session_state)
+    assert state.intent == "shipped the auth fix"
+    assert state.working_set == [1, 2]
+    assert state.closure_status == "clean"
+    assert state.open_loops == ["follow up with team"]
+    assert state.next_actions == ["write tests for ENG-50"]
+
+    assert result.closure_status == "clean"
+    assert result.open_loops_count == 1
+    assert result.next_actions_count == 1
+    assert result.intent == "shipped the auth fix"
+
+
+async def test_session_end_emits_confirmation_via_ctx_info(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import WriteBackStatus
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    impl = _MockContextImpl()
+    ctx = mock_ctx(impl)
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
+
+    with patch.multiple("wizard.tools", **patches):
+        await session_end(
+            ctx,
+            session_id=session.id,
+            summary="done",
+            intent="intent",
+            working_set=[],
+            state_delta="nothing",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
+
+    assert any("clean" in msg for msg in impl.info_calls)
+
+
+async def test_session_end_rejects_invalid_closure_status(db_session):
+    from fastmcp.exceptions import ToolError
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    ctx = MockContext()
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_session_summary = MagicMock()
+
+    with patch.multiple("wizard.tools", **patches):
+        with pytest.raises(ToolError):
+            await session_end(
+                ctx,
+                session_id=session.id,
+                summary="done",
+                intent="intent",
+                working_set=[],
+                state_delta="nothing",
+                open_loops=[],
+                next_actions=[],
+                closure_status="invalid_value",  # type: ignore[arg-type]
+            )
