@@ -831,8 +831,8 @@ def test_notion_ensure_daily_page_creates_and_archives():
 # NotionClient — schema wiring tests
 # ============================================================================
 
-def test_notion_client_uses_schema_for_task_name(tmp_path, monkeypatch):
-    from unittest.mock import patch, MagicMock
+def test_notion_client_uses_schema_for_task_name():
+    from unittest.mock import patch
     from wizard.config import NotionSchemaSettings
     from wizard.integrations import NotionClient
 
@@ -860,12 +860,12 @@ def test_notion_client_uses_schema_for_task_name(tmp_path, monkeypatch):
     assert tasks[0].name == "Test Task"
 
 
-def test_notion_client_uses_schema_for_meeting_url(tmp_path, monkeypatch):
+def test_notion_client_uses_schema_for_meeting_url():
     from unittest.mock import patch
     from wizard.config import NotionSchemaSettings
     from wizard.integrations import NotionClient
 
-    schema = NotionSchemaSettings(meeting_url="Fathom URL", meeting_title="Meeting name")
+    schema = NotionSchemaSettings(meeting_url="Fathom URL")
     client = NotionClient(
         token="tok",
         sisu_work_page_id="p",
