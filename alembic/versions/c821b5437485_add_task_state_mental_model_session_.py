@@ -50,6 +50,13 @@ def upgrade() -> None:
         _sa_text("SELECT id, source_id, created_at FROM task")
     ).fetchall()
 
+    def _to_dt(value):
+        # SQLite returns DATETIME columns as ISO strings via raw text();
+        # other dialects return datetime objects. Coerce both to datetime.
+        if value is None or isinstance(value, _dt.datetime):
+            return value
+        return _dt.datetime.fromisoformat(value)
+
     for t in tasks:
         notes = bind.execute(
             _sa_text(
@@ -62,8 +69,10 @@ def upgrade() -> None:
 
         note_count = len(notes)
         decision_count = sum(1 for n in notes if n.note_type == "decision")
-        last_note_at = max((n.created_at for n in notes), default=None)
-        last_touched_at = last_note_at if last_note_at is not None else t.created_at
+        note_dts = [_to_dt(n.created_at) for n in notes]
+        last_note_at = max(note_dts) if note_dts else None
+        task_created_at = _to_dt(t.created_at)
+        last_touched_at = last_note_at if last_note_at is not None else task_created_at
         stale_days = (now - last_touched_at).days
 
         bind.execute(
