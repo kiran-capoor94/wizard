@@ -329,6 +329,43 @@ def test_save_meeting_summary_scrubs_and_persists(db_session):
     assert "[NHS_ID_1]" in saved.content
 
 
+def test_save_meeting_summary_tasks_linked_count(db_session):
+    from wizard.tools import save_meeting_summary
+    from wizard.models import WizardSession, Meeting, Task, MeetingTasks
+    from wizard.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_meeting_summary.return_value = WriteBackStatus(ok=True)
+
+    session = WizardSession()
+    meeting = Meeting(title="sprint review", content="discussed items")
+    task1 = Task(name="task one")
+    task2 = Task(name="task two")
+    db_session.add(session)
+    db_session.add(meeting)
+    db_session.add(task1)
+    db_session.add(task2)
+    db_session.commit()
+    db_session.refresh(session)
+    db_session.refresh(meeting)
+    db_session.refresh(task1)
+    db_session.refresh(task2)
+    assert meeting.id is not None
+    assert task1.id is not None
+    assert task2.id is not None
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        result = save_meeting_summary(
+            meeting_id=meeting.id,
+            session_id=session.id,
+            summary="sprint summary",
+            task_ids=[task1.id, task2.id],
+        )
+
+    assert result.tasks_linked == 2
+
+
 # ---------------------------------------------------------------------------
 # session_end
 # ---------------------------------------------------------------------------
