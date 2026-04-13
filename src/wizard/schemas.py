@@ -209,6 +209,7 @@ class NoteDetail(BaseModel):
     content: str
     created_at: datetime.datetime
     source_id: str | None
+    mental_model: str | None = None
 
     @classmethod
     def from_model(cls, note) -> "NoteDetail":
@@ -220,6 +221,7 @@ class NoteDetail(BaseModel):
             content=note.content,
             created_at=note.created_at,
             source_id=note.source_id,
+            mental_model=note.mental_model,
         )
 
 
