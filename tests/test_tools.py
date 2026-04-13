@@ -1226,3 +1226,189 @@ def test_rewind_task_raises_tool_error_for_missing_task_state(db_session):
     with patch.multiple("wizard.tools", **patches):
         with pytest.raises(ToolError, match="TaskState missing for task"):
             rewind_task(task_id=task.id)
+
+
+# ---------------------------------------------------------------------------
+# what_am_i_missing tests
+# ---------------------------------------------------------------------------
+
+
+def _make_task_with_state(db_session, note_count=0, decision_count=0, stale_days=0, last_note_at=None):
+    """Helper: create a Task + TaskState with specified fields."""
+    from wizard.models import Task, TaskState, TaskCategory, TaskPriority, TaskStatus
+    import datetime
+
+    task = Task(
+        name="test task",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        category=TaskCategory.ISSUE,
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+    assert task.id is not None
+    state = TaskState(
+        task_id=task.id,
+        note_count=note_count,
+        decision_count=decision_count,
+        stale_days=stale_days,
+        last_note_at=last_note_at,
+        last_touched_at=last_note_at or task.created_at,
+    )
+    db_session.add(state)
+    db_session.flush()
+    return task
+
+
+def test_what_am_i_missing_rule1_no_notes(db_session):
+    from wizard.tools import what_am_i_missing
+
+    task = _make_task_with_state(db_session, note_count=0)
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    types = [s.type for s in result.signals]
+    assert "no_context" in types
+    assert next(s for s in result.signals if s.type == "no_context").severity == "high"
+
+
+def test_what_am_i_missing_rule2_stale(db_session):
+    import datetime
+    from wizard.tools import what_am_i_missing
+
+    last = datetime.datetime.now() - datetime.timedelta(days=5)
+    task = _make_task_with_state(db_session, note_count=3, decision_count=1, stale_days=5, last_note_at=last)
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    types = [s.type for s in result.signals]
+    assert "stale" in types
+
+
+def test_what_am_i_missing_rules_2_and_6_both_fire_at_stale_3(db_session):
+    import datetime
+    from wizard.tools import what_am_i_missing
+
+    last = datetime.datetime.now() - datetime.timedelta(days=3)
+    task = _make_task_with_state(db_session, note_count=3, decision_count=1, stale_days=3, last_note_at=last)
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    types = [s.type for s in result.signals]
+    assert "stale" in types
+    assert "lost_context" in types
+
+
+def test_what_am_i_missing_rule3_low_context(db_session):
+    from wizard.tools import what_am_i_missing
+
+    task = _make_task_with_state(db_session, note_count=2, decision_count=1, stale_days=0)
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    types = [s.type for s in result.signals]
+    assert "low_context" in types
+
+
+def test_what_am_i_missing_rule4_no_decisions(db_session):
+    from wizard.tools import what_am_i_missing
+
+    task = _make_task_with_state(db_session, note_count=3, decision_count=0, stale_days=0)
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    types = [s.type for s in result.signals]
+    assert "no_decisions" in types
+
+
+def test_what_am_i_missing_rule5_analysis_loop(db_session):
+    from wizard.tools import what_am_i_missing
+    from wizard.models import Note, NoteType, Task, TaskState, TaskCategory, TaskPriority, TaskStatus
+
+    task = _make_task_with_state(db_session, note_count=4, decision_count=0, stale_days=0)
+    # Add 4 investigation notes
+    for _ in range(4):
+        db_session.add(Note(
+            task_id=task.id,
+            note_type=NoteType.INVESTIGATION,
+            content="investigation",
+        ))
+    db_session.flush()
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    types = [s.type for s in result.signals]
+    assert "analysis_loop" in types
+    assert next(s for s in result.signals if s.type == "analysis_loop").severity == "high"
+
+
+def test_what_am_i_missing_rule7_no_mental_model(db_session):
+    from wizard.tools import what_am_i_missing
+    from wizard.models import Note, NoteType
+
+    task = _make_task_with_state(db_session, note_count=2, decision_count=1, stale_days=0)
+    # Add notes without mental_model
+    for _ in range(2):
+        db_session.add(Note(
+            task_id=task.id,
+            note_type=NoteType.DECISION,
+            content="decided",
+            mental_model=None,
+        ))
+    db_session.flush()
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    types = [s.type for s in result.signals]
+    assert "no_model" in types
+
+
+def test_what_am_i_missing_severity_sort_order(db_session):
+    from wizard.tools import what_am_i_missing
+
+    # note_count=0 fires Rule 1 (high); stale_days=3 fires Rule 2 (medium) + Rule 6 (medium)
+    task = _make_task_with_state(db_session, note_count=0, stale_days=3)
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    severities = [s.severity for s in result.signals]
+    high_indices = [i for i, sv in enumerate(severities) if sv == "high"]
+    medium_indices = [i for i, sv in enumerate(severities) if sv == "medium"]
+    if high_indices and medium_indices:
+        assert max(high_indices) < min(medium_indices)
+
+
+def test_what_am_i_missing_healthy_task_no_signals(db_session):
+    import datetime
+    from wizard.tools import what_am_i_missing
+    from wizard.models import Note, NoteType
+
+    last = datetime.datetime.now()
+    task = _make_task_with_state(db_session, note_count=5, decision_count=2, stale_days=0, last_note_at=last)
+    # Add 5 notes with mental_model set on one of them
+    for i in range(5):
+        db_session.add(Note(
+            task_id=task.id,
+            note_type=NoteType.DECISION if i < 2 else NoteType.INVESTIGATION,
+            content="content",
+            mental_model="my model" if i == 0 else None,
+        ))
+    db_session.flush()
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = what_am_i_missing(task_id=task.id)
+    assert result.signals == []
+
+
+def test_what_am_i_missing_not_found_raises_tool_error(db_session):
+    from fastmcp.exceptions import ToolError
+    from wizard.tools import what_am_i_missing
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        with pytest.raises(ToolError, match="Task 9999 not found"):
+            what_am_i_missing(task_id=9999)

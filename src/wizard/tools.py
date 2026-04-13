@@ -24,7 +24,10 @@ from .schemas import (
     CreateTaskResponse,
     GetMeetingResponse,
     IngestMeetingResponse,
+    MissingResponse,
     NoteDetail,
+    ResumedTaskNotes,
+    ResumeSessionResponse,
     RewindResponse,
     RewindSummary,
     SaveMeetingSummaryResponse,
@@ -32,6 +35,7 @@ from .schemas import (
     SessionEndResponse,
     SessionStartResponse,
     SessionState,
+    Signal,
     TaskContext,
     TaskStartResponse,
     TimelineEntry,
@@ -457,6 +461,71 @@ def rewind_task(task_id: int) -> RewindResponse:
         return RewindResponse(task=ctx, timeline=timeline, summary=summary)
 
 
+def what_am_i_missing(task_id: int) -> MissingResponse:
+    """Surface cognitive gaps for a task using seven diagnostic rules."""
+    logger.info("what_am_i_missing task_id=%d", task_id)
+    SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+    with get_session() as db:
+        _log_tool_call(db, "what_am_i_missing")
+        task = db.get(Task, task_id)
+        if task is None:
+            raise ToolError(f"Task {task_id} not found")
+        task_state = db.get(TaskState, task_id)
+        if task_state is None:
+            raise ToolError(f"TaskState missing for task {task_id}")
+
+        signals: list[Signal] = []
+        nc = task_state.note_count
+        dc = task_state.decision_count
+        sd = task_state.stale_days
+
+        # Rule 1: no notes at all
+        if nc == 0:
+            signals.append(Signal(type="no_context", severity="high",
+                                  message="No notes recorded for this task"))
+        # Rule 2: stale
+        if sd >= 3:
+            signals.append(Signal(type="stale", severity="medium",
+                                  message=f"No activity for {sd} days"))
+        # Rule 3: very few notes
+        if 0 < nc <= 2:
+            signals.append(Signal(type="low_context", severity="medium",
+                                  message="Very few notes — context may be shallow"))
+        # Rule 4: notes exist but no decisions
+        if dc == 0 and nc > 0:
+            signals.append(Signal(type="no_decisions", severity="medium",
+                                  message="No decisions recorded"))
+        # Rule 5: many investigations, no decisions (inline count query)
+        inv_stmt = (
+            select(Note)
+            .where(Note.task_id == task_id)
+            .where(Note.note_type == NoteType.INVESTIGATION)
+        )
+        inv_notes = list(db.execute(inv_stmt).scalars().all())
+        if len(inv_notes) > 3 and dc == 0:
+            signals.append(Signal(type="analysis_loop", severity="high",
+                                  message="Multiple investigations without a decision"))
+        # Rule 6: has notes but stale for 2+ days
+        if task_state.last_note_at is not None and sd >= 2:
+            signals.append(Signal(type="lost_context", severity="medium",
+                                  message="Context may be degrading due to inactivity"))
+        # Rule 7: no mental model captured (inline existence query)
+        model_stmt = (
+            select(Note)
+            .where(Note.task_id == task_id)
+            .where(Note.mental_model.is_not(None))  # type: ignore[union-attr]
+            .limit(1)
+        )
+        has_model = db.execute(model_stmt).scalars().first() is not None
+        if nc >= 2 and not has_model:
+            signals.append(Signal(type="no_model", severity="medium",
+                                  message="No mental model captured — understanding may be shallow"))
+
+        signals.sort(key=lambda s: SEVERITY_ORDER[s.severity])
+        return MissingResponse(signals=signals)
+
+
 # ---------------------------------------------------------------------------
 # Register tools with MCP
 # ---------------------------------------------------------------------------
@@ -471,3 +540,4 @@ mcp.tool()(session_end)
 mcp.tool()(ingest_meeting)
 mcp.tool()(create_task)
 mcp.tool()(rewind_task)
+mcp.tool()(what_am_i_missing)
