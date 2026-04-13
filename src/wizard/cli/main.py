@@ -2,8 +2,11 @@ import json
 import logging
 import shutil
 from pathlib import Path
+from typing import Optional
 
 import typer
+
+from wizard import agent_registration
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +32,17 @@ def _package_skills_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "skills"
 
 
+_AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "all"]
+
+
 @app.command()
-def setup() -> None:
+def setup(
+    agent: Optional[str] = typer.Option(
+        None,
+        "--agent",
+        help="Agent to register: claude-code, claude-desktop, gemini, opencode, codex, all",
+    ),
+) -> None:
     """Create ~/.wizard, default config, install skills, and register MCP."""
     WIZARD_HOME.mkdir(parents=True, exist_ok=True)
 
@@ -52,11 +64,35 @@ def setup() -> None:
     else:
         typer.echo("No skills found in package — skipping skill install")
 
-    # Register MCP server in Claude Code config
-    from wizard.mcp_config import register_wizard_mcp
+    # Determine which agent(s) to register
+    if agent is None:
+        typer.echo("Which agent would you like to register?")
+        for i, choice in enumerate(_AGENT_CHOICES, 1):
+            typer.echo(f"  {i}. {choice}")
+        selection = typer.prompt(f"Enter number (1-{len(_AGENT_CHOICES)})")
+        try:
+            idx = int(selection) - 1
+            agent = _AGENT_CHOICES[idx]
+        except (ValueError, IndexError):
+            typer.echo("Invalid selection.", err=True)
+            raise typer.Exit(1)
 
-    register_wizard_mcp()
-    typer.echo("  Registered wizard MCP in Claude Code")
+    if agent == "all":
+        agents_to_register = [a for a in _AGENT_CHOICES if a != "all"]
+    elif agent not in [a for a in _AGENT_CHOICES if a != "all"]:
+        typer.echo(f"Unknown agent: {agent}", err=True)
+        raise typer.Exit(1)
+    else:
+        agents_to_register = [agent]
+
+    for aid in agents_to_register:
+        try:
+            agent_registration.register(aid)
+            typer.echo(f"  Registered {aid}")
+        except Exception as exc:
+            typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
+
+    agent_registration.write_registered_agents(agents_to_register)
 
     typer.echo("Setup complete.")
 
