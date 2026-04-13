@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.helpers import MockContext, mock_session
+from tests.helpers import MockContext, _MockContextImpl, mock_ctx, mock_session
 
 
 def _make_notion_mock(notion=None):
@@ -981,16 +981,17 @@ async def test_session_start_reports_progress(db_session):
     sync_mock.sync_notion_tasks = MagicMock(return_value=None)
     sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
-    ctx = MockContext()
+    impl = _MockContextImpl()
+    ctx = mock_ctx(impl)
     with patch.multiple("wizard.tools", **patches):
         from wizard.tools import session_start
         await session_start(ctx)
 
-    assert len(ctx.progress_calls) == 4
-    assert ctx.progress_calls[0] == (0, 3, "Syncing Jira...")
-    assert ctx.progress_calls[1] == (1, 3, "Syncing Notion tasks...")
-    assert ctx.progress_calls[2] == (2, 3, "Syncing Notion meetings...")
-    assert ctx.progress_calls[3] == (3, 3, "Sync complete.")
+    assert len(impl.progress_calls) == 4
+    assert impl.progress_calls[0] == (0, 3, "Syncing Jira...")
+    assert impl.progress_calls[1] == (1, 3, "Syncing Notion tasks...")
+    assert impl.progress_calls[2] == (2, 3, "Syncing Notion meetings...")
+    assert impl.progress_calls[3] == (3, 3, "Sync complete.")
 
 
 # --- elicitation: save_note ---
