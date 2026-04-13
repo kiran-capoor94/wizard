@@ -2,8 +2,15 @@ import json
 import logging
 import shutil
 from pathlib import Path
+from typing import Optional
 
 import typer
+
+from wizard import agent_registration
+from wizard import notion_discovery  # for --reconfigure-notion; enables patching
+from notion_client import Client as NotionSdkClient  # for --reconfigure-notion; enables patching
+from wizard.cli import analytics as analytics_module  # enables patching
+from wizard.database import get_session as get_db_session  # enables patching
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +36,80 @@ def _package_skills_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "skills"
 
 
+_AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "all"]
+
+
+def _run_notion_discovery(config_path: Path) -> None:
+    from wizard.integrations import ConfigurationError
+
+    if not config_path.exists():
+        typer.echo("Config not found. Run 'wizard setup' first.", err=True)
+        raise typer.Exit(1)
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    notion_cfg = cfg.get("notion", {})
+    token = notion_cfg.get("token", "")
+    tasks_db_id = notion_cfg.get("tasks_db_id", "")
+    meetings_db_id = notion_cfg.get("meetings_db_id", "")
+
+    if not token:
+        typer.echo("No Notion token configured. Set notion.token in config.json first.", err=True)
+        raise typer.Exit(1)
+
+    client = NotionSdkClient(auth=token)
+    typer.echo("Fetching Notion database schemas...")
+
+    tasks_props = notion_discovery.fetch_db_properties(client, tasks_db_id)
+    meetings_props = notion_discovery.fetch_db_properties(client, meetings_db_id)
+    all_props = {**tasks_props, **meetings_props}
+
+    required_fields = ["task_name", "task_status", "meeting_title"]
+    all_fields = [
+        "task_name", "task_status", "task_priority", "task_due_date", "task_jira_key",
+        "meeting_title", "meeting_date", "meeting_url", "meeting_summary",
+    ]
+
+    matches = notion_discovery.match_properties(all_props, all_fields)
+
+    for field in required_fields:
+        if matches[field] is None:
+            available_names = list(all_props.keys())
+            typer.echo(f"Could not auto-match required field '{field}'.")
+            typer.echo(f"Available properties: {', '.join(available_names)}")
+            value = typer.prompt(f"Enter Notion property name for '{field}' (or press Enter to skip)")
+            if not value:
+                raise ConfigurationError(f"Required field '{field}' must be mapped.")
+            matches[field] = value
+
+    schema = {k: v for k, v in matches.items() if v is not None}
+    cfg.setdefault("notion", {})["notion_schema"] = schema
+    with open(config_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+    typer.echo("Notion schema updated:")
+    for k, v in schema.items():
+        typer.echo(f"  {k}: {v}")
+
+
 @app.command()
-def setup() -> None:
+def setup(
+    agent: Optional[str] = typer.Option(
+        None,
+        "--agent",
+        help="Agent to register: claude-code, claude-desktop, gemini, opencode, codex, all",
+    ),
+    reconfigure_notion: bool = typer.Option(
+        False, "--reconfigure-notion",
+        help="Re-run Notion schema discovery only",
+    ),
+) -> None:
     """Create ~/.wizard, default config, install skills, and register MCP."""
+    if reconfigure_notion:
+        _run_notion_discovery(WIZARD_HOME / "config.json")
+        return
+
     WIZARD_HOME.mkdir(parents=True, exist_ok=True)
 
     config_path = WIZARD_HOME / "config.json"
@@ -52,14 +130,35 @@ def setup() -> None:
     else:
         typer.echo("No skills found in package — skipping skill install")
 
-    # Register MCP server in Claude config files
-    from wizard.mcp_config import register_wizard_mcp
+    # Determine which agent(s) to register
+    if agent is None:
+        typer.echo("Which agent would you like to register?")
+        for i, choice in enumerate(_AGENT_CHOICES, 1):
+            typer.echo(f"  {i}. {choice}")
+        selection = typer.prompt(f"Enter number (1-{len(_AGENT_CHOICES)})")
+        try:
+            idx = int(selection) - 1
+            agent = _AGENT_CHOICES[idx]
+        except (ValueError, IndexError):
+            typer.echo("Invalid selection.", err=True)
+            raise typer.Exit(1)
 
-    registered = register_wizard_mcp()
-    for name in registered:
-        typer.echo(f"  Registered wizard MCP in {name}")
-    if not registered:
-        typer.echo("  No Claude config files found — MCP not registered. Run setup again after installing Claude.")
+    if agent == "all":
+        agents_to_register = [a for a in _AGENT_CHOICES if a != "all"]
+    elif agent not in [a for a in _AGENT_CHOICES if a != "all"]:
+        typer.echo(f"Unknown agent: {agent}", err=True)
+        raise typer.Exit(1)
+    else:
+        agents_to_register = [agent]
+
+    for aid in agents_to_register:
+        try:
+            agent_registration.register(aid)
+            typer.echo(f"  Registered {aid}")
+        except Exception as exc:
+            typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
+
+    agent_registration.write_registered_agents(agents_to_register)
 
     typer.echo("Setup complete.")
 
@@ -81,66 +180,161 @@ def sync() -> None:
     typer.echo("Sync complete.")
 
 
-@app.command()
-def doctor() -> None:
-    """Check wizard installation health."""
-    ok = True
+# --- doctor helpers ---
 
+
+def _check_db_file() -> tuple[bool, str]:
+    import os
+    from wizard.config import settings
+    db_path_str = os.environ.get("WIZARD_DB", settings.db)
+    db_path = Path(db_path_str)
+    if db_path.exists():
+        return True, f"Database found: {db_path}"
+    return False, f"Database not found: {db_path} — run 'wizard setup' first"
+
+
+def _check_db_tables() -> tuple[bool, str]:
+    import os
+    import sqlite3
+    from wizard.config import settings
+    db_path_str = os.environ.get("WIZARD_DB", settings.db)
+    db_path = Path(db_path_str)
+    if not db_path.exists():
+        return False, "Database file missing — cannot check tables"
     try:
-        from wizard.config import settings
-    except Exception as e:
-        typer.echo(f"  [ERROR] config failed to load: {e}")
-        typer.echo("\nSome checks failed — run 'wizard setup' to fix.")
-        raise typer.Exit(code=1)
+        conn = sqlite3.connect(str(db_path))
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        conn.close()
+        required = {"task", "note", "meeting", "wizardsession", "toolcall"}
+        missing = required - tables
+        if missing:
+            return False, f"Missing tables: {missing}"
+        return True, "All required tables present"
+    except Exception as exc:
+        return False, f"Could not inspect tables: {exc}"
 
-    # 1. Check ~/.wizard/ exists
-    if WIZARD_HOME.exists():
-        typer.echo(f"  [ok] wizard home: {WIZARD_HOME}")
-    else:
-        typer.echo(f"  [MISSING] wizard home not found: {WIZARD_HOME}")
-        ok = False
 
-    # 2. Check config.json
-    config_path = WIZARD_HOME / "config.json"
+def _check_config_file() -> tuple[bool, str]:
+    import os
+    config_path = Path(os.environ.get("WIZARD_CONFIG_FILE", str(Path.home() / ".wizard" / "config.json")))
     if config_path.exists():
-        typer.echo(f"  [ok] config: {config_path}")
-    else:
-        typer.echo(f"  [MISSING] config not found: {config_path}")
-        ok = False
+        return True, f"Config file found: {config_path}"
+    return False, f"Config file not found: {config_path}"
 
-    # 3. Check DB
-    db_path = Path(settings.db)
-    if settings.db == ":memory:" or db_path.exists():
-        typer.echo(f"  [ok] database: {settings.db}")
-    else:
-        typer.echo(f"  [MISSING] database not found: {settings.db}")
-        ok = False
 
-    # 4. Check integrations
-    if settings.jira.token:
-        typer.echo("  [ok] jira: configured")
-    else:
-        typer.echo("  [--] jira: not configured")
+def _check_notion_token() -> tuple[bool, str]:
+    from wizard.config import Settings
+    s = Settings()
+    if s.notion.token:
+        return True, "Notion token configured"
+    return False, "Notion token not set (notion.token)"
 
-    if settings.notion.token:
-        typer.echo("  [ok] notion: configured")
-    else:
-        typer.echo("  [--] notion: not configured")
 
-    # 5. Check skills
-    skills_dir = WIZARD_HOME / "skills"
+def _check_jira_token() -> tuple[bool, str]:
+    from wizard.config import Settings
+    s = Settings()
+    if s.jira.token:
+        return True, "Jira token configured"
+    return False, "Jira token not set (jira.token) — Jira sync disabled"
+
+
+def _check_allowlist_file() -> tuple[bool, str]:
+    allowlist = Path.home() / ".wizard" / "allowlist.txt"
+    if allowlist.exists():
+        return True, f"Allowlist found: {allowlist}"
+    return False, f"Allowlist not found: {allowlist}"
+
+
+def _check_agent_registrations() -> tuple[bool, str]:
+    registered = agent_registration.read_registered_agents()
+    if not registered:
+        registered = agent_registration.scan_all_registered()
+    if registered:
+        return True, f"Registered agents: {', '.join(registered)}"
+    return False, "No agents registered — run 'wizard setup --agent <agent>'"
+
+
+def _check_migration_current() -> tuple[bool, str]:
+    try:
+        import os
+        from alembic.runtime.migration import MigrationContext
+        from sqlalchemy import create_engine
+        from wizard.config import settings
+        db_path_str = os.environ.get("WIZARD_DB", settings.db)
+        engine = create_engine(f"sqlite:///{db_path_str}")
+        with engine.connect() as conn:
+            ctx = MigrationContext.configure(conn)
+            current = ctx.get_current_revision()
+        return True, f"Migration current: {current}"
+    except Exception as exc:
+        return False, f"Migration check failed: {exc}"
+
+
+def _check_skills_installed() -> tuple[bool, str]:
+    skills_dir = Path.home() / ".wizard" / "skills"
     if skills_dir.exists() and any(skills_dir.iterdir()):
-        skill_count = sum(1 for d in skills_dir.iterdir() if d.is_dir())
-        typer.echo(f"  [ok] skills: {skill_count} installed")
-    else:
-        typer.echo("  [MISSING] skills not installed — run 'wizard setup'")
-        ok = False
+        return True, f"Skills directory present: {skills_dir}"
+    return False, f"Skills not installed at {skills_dir} — run 'wizard setup --agent claude-code'"
 
-    if ok:
-        typer.echo("\nAll checks passed.")
-    else:
-        typer.echo("\nSome checks failed — run 'wizard setup' to fix.")
-        raise typer.Exit(code=1)
+
+def _check_notion_schema() -> tuple[bool, str]:
+    from wizard.config import Settings
+    s = Settings()
+    schema = s.notion.notion_schema  # NOTE: field is notion_schema, NOT schema
+    if schema.task_name and schema.task_status and schema.meeting_title:
+        return True, "Notion schema configured"
+    return False, "Notion schema incomplete — run 'wizard setup --reconfigure-notion'"
+
+
+_DOCTOR_CHECK_NAMES = [
+    ("DB file exists", "_check_db_file"),
+    ("Notion token", "_check_notion_token"),
+    ("Jira token", "_check_jira_token"),
+    ("Config file", "_check_config_file"),
+    ("DB tables", "_check_db_tables"),
+    ("Allowlist file", "_check_allowlist_file"),
+    ("Agent registered", "_check_agent_registrations"),
+    ("Notion schema", "_check_notion_schema"),
+    ("Migration current", "_check_migration_current"),
+    ("Skills installed", "_check_skills_installed"),
+]
+
+
+def _get_doctor_checks():
+    """Build doctor checks list at call time so individual checks can be patched in tests."""
+    import wizard.cli.main as _self
+    return [(name, getattr(_self, fn_name)) for name, fn_name in _DOCTOR_CHECK_NAMES]
+
+
+@app.command()
+def doctor(
+    all_checks: bool = typer.Option(False, "--all", help="Report all failures instead of stopping at first"),
+) -> None:
+    """Run health checks on the wizard installation."""
+    failures = []
+    notion_token_ok = True
+
+    for i, (name, check_fn) in enumerate(_get_doctor_checks(), 1):
+        if i == 8 and not notion_token_ok:
+            typer.echo(f"  [{i:2d}] SKIP  {name} (Notion token not configured)")
+            continue
+
+        passed, message = check_fn()
+
+        if i == 2:
+            notion_token_ok = passed
+
+        status = "PASS" if passed else "FAIL"
+        typer.echo(f"  [{i:2d}] {status}  {name}: {message}")
+
+        if not passed:
+            failures.append((i, name, message))
+            if not all_checks:
+                raise typer.Exit(1)
+
+    if failures:
+        raise typer.Exit(1)
+    typer.echo("All checks passed.")
 
 
 @app.command()
@@ -148,9 +342,12 @@ def uninstall(
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
 ) -> None:
     """Remove all Wizard runtime state and MCP registration."""
-    from wizard.mcp_config import deregister_wizard_mcp, find_wizard_mcp_targets
+    # Read which agents are registered
+    registered = agent_registration.read_registered_agents()
+    if not registered:
+        registered = agent_registration.scan_all_registered()
 
-    # Step 1: Gather what exists
+    # Gather which wizard files exist
     wizard_files = {
         "wizard.db": "all notes, sessions, meetings",
         "config.json": None,
@@ -162,16 +359,14 @@ def uninstall(
         if path.exists():
             existing_files.append((name, desc))
 
-    mcp_targets = find_wizard_mcp_targets()
-
     has_wizard_dir = WIZARD_HOME.exists()
-    has_anything = has_wizard_dir or bool(mcp_targets)
+    has_anything = has_wizard_dir or bool(registered)
 
     if not has_anything:
         typer.echo("Nothing to uninstall.")
         return
 
-    # Step 2: Confirmation prompt
+    # Confirmation
     if not yes:
         typer.echo("This will permanently delete:")
         for name, desc in existing_files:
@@ -179,19 +374,23 @@ def uninstall(
             typer.echo(f"  ~/.wizard/{name}{suffix}")
         if has_wizard_dir and not existing_files:
             typer.echo("  ~/.wizard/")
-        for name in mcp_targets:
-            typer.echo(f"  wizard MCP entry from {name} config")
+        for aid in registered:
+            typer.echo(f"  wizard MCP entry for {aid}")
         typer.echo("")
         confirm = typer.prompt("Are you sure? [y/N]", default="N", show_default=False)
         if confirm.lower() != "y":
             typer.echo("Aborted.")
             return
 
-    # Step 3: Execute
-    deregistered = deregister_wizard_mcp()
-    for name in deregistered:
-        typer.echo(f"  Removed wizard MCP from {name}")
+    # Deregister all agents
+    for aid in registered:
+        try:
+            agent_registration.deregister(aid)
+            typer.echo(f"  Removed wizard MCP from {aid}")
+        except Exception as exc:
+            typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
 
+    # Remove wizard directory
     if has_wizard_dir:
         try:
             shutil.rmtree(WIZARD_HOME)
@@ -200,5 +399,57 @@ def uninstall(
             typer.echo(f"  Failed to remove {WIZARD_HOME}: {e}", err=True)
             raise typer.Exit(code=1)
 
-    # Step 4: Summary
     typer.echo("Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package.")
+
+
+@app.command()
+def analytics(
+    day: bool = typer.Option(False, "--day", help="Show today's analytics"),
+    week: bool = typer.Option(False, "--week", help="Show last 7 days (default)"),
+    from_date: Optional[str] = typer.Option(None, "--from", help="Start date YYYY-MM-DD"),
+    to_date: Optional[str] = typer.Option(None, "--to", help="End date YYYY-MM-DD"),
+) -> None:
+    """Show wizard usage analytics."""
+    import datetime
+    import os
+    from wizard.config import settings
+
+    today = datetime.date.today()
+
+    options_set = sum([day, week, bool(from_date or to_date)])
+    if options_set > 1:
+        typer.echo("Options --day, --week, --from/--to are mutually exclusive.", err=True)
+        raise typer.Exit(1)
+
+    if day:
+        start = today
+        end = today
+    elif from_date or to_date:
+        try:
+            start = datetime.date.fromisoformat(from_date) if from_date else today - datetime.timedelta(days=7)
+            end = datetime.date.fromisoformat(to_date) if to_date else today
+        except ValueError as exc:
+            typer.echo(f"Invalid date format: {exc}", err=True)
+            raise typer.Exit(1)
+    else:
+        start = today - datetime.timedelta(days=7)
+        end = today
+
+    db_path = Path(os.environ.get("WIZARD_DB", settings.db))
+    if not db_path.exists():
+        typer.echo("Database not found. Run 'wizard setup' first.", err=True)
+        raise typer.Exit(1)
+
+    with get_db_session() as db:
+        sessions_data = analytics_module.query_sessions(db, start, end)
+        notes_data = analytics_module.query_notes(db, start, end)
+        tasks_data = analytics_module.query_tasks(db, start, end)
+        compounding = analytics_module.query_compounding(db, start, end)
+
+    combined = {
+        "sessions": sessions_data,
+        "notes": notes_data,
+        "tasks": tasks_data,
+        "compounding": compounding,
+    }
+    typer.echo(analytics_module.format_table(combined, start, end))
