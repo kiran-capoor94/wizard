@@ -74,3 +74,33 @@ def test_task_context_from_model_null_task_state_uses_defaults():
     assert ctx.note_count == 0
     assert ctx.decision_count == 0
     assert ctx.last_worked_at is None
+
+
+def test_note_detail_from_model_includes_mental_model():
+    from wizard.models import Note, NoteType
+    from wizard.schemas import NoteDetail
+
+    note = Note(
+        id=10,
+        note_type=NoteType.DECISION,
+        content="We chose SQLite",
+        mental_model="Trade-off accepted: consistency for simplicity",
+        source_id=None,
+    )
+    detail = NoteDetail.from_model(note)
+    assert detail.mental_model == "Trade-off accepted: consistency for simplicity"
+
+
+def test_note_detail_from_model_mental_model_none_when_absent():
+    from wizard.models import Note, NoteType
+    from wizard.schemas import NoteDetail
+
+    note = Note(
+        id=11,
+        note_type=NoteType.INVESTIGATION,
+        content="Looking at options",
+        mental_model=None,
+        source_id=None,
+    )
+    detail = NoteDetail.from_model(note)
+    assert detail.mental_model is None
