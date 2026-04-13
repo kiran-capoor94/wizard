@@ -274,7 +274,7 @@ class GetMeetingResponse(BaseModel):
 
 class SaveMeetingSummaryResponse(BaseModel):
     note_id: int
-    linked_task_ids: list[int]
+    tasks_linked: int
     notion_write_back: WriteBackStatus
 
 
