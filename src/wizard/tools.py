@@ -3,6 +3,7 @@ from typing import Literal
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
+from fastmcp.server.elicitation import AcceptedElicitation
 from sqlmodel import Session, select
 
 from .database import get_session
@@ -159,7 +160,6 @@ async def save_note(
             task = task_repo().get_by_id(db, task_id)
             if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
                 try:
-                    from fastmcp.server.elicitation import AcceptedElicitation
                     result = await ctx.elicit(
                         "Optional: summarise what you now understand in 1-2 sentences (mental model). "
                         "Press Enter to skip.",
@@ -210,7 +210,6 @@ async def update_task_status(
 
             if new_status == TaskStatus.DONE:
                 try:
-                    from fastmcp.server.elicitation import AcceptedElicitation
                     elicit_result = await ctx.elicit(
                         "Task closed. What was the outcome? (1-2 sentences, or press Enter to skip)",
                         response_type=str,
