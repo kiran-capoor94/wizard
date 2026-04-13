@@ -119,6 +119,14 @@ class Note(TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
     note_type: NoteType = Field(index=True)
     content: str
+    mental_model: str | None = Field(
+        default=None,
+        description=(
+            "1-2 sentence causal abstraction written by the engineer; "
+            "soft cap 1500 chars at the application display layer; "
+            "stored as-is, not scrubbed"
+        ),
+    )
     source_id: str | None = Field(
         default=None,
         index=True,
