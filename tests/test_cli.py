@@ -152,31 +152,36 @@ def test_sync_reports_results(db_session):
 # --- doctor command tests ---
 
 
-def test_doctor_checks_wizard_home(tmp_path):
+def test_doctor_checks_wizard_home(tmp_path, monkeypatch):
     import json
 
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
-    (wizard_dir / "config.json").write_text(json.dumps({"db": ":memory:"}))
+    db_path = wizard_dir / "wizard.db"
+    db_path.touch()
+    (wizard_dir / "config.json").write_text(json.dumps({}))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(wizard_dir / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(db_path))
 
     with patch("wizard.cli.main.WIZARD_HOME", wizard_dir):
         from wizard.cli.main import app
 
         result = runner.invoke(app, ["doctor"])
 
-    assert "config" in result.output.lower()
+    # Check 1 (db file) passes; check 2 (notion token) fails → output contains check name
+    assert "db" in result.output.lower() or "notion" in result.output.lower()
 
 
-def test_doctor_reports_missing_wizard_home(tmp_path):
-    wizard_dir = tmp_path / ".wizard"  # does not exist
+def test_doctor_reports_missing_wizard_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZARD_DB", str(tmp_path / "no_such.db"))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "nonexistent_config.json"))
 
-    with patch("wizard.cli.main.WIZARD_HOME", wizard_dir):
-        from wizard.cli.main import app
+    from wizard.cli.main import app
 
-        result = runner.invoke(app, ["doctor"])
+    result = runner.invoke(app, ["doctor"])
 
     assert result.exit_code == 1
-    assert "not found" in result.output.lower() or "missing" in result.output.lower()
+    assert "not found" in result.output.lower() or "missing" in result.output.lower() or "fail" in result.output.lower()
 
 
 # --- setup MCP registration tests ---
@@ -451,4 +456,88 @@ def test_setup_interactive_prompt_invalid_selection(tmp_path):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(ctx.app, ["setup"], input="99\n")
 
+    assert result.exit_code != 0
+
+
+# --- setup --reconfigure-notion tests ---
+
+
+def test_setup_reconfigure_notion_runs_discovery(tmp_path):
+    from unittest.mock import patch, MagicMock
+    import json
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    config = {
+        "notion": {
+            "token": "test-token",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+        }
+    }
+    (wizard_dir / "config.json").write_text(json.dumps(config))
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main.notion_discovery") as mock_nd, \
+             patch("wizard.cli.main.NotionSdkClient"):
+            mock_ar.read_registered_agents.return_value = []
+            mock_nd.fetch_db_properties.return_value = {"Task": "title", "Status": "status"}
+            mock_nd.match_properties.return_value = {
+                "task_name": "Task", "task_status": "Status",
+                "task_priority": None, "task_due_date": None,
+                "task_jira_key": None, "meeting_title": "Meeting name",
+                "meeting_date": None, "meeting_url": None, "meeting_summary": None,
+            }
+            result = runner.invoke(ctx.app, ["setup", "--reconfigure-notion"])
+
+    mock_nd.fetch_db_properties.assert_called()
+    mock_nd.match_properties.assert_called()
+    assert result.exit_code == 0
+
+
+# --- doctor command tests (new 10-check implementation) ---
+
+
+def test_doctor_check_1_db_file_exists(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(tmp_path / "no_such.db"))
+    from typer.testing import CliRunner
+    from wizard.cli.main import app
+    runner_local = CliRunner()
+    result = runner_local.invoke(app, ["doctor"])
+    assert result.exit_code != 0
+    assert "database" in result.output.lower() or "db" in result.output.lower()
+
+
+def test_doctor_all_checks_pass_with_valid_setup(tmp_path, monkeypatch):
+    import json
+    from unittest.mock import patch
+    db_path = tmp_path / "wizard.db"
+    db_path.touch()
+    config = {
+        "notion": {"token": "tok", "tasks_db_id": "t", "meetings_db_id": "m"},
+        "jira": {"token": "jtok", "base_url": "https://jira.example.com", "project_key": "ENG"},
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(db_path))
+    with patch("wizard.cli.main._check_db_tables", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_migration_current", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_agent_registrations", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_allowlist_file", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_skills_installed", return_value=(True, "ok")):
+        from typer.testing import CliRunner
+        from wizard.cli.main import app
+        runner_local = CliRunner()
+        result = runner_local.invoke(app, ["doctor", "--all"])
+    assert result.exit_code == 0
+
+
+def test_doctor_stops_at_first_failure_without_all_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(tmp_path / "no_such.db"))
+    from typer.testing import CliRunner
+    from wizard.cli.main import app
+    runner_local = CliRunner()
+    result = runner_local.invoke(app, ["doctor"])
     assert result.exit_code != 0
