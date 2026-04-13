@@ -189,7 +189,7 @@ async def test_task_start_raises_when_task_not_found(db_session):
             await task_start(ctx, task_id=999)
 
 
-def test_task_start_latest_mental_model_returns_newest_note_model(db_session):
+async def test_task_start_latest_mental_model_returns_newest_note_model(db_session):
     import datetime
     from wizard.tools import task_start
     from wizard.models import Task, Note, NoteType
@@ -220,14 +220,15 @@ def test_task_start_latest_mental_model_returns_newest_note_model(db_session):
     db_session.add(newer_note)
     db_session.commit()
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        result = task_start(task_id=task.id)
+        result = await task_start(ctx, task_id=task.id)
 
     assert result.latest_mental_model == "State machine"
 
 
-def test_task_start_latest_mental_model_none_when_no_notes_have_model(db_session):
+async def test_task_start_latest_mental_model_none_when_no_notes_have_model(db_session):
     from wizard.tools import task_start
     from wizard.models import Task, Note, NoteType
 
@@ -246,9 +247,10 @@ def test_task_start_latest_mental_model_none_when_no_notes_have_model(db_session
     db_session.add(note)
     db_session.commit()
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        result = task_start(task_id=task.id)
+        result = await task_start(ctx, task_id=task.id)
 
     assert result.latest_mental_model is None
 
@@ -415,9 +417,9 @@ async def test_save_meeting_summary_scrubs_and_persists(db_session):
     assert "[NHS_ID_1]" in saved.content
 
 
-def test_save_meeting_summary_tasks_linked_count(db_session):
+async def test_save_meeting_summary_tasks_linked_count(db_session):
     from wizard.tools import save_meeting_summary
-    from wizard.models import WizardSession, Meeting, Task, MeetingTasks
+    from wizard.models import WizardSession, Meeting, Task
     from wizard.schemas import WriteBackStatus
 
     wb_mock = MagicMock()
@@ -441,9 +443,11 @@ def test_save_meeting_summary_tasks_linked_count(db_session):
     assert task1.id is not None
     assert task2.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = save_meeting_summary(
+        result = await save_meeting_summary(
+            ctx,
             meeting_id=meeting.id,
             session_id=session.id,
             summary="sprint summary",
@@ -499,10 +503,10 @@ async def test_session_end_saves_summary_note(db_session):
     assert called_session.daily_page_id == "test-daily-page"
 
 
-def test_session_end_session_state_saved_true_on_happy_path(db_session):
+async def test_session_end_session_state_saved_true_on_happy_path(db_session):
     from wizard.tools import session_end
     from wizard.models import WizardSession
-    from wizard.schemas import WriteBackStatus, SessionState
+    from wizard.schemas import WriteBackStatus
 
     wb_mock = MagicMock()
     wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
@@ -513,31 +517,29 @@ def test_session_end_session_state_saved_true_on_happy_path(db_session):
     db_session.refresh(session)
     assert session.id is not None
 
-    state = SessionState(
-        intent="finish auth refactor",
-        working_set=[1, 2],
-        state_delta="Completed token refresh logic",
-        open_loops=["rate limiting"],
-        next_actions=["write tests"],
-        closure_status="clean",
-    )
-
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        result = session_end(
+        result = await session_end(
+            ctx,
             session_id=session.id,
             summary="wrapped up",
-            session_state=state,
+            intent="finish auth refactor",
+            working_set=[1, 2],
+            state_delta="Completed token refresh logic",
+            open_loops=["rate limiting"],
+            next_actions=["write tests"],
+            closure_status="clean",
         )
 
     assert result.session_state_saved is True
 
 
-def test_session_end_session_state_saved_false_when_write_fails(db_session):
+async def test_session_end_session_state_saved_false_when_write_fails(db_session):
     from unittest.mock import patch as _patch
     from wizard.tools import session_end
     from wizard.models import WizardSession
-    from wizard.schemas import WriteBackStatus, SessionState
+    from wizard.schemas import WriteBackStatus
 
     wb_mock = MagicMock()
     wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
@@ -548,22 +550,20 @@ def test_session_end_session_state_saved_false_when_write_fails(db_session):
     db_session.refresh(session)
     assert session.id is not None
 
-    state = SessionState(
-        intent="test",
-        working_set=[],
-        state_delta="none",
-        open_loops=[],
-        next_actions=[],
-        closure_status="clean",
-    )
-
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
         with _patch("wizard.schemas.SessionState.model_dump_json", side_effect=RuntimeError("disk full")):
-            result = session_end(
+            result = await session_end(
+                ctx,
                 session_id=session.id,
                 summary="wrapped up",
-                session_state=state,
+                intent="test",
+                working_set=[],
+                state_delta="none",
+                open_loops=[],
+                next_actions=[],
+                closure_status="clean",
             )
 
     assert result.session_state_saved is False
@@ -1003,7 +1003,7 @@ async def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
     assert response.mental_model_saved is False
 
 
-def test_save_note_mental_model_saved_true_when_model_provided(db_session):
+async def test_save_note_mental_model_saved_true_when_model_provided(db_session):
     from wizard.tools import save_note
     from wizard.models import NoteType, Task
 
@@ -1013,9 +1013,11 @@ def test_save_note_mental_model_saved_true_when_model_provided(db_session):
     db_session.refresh(task)
     assert task.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        result = save_note(
+        result = await save_note(
+            ctx,
             task_id=task.id,
             note_type=NoteType.INVESTIGATION,
             content="some investigation",
@@ -1025,7 +1027,7 @@ def test_save_note_mental_model_saved_true_when_model_provided(db_session):
     assert result.mental_model_saved is True
 
 
-def test_save_note_mental_model_saved_false_when_model_absent(db_session):
+async def test_save_note_mental_model_saved_false_when_model_absent(db_session):
     from wizard.tools import save_note
     from wizard.models import NoteType, Task
 
@@ -1035,9 +1037,11 @@ def test_save_note_mental_model_saved_false_when_model_absent(db_session):
     db_session.refresh(task)
     assert task.id is not None
 
+    ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
-        result = save_note(
+        result = await save_note(
+            ctx,
             task_id=task.id,
             note_type=NoteType.DOCS,
             content="some docs",
@@ -1149,12 +1153,26 @@ async def test_update_task_status_does_not_reset_stale_days(db_session):
 # ---------------------------------------------------------------------------
 
 
-def test_rewind_task_empty_timeline(db_session):
+async def test_rewind_task_empty_timeline(db_session):
     from wizard.tools import rewind_task
-    from wizard.models import Task, TaskState, TaskStatus
+    from wizard.models import Task, TaskStatus
+    from wizard.deps import task_state_repo
 
     task = Task(name="empty task", status=TaskStatus.TODO)
-    assert state.decision_count == 1
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    task_state_repo().create_for_task(db_session, task)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await rewind_task(task_id=task.id)
+
+    assert result.timeline == []
+    assert result.summary.total_notes == 0
+    assert result.summary.duration_days == 0
 
 
 # --- session threading ---
