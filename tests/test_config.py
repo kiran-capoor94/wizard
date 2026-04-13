@@ -79,3 +79,24 @@ def test_krisp_settings_removed(tmp_path, monkeypatch):
     monkeypatch.delitem(sys.modules, "wizard.config", raising=False)
     from wizard.config import settings
     assert not hasattr(settings, "krisp")
+
+
+def test_notion_schema_defaults():
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings()
+    assert schema.task_name == "Task"
+    assert schema.task_status == "Status"
+    assert schema.task_priority == "Priority"
+    assert schema.task_due_date == "Due date"
+    assert schema.task_jira_key == "Jira"
+    assert schema.meeting_title == "Meeting name"
+    assert schema.meeting_date == "Date"
+    assert schema.meeting_url == "Krisp URL"
+    assert schema.meeting_summary == "Summary"
+
+
+def test_notion_settings_has_schema():
+    from wizard.config import NotionSettings, NotionSchemaSettings
+    notion = NotionSettings()
+    assert hasattr(notion, "notion_schema")
+    assert isinstance(notion.notion_schema, NotionSchemaSettings)
