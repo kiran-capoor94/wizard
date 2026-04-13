@@ -17,6 +17,7 @@ def db_session(monkeypatch, tmp_path):
         "wizard.database",
         "wizard.deps",
         "wizard.integrations",
+        "wizard.agent_registration",
         "wizard.models",
         "wizard.repositories",
         "wizard.schemas",
