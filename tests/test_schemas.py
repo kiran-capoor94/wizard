@@ -122,3 +122,41 @@ def test_meeting_context_has_already_summarised_field():
     assert ctx.already_summarised is True
     assert ctx.source_url == "https://example.com"
     assert ctx.source_type == "KRISP"
+
+
+def test_timeline_entry_round_trip():
+    from wizard.models import NoteType
+    from wizard.schemas import TimelineEntry
+    import datetime
+
+    entry = TimelineEntry(
+        note_id=1,
+        created_at=datetime.datetime(2026, 4, 1),
+        note_type=NoteType.INVESTIGATION,
+        preview="Short preview",
+        mental_model=None,
+    )
+    assert entry.note_id == 1
+    assert entry.preview == "Short preview"
+    assert entry.mental_model is None
+
+
+def test_rewind_response_empty_timeline():
+    from wizard.models import Task, TaskPriority, TaskCategory, TaskStatus
+    from wizard.schemas import RewindResponse, RewindSummary, TaskContext
+    import datetime
+
+    task = Task(id=1, name="T", status=TaskStatus.TODO,
+                priority=TaskPriority.HIGH, category=TaskCategory.ISSUE)
+    ctx = TaskContext.from_model(task, None)
+    resp = RewindResponse(
+        task=ctx,
+        timeline=[],
+        summary=RewindSummary(
+            total_notes=0,
+            duration_days=0,
+            last_activity=datetime.datetime(2026, 4, 1),
+        ),
+    )
+    assert resp.timeline == []
+    assert resp.summary.total_notes == 0

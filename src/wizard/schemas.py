@@ -205,6 +205,26 @@ class MeetingContext(BaseModel):
     source_type: str | None = None
 
 
+class TimelineEntry(BaseModel):
+    note_id: int
+    created_at: datetime.datetime
+    note_type: NoteType
+    preview: str               # content[:200]
+    mental_model: str | None
+
+
+class RewindSummary(BaseModel):
+    total_notes: int
+    duration_days: int         # 0 if fewer than 2 notes
+    last_activity: datetime.datetime
+
+
+class RewindResponse(BaseModel):
+    task: TaskContext
+    timeline: list[TimelineEntry]  # sorted oldest first; empty list, never null
+    summary: RewindSummary
+
+
 class NoteDetail(BaseModel):
     id: int
     note_type: NoteType
