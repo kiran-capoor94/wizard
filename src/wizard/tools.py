@@ -1,11 +1,12 @@
 import logging
 
 from fastmcp.exceptions import ToolError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from .database import get_session
 from .deps import meeting_repo, note_repo, notion_client, security, sync_service, task_repo, task_state_repo, writeback
 from .mcp_instance import mcp
+from .repositories import find_latest_session_with_notes
 from .models import (
     Meeting,
     MeetingCategory,
@@ -526,6 +527,104 @@ def what_am_i_missing(task_id: int) -> MissingResponse:
         return MissingResponse(signals=signals)
 
 
+def resume_session(session_id: int | None = None) -> ResumeSessionResponse:
+    """Resume a prior session in a new thread. Creates a new session and syncs."""
+    logger.info("resume_session session_id=%s", session_id)
+    with get_session() as db:
+        _log_tool_call(db, "resume_session")
+
+        # Find prior session
+        if session_id is not None:
+            prior = db.get(WizardSession, session_id)
+            if prior is None:
+                raise ToolError(f"Session {session_id} not found")
+        else:
+            prior = find_latest_session_with_notes(db)
+            if prior is None:
+                raise ToolError("No sessions with notes found")
+
+        assert prior.id is not None
+
+        # Create new session
+        new_session = WizardSession()
+        db.add(new_session)
+        db.flush()
+        db.refresh(new_session)
+        assert new_session.id is not None
+
+        # Sync
+        sync_results = sync_service().sync_all(db)
+
+        # Daily page
+        daily_page = None
+        try:
+            daily_page = notion_client().ensure_daily_page()
+            new_session.daily_page_id = daily_page.page_id
+            db.add(new_session)
+            db.flush()
+        except Exception as e:
+            logger.warning("ensure_daily_page failed: %s", e)
+
+        # Deserialise prior session_state
+        session_state: SessionState | None = None
+        working_set_tasks: list[TaskContext] = []
+        if prior.session_state is not None:
+            try:
+                session_state = SessionState.model_validate_json(prior.session_state)
+                for tid in session_state.working_set:
+                    t = db.get(Task, tid)
+                    ts = db.get(TaskState, tid)
+                    if t is not None:
+                        working_set_tasks.append(TaskContext.from_model(t, ts))
+            except Exception as e:
+                logger.warning("Failed to deserialise session_state: %s", e)
+                session_state = None
+        else:
+            logger.warning(
+                "Session %d was not cleanly closed — no structured state available. "
+                "Falling back to note history.",
+                prior.id,
+            )
+
+        # Fetch prior notes grouped by task
+        note_stmt = (
+            select(Note)
+            .where(Note.session_id == prior.id)
+            .order_by(col(Note.created_at).asc())
+        )
+        all_prior_notes = list(db.execute(note_stmt).scalars().all())
+        by_task: dict[int, list[Note]] = {}
+        for n in all_prior_notes:
+            if n.task_id is not None:
+                by_task.setdefault(n.task_id, []).append(n)
+
+        prior_notes: list[ResumedTaskNotes] = []
+        for tid, notes in by_task.items():
+            t = db.get(Task, tid)
+            ts = db.get(TaskState, tid)
+            if t is not None:
+                latest_mm = next(
+                    (n.mental_model for n in reversed(notes) if n.mental_model is not None),
+                    None,
+                )
+                prior_notes.append(ResumedTaskNotes(
+                    task=TaskContext.from_model(t, ts),
+                    notes=[NoteDetail.from_model(n) for n in notes],
+                    latest_mental_model=latest_mm,
+                ))
+
+        return ResumeSessionResponse(
+            session_id=new_session.id,
+            resumed_from_session_id=prior.id,
+            session_state=session_state,
+            working_set_tasks=working_set_tasks,
+            prior_notes=prior_notes,
+            unsummarised_meetings=meeting_repo().get_unsummarised_contexts(db),
+            sync_results=sync_results,
+            daily_page=daily_page,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Register tools with MCP
 # ---------------------------------------------------------------------------
@@ -541,3 +640,4 @@ mcp.tool()(ingest_meeting)
 mcp.tool()(create_task)
 mcp.tool()(rewind_task)
 mcp.tool()(what_am_i_missing)
+mcp.tool()(resume_session)
