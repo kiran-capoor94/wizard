@@ -4,7 +4,7 @@ from fastmcp.exceptions import ToolError
 from sqlmodel import Session, select
 
 from .database import get_session
-from .deps import meeting_repo, note_repo, notion_client, security, sync_service, task_repo, writeback
+from .deps import meeting_repo, note_repo, notion_client, security, sync_service, task_repo, task_state_repo, writeback
 from .mcp_instance import mcp
 from .models import (
     Meeting,
@@ -353,6 +353,8 @@ def create_task(
         db.flush()
         db.refresh(task)
         assert task.id is not None
+
+        task_state_repo().create_for_task(db, task)
 
         if meeting_id:
             db.add(MeetingTasks(meeting_id=meeting_id, task_id=task.id))
