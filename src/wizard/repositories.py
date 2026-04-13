@@ -90,7 +90,7 @@ class TaskRepository:
         rows = db.exec(stmt).all()
 
         results: list[TaskContext] = []
-        for task, _lw_at in rows:
+        for task, _lw_at in rows:  # pyright: ignore[reportUnknownVariableType]
             task_state = db.get(TaskState, task.id)
             latest = self._latest_note_for(db, task)
             results.append(_task_context_from_row(task, task_state, latest))
