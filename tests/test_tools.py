@@ -377,6 +377,12 @@ async def test_session_end_saves_summary_note(db_session):
             ctx,
             session_id=session_id,
             summary="wrapped up today's work",
+            intent="wrapped up",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
         )
 
     assert result.note_id is not None
@@ -567,7 +573,17 @@ async def test_compounding_loop_across_two_sessions(db_session):
         await update_task_status(ctx, task_id=task_id, new_status=TaskStatus.IN_PROGRESS)
 
         # session_end
-        await session_end(ctx, session_id=session_id, summary="Investigated auth bug")
+        await session_end(
+            ctx,
+            session_id=session_id,
+            summary="Investigated auth bug",
+            intent="investigate auth",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
 
         # --- Session 2 ---
         s2 = await session_start(ctx)
@@ -667,7 +683,17 @@ async def test_session_end_logs_tool_call_with_session_id(db_session):
     wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
 
     with patch.multiple("wizard.tools", **patches):
-        await session_end(ctx, session_id=session.id, summary="done")
+        await session_end(
+            ctx,
+            session_id=session.id,
+            summary="done",
+            intent="done",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
 
     rows = db_session.exec(select(ToolCall)).all()
     assert len(rows) == 1
@@ -726,7 +752,17 @@ async def test_tool_call_sequence_within_session(db_session):
             note_type=NoteType.INVESTIGATION,
             content="finding",
         )
-        await session_end(ctx, session_id=s.session_id, summary="wrap up")
+        await session_end(
+            ctx,
+            session_id=s.session_id,
+            summary="wrap up",
+            intent="wrap up",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
 
     rows = db_session.exec(
         select(ToolCall).order_by(col(ToolCall.called_at))
@@ -968,7 +1004,17 @@ async def test_session_end_clears_current_session_id_from_ctx_state(db_session):
     wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
 
     with patch.multiple("wizard.tools", **patches):
-        await session_end(ctx, session_id=session.id, summary="done")
+        await session_end(
+            ctx,
+            session_id=session.id,
+            summary="done",
+            intent="done",
+            working_set=[],
+            state_delta="no changes",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
 
     assert await ctx.get_state("current_session_id") is None
 
@@ -1155,3 +1201,110 @@ async def test_update_task_status_does_not_elicit_for_in_progress(db_session):
         await update_task_status(ctx, task_id=task.id, new_status=TaskStatus.IN_PROGRESS)
 
     wb_mock.append_task_outcome.assert_not_called()
+
+
+# --- session_end expansion ---
+
+async def test_session_end_persists_session_state(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import SessionState, WriteBackStatus
+    import json
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    ctx = MockContext()
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
+
+    with patch.multiple("wizard.tools", **patches):
+        result = await session_end(
+            ctx,
+            session_id=session.id,
+            summary="good session",
+            intent="shipped the auth fix",
+            working_set=[1, 2],
+            state_delta="ENG-42 now done",
+            open_loops=["follow up with team"],
+            next_actions=["write tests for ENG-50"],
+            closure_status="clean",
+        )
+
+    db_session.refresh(session)
+    assert session.session_state is not None
+    state = SessionState.model_validate_json(session.session_state)
+    assert state.intent == "shipped the auth fix"
+    assert state.working_set == [1, 2]
+    assert state.closure_status == "clean"
+    assert state.open_loops == ["follow up with team"]
+    assert state.next_actions == ["write tests for ENG-50"]
+
+    assert result.closure_status == "clean"
+    assert result.open_loops_count == 1
+    assert result.next_actions_count == 1
+    assert result.intent == "shipped the auth fix"
+
+
+async def test_session_end_emits_confirmation_via_ctx_info(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import WriteBackStatus
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    impl = _MockContextImpl()
+    ctx = mock_ctx(impl)
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
+
+    with patch.multiple("wizard.tools", **patches):
+        await session_end(
+            ctx,
+            session_id=session.id,
+            summary="done",
+            intent="intent",
+            working_set=[],
+            state_delta="nothing",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
+
+    assert any("clean" in msg for msg in impl.info_calls)
+
+
+async def test_session_end_rejects_invalid_closure_status(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    ctx = MockContext()
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_session_summary = MagicMock()
+
+    with patch.multiple("wizard.tools", **patches):
+        with pytest.raises(Exception):
+            await session_end(
+                ctx,
+                session_id=session.id,
+                summary="done",
+                intent="intent",
+                working_set=[],
+                state_delta="nothing",
+                open_loops=[],
+                next_actions=[],
+                closure_status="invalid_value",  # type: ignore[arg-type]
+            )
