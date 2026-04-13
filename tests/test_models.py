@@ -216,3 +216,30 @@ class TestSessionState:
             SessionState.model_validate(
                 {"state_delta": "y", "closure_status": "clean"}
             )
+
+
+# --- Task 2: Note.mental_model ---
+
+
+class TestNoteMentalModel:
+    def test_note_can_store_mental_model(self, db_session):
+        from wizard.models import Note, NoteType
+
+        note = Note(
+            note_type=NoteType.INVESTIGATION,
+            content="findings",
+            mental_model="Auth fails due to a token-refresh race condition",
+        )
+        db_session.add(note)
+        db_session.flush()
+        db_session.refresh(note)
+        assert note.mental_model == "Auth fails due to a token-refresh race condition"
+
+    def test_mental_model_defaults_to_none(self, db_session):
+        from wizard.models import Note, NoteType
+
+        note = Note(note_type=NoteType.DOCS, content="x")
+        db_session.add(note)
+        db_session.flush()
+        db_session.refresh(note)
+        assert note.mental_model is None
