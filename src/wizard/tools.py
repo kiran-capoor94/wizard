@@ -1,10 +1,21 @@
 import logging
+from typing import Literal
 
+from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from sqlmodel import Session, select
 
 from .database import get_session
-from .deps import meeting_repo, note_repo, notion_client, security, sync_service, task_repo, task_state_repo, writeback
+from .deps import (
+    meeting_repo,
+    note_repo,
+    notion_client,
+    security,
+    sync_service,
+    task_repo,
+    task_state_repo,
+    writeback,
+)
 from .mcp_instance import mcp
 from .models import (
     Meeting,
@@ -28,6 +39,8 @@ from .schemas import (
     SaveNoteResponse,
     SessionEndResponse,
     SessionStartResponse,
+    SessionState,
+    SourceSyncStatus,
     TaskStartResponse,
     UpdateTaskStatusResponse,
 )
@@ -35,7 +48,7 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 
-def _log_tool_call(db: Session, tool_name: str, session_id: int | None = None) -> None:
+async def _log_tool_call(db: Session, tool_name: str, session_id: int | None = None) -> None:
     db.add(ToolCall(tool_name=tool_name, session_id=session_id))
     db.flush()
 
@@ -45,7 +58,7 @@ def _log_tool_call(db: Session, tool_name: str, session_id: int | None = None) -
 # ---------------------------------------------------------------------------
 
 
-def session_start() -> SessionStartResponse:
+async def session_start(ctx: Context) -> SessionStartResponse:
     """Creates a session, syncs Jira and Notion, returns open and blocked tasks + unsummarised meetings."""
     logger.info("session_start")
     with get_session() as db:
@@ -54,7 +67,7 @@ def session_start() -> SessionStartResponse:
         db.flush()
         db.refresh(session)
         assert session.id is not None
-        _log_tool_call(db, "session_start", session_id=session.id)
+        await _log_tool_call(db, "session_start", session_id=session.id)
 
         sync_results = sync_service().sync_all(db)
 
@@ -77,7 +90,7 @@ def session_start() -> SessionStartResponse:
         )
 
 
-def task_start(task_id: int) -> TaskStartResponse:
+async def task_start(ctx: Context, task_id: int) -> TaskStartResponse:
     """Returns full task context + all prior notes for compounding context.
 
     task_id: integer task ID from the open_tasks or blocked_tasks list
@@ -86,11 +99,13 @@ def task_start(task_id: int) -> TaskStartResponse:
     logger.info("task_start task_id=%d", task_id)
     try:
         with get_session() as db:
-            _log_tool_call(db, "task_start")
+            await _log_tool_call(db, "task_start")
             task = task_repo().get_by_id(db, task_id)
             task_ctx = task_repo().build_task_context(db, task)
 
-            notes = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
+            notes = note_repo().get_for_task(
+                db, task_id=task.id, source_id=task.source_id
+            )
             notes_by_type: dict[str, int] = {}
             for note in notes:
                 key = note.note_type.value
@@ -109,7 +124,8 @@ def task_start(task_id: int) -> TaskStartResponse:
         raise ToolError(str(e)) from e
 
 
-def save_note(
+async def save_note(
+    ctx: Context,
     task_id: int,
     note_type: NoteType,
     content: str,
@@ -119,7 +135,7 @@ def save_note(
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
         with get_session() as db:
-            _log_tool_call(db, "save_note")
+            await _log_tool_call(db, "save_note")
             task = task_repo().get_by_id(db, task_id)
             clean = security().scrub(content).clean
             note = Note(
@@ -139,14 +155,16 @@ def save_note(
         raise ToolError(str(e)) from e
 
 
-def update_task_status(
-    task_id: int, new_status: TaskStatus
+async def update_task_status(
+    ctx: Context, task_id: int, new_status: TaskStatus
 ) -> UpdateTaskStatusResponse:
     """Updates task status locally and attempts Jira and Notion write-back."""
-    logger.info("update_task_status task_id=%d new_status=%s", task_id, new_status.value)
+    logger.info(
+        "update_task_status task_id=%d new_status=%s", task_id, new_status.value
+    )
     try:
         with get_session() as db:
-            _log_tool_call(db, "update_task_status")
+            await _log_tool_call(db, "update_task_status")
             task = task_repo().get_by_id(db, task_id)
             task.status = new_status
             db.add(task)
@@ -171,7 +189,7 @@ def update_task_status(
         raise ToolError(str(e)) from e
 
 
-def get_meeting(meeting_id: int) -> GetMeetingResponse:
+async def get_meeting(ctx: Context, meeting_id: int) -> GetMeetingResponse:
     """Returns meeting transcript and linked open tasks.
 
     meeting_id: integer meeting ID from the unsummarised_meetings list
@@ -180,14 +198,15 @@ def get_meeting(meeting_id: int) -> GetMeetingResponse:
     logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
         with get_session() as db:
-            _log_tool_call(db, "get_meeting")
+            await _log_tool_call(db, "get_meeting")
             meeting = meeting_repo().get_by_id(db, meeting_id)
             assert meeting.id is not None
 
             linked_tasks = [
                 task_repo().build_task_context(db, t)
                 for t in meeting.tasks
-                if t.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
+                if t.status
+                in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
             ]
 
             return GetMeetingResponse(
@@ -204,14 +223,20 @@ def get_meeting(meeting_id: int) -> GetMeetingResponse:
         raise ToolError(str(e)) from e
 
 
-def save_meeting_summary(
-    meeting_id: int, session_id: int, summary: str, task_ids: list[int] | None = None
+async def save_meeting_summary(
+    ctx: Context,
+    meeting_id: int,
+    session_id: int,
+    summary: str,
+    task_ids: list[int] | None = None,
 ) -> SaveMeetingSummaryResponse:
     """Scrubs and persists the LLM-generated meeting summary. Attempts Notion write-back."""
-    logger.info("save_meeting_summary meeting_id=%d session_id=%d", meeting_id, session_id)
+    logger.info(
+        "save_meeting_summary meeting_id=%d session_id=%d", meeting_id, session_id
+    )
     try:
         with get_session() as db:
-            _log_tool_call(db, "save_meeting_summary", session_id=session_id)
+            await _log_tool_call(db, "save_meeting_summary", session_id=session_id)
             meeting = meeting_repo().get_by_id(db, meeting_id)
             assert meeting.id is not None
 
@@ -254,11 +279,11 @@ def save_meeting_summary(
         raise ToolError(str(e)) from e
 
 
-def session_end(session_id: int, summary: str) -> SessionEndResponse:
+async def session_end(ctx: Context, session_id: int, summary: str) -> SessionEndResponse:
     """Persists session summary note and attempts Notion daily page write-back."""
     logger.info("session_end session_id=%d", session_id)
     with get_session() as db:
-        _log_tool_call(db, "session_end", session_id=session_id)
+        await _log_tool_call(db, "session_end", session_id=session_id)
         session = db.get(WizardSession, session_id)
         if session is None:
             raise ToolError(f"Session {session_id} not found")
@@ -286,7 +311,8 @@ def session_end(session_id: int, summary: str) -> SessionEndResponse:
         )
 
 
-def ingest_meeting(
+async def ingest_meeting(
+    ctx: Context,
     title: str,
     content: str,
     source_id: str | None = None,
@@ -296,7 +322,7 @@ def ingest_meeting(
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
     logger.info("ingest_meeting source_id=%s", source_id)
     with get_session() as db:
-        _log_tool_call(db, "ingest_meeting")
+        await _log_tool_call(db, "ingest_meeting")
         clean_title = security().scrub(title).clean
         clean_content = security().scrub(content).clean
 
@@ -338,7 +364,8 @@ def ingest_meeting(
         )
 
 
-def create_task(
+async def create_task(
+    ctx: Context,
     name: str,
     priority: TaskPriority = TaskPriority.MEDIUM,
     category: TaskCategory = TaskCategory.ISSUE,
@@ -349,7 +376,7 @@ def create_task(
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
     with get_session() as db:
-        _log_tool_call(db, "create_task")
+        await _log_tool_call(db, "create_task")
         clean_name = security().scrub(name).clean
         task = Task(
             name=clean_name,
