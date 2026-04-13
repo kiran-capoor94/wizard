@@ -273,9 +273,7 @@ class WriteBackService:
             page_id = self._notion.create_meeting_page(
                 title=meeting.title,
                 category=notion_category,
-                krisp_url=(
-                    meeting.source_url if meeting.source_type == "KRISP" else None
-                ),
+                krisp_url=meeting.source_url,
                 summary=meeting.summary,
             )
             if page_id:
