@@ -299,7 +299,7 @@ def session_end(
             try:
                 session.session_state = session_state.model_dump_json()
                 db.add(session)
-                db.commit()
+                db.flush()
                 session_state_saved = True
             except Exception as e:
                 logger.warning("Failed to persist session_state: %s", e)
