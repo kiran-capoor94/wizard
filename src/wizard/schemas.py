@@ -314,3 +314,13 @@ class IngestMeetingResponse(BaseModel):
 class CreateTaskResponse(BaseModel):
     task_id: int
     notion_write_back: WriteBackStatus
+
+
+class Signal(BaseModel):
+    type: str
+    severity: Literal["high", "medium", "low"]
+    message: str
+
+
+class MissingResponse(BaseModel):
+    signals: list[Signal]
