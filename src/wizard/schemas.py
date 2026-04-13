@@ -303,6 +303,10 @@ class SessionEndResponse(BaseModel):
     note_id: int
     notion_write_back: WriteBackStatus
     session_state_saved: bool = False
+    closure_status: str | None = None
+    open_loops_count: int = 0
+    next_actions_count: int = 0
+    intent: str | None = None
 
 
 class IngestMeetingResponse(BaseModel):
