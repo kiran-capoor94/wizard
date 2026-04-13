@@ -15,6 +15,7 @@ from .models import (
     Task,
     TaskCategory,
     TaskPriority,
+    TaskState,
     TaskStatus,
     ToolCall,
     WizardSession,
@@ -24,12 +25,16 @@ from .schemas import (
     GetMeetingResponse,
     IngestMeetingResponse,
     NoteDetail,
+    RewindResponse,
+    RewindSummary,
     SaveMeetingSummaryResponse,
     SaveNoteResponse,
     SessionEndResponse,
     SessionStartResponse,
     SessionState,
+    TaskContext,
     TaskStartResponse,
+    TimelineEntry,
     UpdateTaskStatusResponse,
 )
 
@@ -405,6 +410,52 @@ def create_task(
         )
 
 
+def rewind_task(task_id: int) -> RewindResponse:
+    """Reconstruct the full note timeline for a task, oldest first."""
+    logger.info("rewind_task task_id=%d", task_id)
+    with get_session() as db:
+        _log_tool_call(db, "rewind_task")
+
+        task = db.get(Task, task_id)
+        if task is None:
+            raise ToolError(f"Task {task_id} not found")
+
+        task_state = db.get(TaskState, task_id)
+        if task_state is None:
+            raise ToolError(f"TaskState missing for task {task_id}")
+
+        notes_desc = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
+        notes_asc = list(reversed(notes_desc))
+
+        timeline = [
+            TimelineEntry(
+                note_id=n.id,
+                created_at=n.created_at,
+                note_type=n.note_type,
+                preview=n.content[:200],
+                mental_model=n.mental_model,
+            )
+            for n in notes_asc
+        ]
+
+        total_notes = len(notes_asc)
+        if total_notes >= 2:
+            duration_days = (notes_asc[-1].created_at - notes_asc[0].created_at).days
+        else:
+            duration_days = 0
+        last_activity = notes_asc[-1].created_at if notes_asc else task.created_at
+
+        summary = RewindSummary(
+            total_notes=total_notes,
+            duration_days=duration_days,
+            last_activity=last_activity,
+        )
+
+        ctx = TaskContext.from_model(task, task_state)
+
+        return RewindResponse(task=ctx, timeline=timeline, summary=summary)
+
+
 # ---------------------------------------------------------------------------
 # Register tools with MCP
 # ---------------------------------------------------------------------------
@@ -418,3 +469,4 @@ mcp.tool()(save_meeting_summary)
 mcp.tool()(session_end)
 mcp.tool()(ingest_meeting)
 mcp.tool()(create_task)
+mcp.tool()(rewind_task)

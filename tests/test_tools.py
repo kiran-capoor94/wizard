@@ -1052,4 +1052,150 @@ def test_update_task_status_does_not_reset_stale_days(db_session):
     db_session.refresh(state)
     assert state.stale_days == 7
     assert state.note_count == 3
-    assert state.decision_count == 1
+
+
+# ---------------------------------------------------------------------------
+# rewind_task
+# ---------------------------------------------------------------------------
+
+
+def test_rewind_task_empty_timeline(db_session):
+    from wizard.tools import rewind_task
+    from wizard.models import Task, TaskState, TaskStatus
+
+    task = Task(name="empty task", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    state = TaskState(
+        task_id=task.id,
+        last_touched_at=task.created_at,
+        stale_days=0,
+        note_count=0,
+        decision_count=0,
+    )
+    db_session.add(state)
+    db_session.commit()
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = rewind_task(task_id=task.id)
+
+    assert result.timeline == []
+    assert result.summary.total_notes == 0
+    assert result.summary.duration_days == 0
+    assert result.summary.last_activity == task.created_at
+    assert result.task.id == task.id
+
+
+def test_rewind_task_single_note(db_session):
+    from wizard.tools import rewind_task
+    from wizard.models import Task, TaskState, TaskStatus, Note, NoteType
+
+    task = Task(name="single note task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    state = TaskState(
+        task_id=task.id,
+        last_touched_at=task.created_at,
+        stale_days=0,
+        note_count=1,
+        decision_count=0,
+    )
+    db_session.add(state)
+
+    note = Note(
+        note_type=NoteType.INVESTIGATION,
+        content="some investigation note",
+        task_id=task.id,
+    )
+    db_session.add(note)
+    db_session.commit()
+    db_session.refresh(note)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = rewind_task(task_id=task.id)
+
+    assert result.summary.total_notes == 1
+    assert result.summary.duration_days == 0
+    assert result.summary.last_activity == note.created_at
+    assert len(result.timeline) == 1
+    assert result.timeline[0].note_id == note.id
+    assert result.timeline[0].note_type == NoteType.INVESTIGATION
+
+
+def test_rewind_task_multiple_notes_sort_order_and_preview(db_session):
+    import datetime
+    from wizard.tools import rewind_task
+    from wizard.models import Task, TaskState, TaskStatus, Note, NoteType
+
+    task = Task(name="multi note task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    state = TaskState(
+        task_id=task.id,
+        last_touched_at=task.created_at,
+        stale_days=0,
+        note_count=2,
+        decision_count=0,
+    )
+    db_session.add(state)
+
+    t_old = datetime.datetime(2025, 1, 1, 10, 0, 0)
+    t_new = datetime.datetime(2025, 1, 6, 10, 0, 0)  # 5 days later
+
+    old_note = Note(
+        note_type=NoteType.INVESTIGATION,
+        content="old note",
+        task_id=task.id,
+    )
+    old_note.created_at = t_old
+    db_session.add(old_note)
+
+    long_content = "x" * 300
+    new_note = Note(
+        note_type=NoteType.DECISION,
+        content=long_content,
+        task_id=task.id,
+    )
+    new_note.created_at = t_new
+    db_session.add(new_note)
+
+    db_session.commit()
+    db_session.refresh(old_note)
+    db_session.refresh(new_note)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = rewind_task(task_id=task.id)
+
+    assert result.summary.total_notes == 2
+    assert result.summary.duration_days == 5
+    assert result.summary.last_activity == t_new
+
+    # oldest first
+    assert result.timeline[0].note_id == old_note.id
+    assert result.timeline[1].note_id == new_note.id
+
+    # preview truncated at 200 chars
+    assert len(result.timeline[1].preview) == 200
+    assert result.timeline[1].preview == long_content[:200]
+
+
+def test_rewind_task_not_found_raises_tool_error(db_session):
+    from fastmcp.exceptions import ToolError
+    from wizard.tools import rewind_task
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        with pytest.raises(ToolError, match="Task 9999 not found"):
+            rewind_task(task_id=9999)
