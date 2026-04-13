@@ -37,7 +37,9 @@ async def test_session_start_creates_session(db_session):
     from wizard.tools import session_start
     ctx = MockContext()
     patches, sync_mock, _ = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
         result = await session_start(ctx)
@@ -53,24 +55,25 @@ async def test_session_start_calls_sync(db_session):
     from wizard.tools import session_start
     ctx = MockContext()
     patches, sync_mock, _ = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
         await session_start(ctx)
 
-    sync_mock.sync_all.assert_called_once()
+    sync_mock.sync_jira.assert_called_once()
+    sync_mock.sync_notion_tasks.assert_called_once()
+    sync_mock.sync_notion_meetings.assert_called_once()
 
 
 async def test_session_start_surfaces_sync_errors(db_session):
     from wizard.tools import session_start
-    from wizard.schemas import SourceSyncStatus
     ctx = MockContext()
     patches, sync_mock, _ = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[
-        SourceSyncStatus(source="jira", ok=False, error="Jira token not configured"),
-        SourceSyncStatus(source="notion_tasks", ok=True),
-        SourceSyncStatus(source="notion_meetings", ok=True),
-    ])
+    sync_mock.sync_jira = MagicMock(side_effect=Exception("Jira token not configured"))
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
         result = await session_start(ctx)
@@ -97,7 +100,9 @@ async def test_session_start_resolves_daily_page(db_session):
     )
 
     patches, sync_mock, _ = _patch_tools(db_session, notion=notion_mock)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
         result = await session_start(ctx)
@@ -118,7 +123,9 @@ async def test_session_start_daily_page_failure_is_non_fatal(db_session):
     notion_mock.ensure_daily_page.side_effect = Exception("notion API down")
 
     patches, sync_mock, _ = _patch_tools(db_session, notion=notion_mock)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
         result = await session_start(ctx)
@@ -538,7 +545,9 @@ async def test_compounding_loop_across_two_sessions(db_session):
     )
     wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
     sync_mock = MagicMock()
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, sync=sync_mock, wb=wb_mock)
@@ -606,7 +615,9 @@ async def test_session_start_logs_tool_call(db_session):
 
     ctx = MockContext()
     patches, sync_mock, _ = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     with patch.multiple("wizard.tools", **patches):
         result = await session_start(ctx)
@@ -700,7 +711,9 @@ async def test_tool_call_sequence_within_session(db_session):
 
     ctx = MockContext()
     patches, sync_mock, wb_mock = _patch_tools(db_session)
-    sync_mock.sync_all = MagicMock(return_value=[])
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
     wb_mock.push_session_summary = MagicMock(
         return_value=WriteBackStatus(ok=True)
     )
@@ -721,7 +734,7 @@ async def test_tool_call_sequence_within_session(db_session):
     names = [r.tool_name for r in rows]
     assert names == ["session_start", "save_note", "session_end"]
     assert rows[0].session_id == s.session_id
-    assert rows[1].session_id is None
+    assert rows[1].session_id == s.session_id  # ctx state carries session_id into save_note
     assert rows[2].session_id == s.session_id
 
 
@@ -878,3 +891,83 @@ async def test_update_task_status_does_not_reset_stale_days(db_session):
     assert state.stale_days == 7
     assert state.note_count == 3
     assert state.decision_count == 1
+
+
+# --- session threading ---
+
+async def test_session_start_sets_current_session_id_in_ctx_state(db_session):
+    from wizard.tools import session_start
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
+
+    ctx = MockContext()
+    with patch.multiple("wizard.tools", **patches):
+        result = await session_start(ctx)
+
+    assert await ctx.get_state("current_session_id") == result.session_id
+
+
+async def test_save_note_uses_session_id_from_ctx_state_when_set(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext()
+    await ctx.set_state("current_session_id", 42)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(ctx, task_id=task.id, note_type=NoteType.DOCS, content="content")
+
+    note = db_session.get(Note, result.note_id)
+    assert note.session_id == 42
+
+
+async def test_save_note_session_id_null_when_no_ctx_state(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext()  # no set_state called
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(ctx, task_id=task.id, note_type=NoteType.DOCS, content="content")
+
+    note = db_session.get(Note, result.note_id)
+    assert note.session_id is None
+
+
+async def test_session_end_clears_current_session_id_from_ctx_state(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import WriteBackStatus
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+
+    ctx = MockContext()
+    await ctx.set_state("current_session_id", session.id)
+
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
+
+    with patch.multiple("wizard.tools", **patches):
+        await session_end(ctx, session_id=session.id, summary="done")
+
+    assert await ctx.get_state("current_session_id") is None

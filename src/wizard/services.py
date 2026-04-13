@@ -25,9 +25,9 @@ class SyncService:
     def sync_all(self, db: Session) -> list[SourceSyncStatus]:
         results: list[SourceSyncStatus] = []
         for source, fn in [
-            ("jira", self._sync_jira),
-            ("notion_tasks", self._sync_notion_tasks),
-            ("notion_meetings", self._sync_notion_meetings),
+            ("jira", self.sync_jira),
+            ("notion_tasks", self.sync_notion_tasks),
+            ("notion_meetings", self.sync_notion_meetings),
         ]:
             try:
                 fn(db)
@@ -37,7 +37,7 @@ class SyncService:
                 results.append(SourceSyncStatus(source=source, ok=False, error=str(e)))
         return results
 
-    def _sync_jira(self, db: Session) -> None:
+    def sync_jira(self, db: Session) -> None:
         raw_tasks = self._jira.fetch_open_tasks()
         for raw in raw_tasks:
             scrubbed_name = self._security.scrub(raw.summary).clean
@@ -62,7 +62,7 @@ class SyncService:
                 db.add(task)
         db.flush()
 
-    def _sync_notion_tasks(self, db: Session) -> None:
+    def sync_notion_tasks(self, db: Session) -> None:
         raw_tasks = self._notion.fetch_tasks()
         for raw in raw_tasks:
             name = raw.name or ""
@@ -122,7 +122,7 @@ class SyncService:
                 db.add(task)
         db.flush()
 
-    def _sync_notion_meetings(self, db: Session) -> None:
+    def sync_notion_meetings(self, db: Session) -> None:
         raw_meetings = self._notion.fetch_meetings()
         for raw in raw_meetings:
             title = raw.title or ""
