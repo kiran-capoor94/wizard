@@ -40,11 +40,24 @@ class JiraSettings(BaseModel):
     email: str = ""
 
 
+class NotionSchemaSettings(BaseModel):
+    task_name: str = "Task"
+    task_status: str = "Status"
+    task_priority: str = "Priority"
+    task_due_date: str = "Due date"
+    task_jira_key: str = "Jira"
+    meeting_title: str = "Meeting name"
+    meeting_date: str = "Date"
+    meeting_url: str = "Krisp URL"
+    meeting_summary: str = "Summary"
+
+
 class NotionSettings(BaseModel):
     sisu_work_page_id: str = ""
     tasks_db_id: str = ""
     meetings_db_id: str = ""
     token: str = ""
+    notion_schema: NotionSchemaSettings = Field(default_factory=NotionSchemaSettings)
 
 
 class ScrubbingSettings(BaseModel):
@@ -54,7 +67,7 @@ class ScrubbingSettings(BaseModel):
 
 class Settings(BaseSettings):
     name: str = "wizard"
-    version: str = "1.1.5"
+    version: str = "1.1.6"
     db: str = str(Path.home() / ".wizard" / "wizard.db")
     jira: JiraSettings = Field(default_factory=JiraSettings)
     notion: NotionSettings = Field(default_factory=NotionSettings)

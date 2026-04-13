@@ -825,3 +825,65 @@ def test_notion_ensure_daily_page_creates_and_archives():
     mock_instance.pages.update.assert_called_once_with(
         page_id="stale-id", archived=True
     )
+
+
+# ============================================================================
+# NotionClient — schema wiring tests
+# ============================================================================
+
+def test_notion_client_uses_schema_for_task_name():
+    from unittest.mock import patch
+    from wizard.config import NotionSchemaSettings
+    from wizard.integrations import NotionClient
+
+    schema = NotionSchemaSettings(task_name="My Task")
+    client = NotionClient(
+        token="tok",
+        sisu_work_page_id="p",
+        tasks_db_id="t",
+        meetings_db_id="m",
+        schema=schema,
+    )
+    page = {
+        "id": "page-1",
+        "properties": {
+            "My Task": {"type": "title", "title": [{"plain_text": "Test Task"}]},
+            "Status": {"type": "status", "status": {"name": "In Progress"}},
+            "Priority": {"type": "select", "select": {"name": "High"}},
+            "Due date": {"type": "date", "date": None},
+            "Jira": {"type": "url", "url": None},
+        },
+    }
+    with patch("wizard.integrations.collect_paginated_api", return_value=[page]):
+        tasks = client.fetch_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].name == "Test Task"
+
+
+def test_notion_client_uses_schema_for_meeting_url():
+    from unittest.mock import patch
+    from wizard.config import NotionSchemaSettings
+    from wizard.integrations import NotionClient
+
+    schema = NotionSchemaSettings(meeting_url="Fathom URL")
+    client = NotionClient(
+        token="tok",
+        sisu_work_page_id="p",
+        tasks_db_id="t",
+        meetings_db_id="m",
+        schema=schema,
+    )
+    page = {
+        "id": "page-2",
+        "properties": {
+            "Meeting name": {"type": "title", "title": [{"plain_text": "Standup"}]},
+            "Category": {"type": "multi_select", "multi_select": []},
+            "Summary": {"type": "rich_text", "rich_text": []},
+            "Fathom URL": {"type": "url", "url": "https://fathom.video/123"},
+            "Date": {"type": "date", "date": None},
+        },
+    }
+    with patch("wizard.integrations.collect_paginated_api", return_value=[page]):
+        meetings = client.fetch_meetings()
+    assert len(meetings) == 1
+    assert meetings[0].krisp_url == "https://fathom.video/123"

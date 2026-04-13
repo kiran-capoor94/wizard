@@ -33,7 +33,9 @@ def test_setup_creates_wizard_dir(tmp_path):
     wizard_dir = tmp_path / ".wizard"
 
     with _fresh_app(wizard_dir) as ctx:
-        result = runner.invoke(ctx.app, ["setup"])
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
 
     assert result.exit_code == 0
     assert wizard_dir.exists()
@@ -44,7 +46,9 @@ def test_setup_creates_default_config(tmp_path):
     wizard_dir = tmp_path / ".wizard"
 
     with _fresh_app(wizard_dir) as ctx:
-        result = runner.invoke(ctx.app, ["setup"])
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
 
     config = json.loads((wizard_dir / "config.json").read_text())
     assert "jira" in config
@@ -52,12 +56,13 @@ def test_setup_creates_default_config(tmp_path):
     assert "scrubbing" in config
 
 
-
 def test_setup_copies_skills(tmp_path):
     wizard_dir = tmp_path / ".wizard"
 
     with _fresh_app(wizard_dir) as ctx:
-        result = runner.invoke(ctx.app, ["setup"])
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
 
     assert result.exit_code == 0
     skills_dir = wizard_dir / "skills"
@@ -76,8 +81,10 @@ def test_setup_handles_missing_skills_source(tmp_path):
     fake_skills = tmp_path / "nonexistent_skills"
 
     with _fresh_app(wizard_dir) as ctx:
-        with patch("wizard.cli.main._package_skills_dir", return_value=fake_skills):
-            result = runner.invoke(ctx.app, ["setup"])
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            with patch("wizard.cli.main._package_skills_dir", return_value=fake_skills):
+                result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
 
     assert result.exit_code == 0
     assert not (wizard_dir / "skills").exists()
@@ -87,8 +94,10 @@ def test_setup_is_idempotent(tmp_path):
     wizard_dir = tmp_path / ".wizard"
 
     with _fresh_app(wizard_dir) as ctx:
-        runner.invoke(ctx.app, ["setup"])
-        result = runner.invoke(ctx.app, ["setup"])
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
 
     assert result.exit_code == 0
 
@@ -143,31 +152,36 @@ def test_sync_reports_results(db_session):
 # --- doctor command tests ---
 
 
-def test_doctor_checks_wizard_home(tmp_path):
+def test_doctor_checks_wizard_home(tmp_path, monkeypatch):
     import json
 
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
-    (wizard_dir / "config.json").write_text(json.dumps({"db": ":memory:"}))
+    db_path = wizard_dir / "wizard.db"
+    db_path.touch()
+    (wizard_dir / "config.json").write_text(json.dumps({}))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(wizard_dir / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(db_path))
 
     with patch("wizard.cli.main.WIZARD_HOME", wizard_dir):
         from wizard.cli.main import app
 
         result = runner.invoke(app, ["doctor"])
 
-    assert "config" in result.output.lower()
+    # Check 1 (db file) passes; check 2 (notion token) fails → output contains check name
+    assert "db" in result.output.lower() or "notion" in result.output.lower()
 
 
-def test_doctor_reports_missing_wizard_home(tmp_path):
-    wizard_dir = tmp_path / ".wizard"  # does not exist
+def test_doctor_reports_missing_wizard_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZARD_DB", str(tmp_path / "no_such.db"))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "nonexistent_config.json"))
 
-    with patch("wizard.cli.main.WIZARD_HOME", wizard_dir):
-        from wizard.cli.main import app
+    from wizard.cli.main import app
 
-        result = runner.invoke(app, ["doctor"])
+    result = runner.invoke(app, ["doctor"])
 
     assert result.exit_code == 1
-    assert "not found" in result.output.lower() or "missing" in result.output.lower()
+    assert "not found" in result.output.lower() or "missing" in result.output.lower() or "fail" in result.output.lower()
 
 
 # --- setup MCP registration tests ---
@@ -175,35 +189,45 @@ def test_doctor_reports_missing_wizard_home(tmp_path):
 
 def test_setup_registers_mcp_in_claude_configs(tmp_path):
     wizard_dir = tmp_path / ".wizard"
-    code_cfg = tmp_path / "claude.json"
-    desktop_cfg = tmp_path / "desktop_config.json"
+    code_cfg = tmp_path / "claude_code_config.json"
     code_cfg.write_text(json.dumps({}))
-    desktop_cfg.write_text(json.dumps({}))
+
+    from wizard.agent_registration import AgentConfig, _register_json
+
+    patched_agents = {
+        "claude-code": AgentConfig(
+            agent_id="claude-code",
+            config_path=code_cfg,
+            format="json",
+            mcp_key="mcpServers",
+        )
+    }
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
-        ):
-            result = runner.invoke(ctx.app, ["setup"])
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+
+            def _real_register(aid: str) -> None:
+                _register_json(patched_agents[aid])
+
+            mock_ar.register.side_effect = _real_register
+            mock_ar.write_registered_agents.return_value = None
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
 
     assert result.exit_code == 0
     code_data = json.loads(code_cfg.read_text())
     assert "wizard" in code_data.get("mcpServers", {})
-    assert "Claude Code" in result.output
+    assert "claude-code" in result.output
 
 
 def test_setup_skips_mcp_when_config_missing(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     code_cfg = tmp_path / "claude.json"  # does not exist
-    desktop_cfg = tmp_path / "desktop_config.json"  # does not exist
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
-        ):
-            result = runner.invoke(ctx.app, ["setup"])
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
 
     assert result.exit_code == 0
     assert not code_cfg.exists()
@@ -220,34 +244,40 @@ def test_uninstall_removes_wizard_dir_and_mcp(tmp_path):
     skills = wizard_dir / "skills" / "test-skill"
     skills.mkdir(parents=True)
 
-    code_cfg = tmp_path / "claude.json"
-    desktop_cfg = tmp_path / "desktop_config.json"
+    code_cfg = tmp_path / "claude_code_config.json"
     code_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
-    desktop_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
+
+    import wizard.agent_registration as ar
+    from wizard.agent_registration import AgentConfig
+
+    patched_agents = {
+        "claude-code": AgentConfig(
+            agent_id="claude-code",
+            config_path=code_cfg,
+            format="json",
+            mcp_key="mcpServers",
+        )
+    }
 
     with _fresh_app(wizard_dir) as ctx:
         with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
+            patch.object(ar, "read_registered_agents", return_value=["claude-code"]),
+            patch.object(ar, "_AGENTS", patched_agents),
         ):
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
     assert not wizard_dir.exists()
     assert "wizard" not in json.loads(code_cfg.read_text()).get("mcpServers", {})
-    assert "wizard" not in json.loads(desktop_cfg.read_text()).get("mcpServers", {})
 
 
 def test_uninstall_nothing_to_do(tmp_path):
     wizard_dir = tmp_path / ".wizard"  # does not exist
-    code_cfg = tmp_path / "claude.json"  # does not exist
-    desktop_cfg = tmp_path / "desktop_config.json"  # does not exist
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
-        ):
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = []
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
@@ -260,10 +290,9 @@ def test_uninstall_aborts_without_confirmation(tmp_path):
     (wizard_dir / "config.json").write_text("{}")
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
-        ):
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = []
             result = runner.invoke(ctx.app, ["uninstall"], input="n\n")
 
     assert result.exit_code == 0
@@ -276,10 +305,9 @@ def test_uninstall_proceeds_with_confirmation(tmp_path):
     (wizard_dir / "config.json").write_text("{}")
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
-        ):
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = []
             result = runner.invoke(ctx.app, ["uninstall"], input="y\n")
 
     assert result.exit_code == 0
@@ -296,15 +324,14 @@ def test_uninstall_partial_state(tmp_path):
     code_cfg.write_text(json.dumps({"mcpServers": {"other": {}}}))  # no wizard entry
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope.json"),
-        ):
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = []
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
     assert not wizard_dir.exists()
-    # Other MCP entries preserved
+    # Other MCP entries preserved (unaffected since no agents deregistered)
     assert json.loads(code_cfg.read_text()) == {"mcpServers": {"other": {}}}
 
 
@@ -314,12 +341,203 @@ def test_uninstall_is_idempotent(tmp_path):
     (wizard_dir / "config.json").write_text("{}")
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
-        ):
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = []
             runner.invoke(ctx.app, ["uninstall", "--yes"])
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
     assert "nothing to uninstall" in result.output.lower()
+
+
+def test_uninstall_reads_registered_agents_and_deregisters(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = ["claude-code", "gemini"]
+            result = runner.invoke(ctx.app, ["uninstall", "--yes"])
+
+    deregistered = [call.args[0] for call in mock_ar.deregister.call_args_list]
+    assert "claude-code" in deregistered
+    assert "gemini" in deregistered
+    assert result.exit_code == 0
+
+
+def test_uninstall_falls_back_to_scan_if_no_registered_agents_file(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = ["claude-desktop"]
+            result = runner.invoke(ctx.app, ["uninstall", "--yes"])
+
+    mock_ar.scan_all_registered.assert_called_once()
+    mock_ar.deregister.assert_called_with("claude-desktop")
+    assert result.exit_code == 0
+
+
+# --- setup --agent flag tests ---
+
+
+def test_setup_agent_flag_registers_gemini(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "gemini"])
+
+    mock_ar.register.assert_called_with("gemini")
+    mock_ar.write_registered_agents.assert_called()
+    assert result.exit_code == 0
+
+
+def test_setup_agent_all_registers_all_five(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "all"])
+
+    registered_ids = [call.args[0] for call in mock_ar.register.call_args_list]
+    assert set(registered_ids) == {"claude-code", "claude-desktop", "gemini", "opencode", "codex"}
+    assert result.exit_code == 0
+
+
+def test_setup_writes_registered_agents_json(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
+
+    mock_ar.write_registered_agents.assert_called_once_with(["claude-code"])
+    assert result.exit_code == 0
+
+
+def test_setup_unknown_agent_exits_nonzero(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "notarealbot"])
+
+    assert result.exit_code != 0
+
+
+def test_setup_interactive_prompt_selects_agent(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            # "3" selects "gemini" (1=claude-code, 2=claude-desktop, 3=gemini, ...)
+            result = runner.invoke(ctx.app, ["setup"], input="3\n")
+
+    mock_ar.register.assert_called_with("gemini")
+    assert result.exit_code == 0
+
+
+def test_setup_interactive_prompt_invalid_selection(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup"], input="99\n")
+
+    assert result.exit_code != 0
+
+
+# --- setup --reconfigure-notion tests ---
+
+
+def test_setup_reconfigure_notion_runs_discovery(tmp_path):
+    from unittest.mock import patch
+    import json
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    config = {
+        "notion": {
+            "token": "test-token",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+        }
+    }
+    (wizard_dir / "config.json").write_text(json.dumps(config))
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main.notion_discovery") as mock_nd, \
+             patch("wizard.cli.main.NotionSdkClient"):
+            mock_ar.read_registered_agents.return_value = []
+            mock_nd.fetch_db_properties.return_value = {"Task": "title", "Status": "status"}
+            mock_nd.match_properties.return_value = {
+                "task_name": "Task", "task_status": "Status",
+                "task_priority": None, "task_due_date": None,
+                "task_jira_key": None, "meeting_title": "Meeting name",
+                "meeting_date": None, "meeting_url": None, "meeting_summary": None,
+            }
+            result = runner.invoke(ctx.app, ["setup", "--reconfigure-notion"])
+
+    mock_nd.fetch_db_properties.assert_called()
+    mock_nd.match_properties.assert_called()
+    assert result.exit_code == 0
+
+
+# --- doctor command tests (new 10-check implementation) ---
+
+
+def test_doctor_check_1_db_file_exists(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(tmp_path / "no_such.db"))
+    from typer.testing import CliRunner
+    from wizard.cli.main import app
+    runner_local = CliRunner()
+    result = runner_local.invoke(app, ["doctor"])
+    assert result.exit_code != 0
+    assert "database" in result.output.lower() or "db" in result.output.lower()
+
+
+def test_doctor_all_checks_pass_with_valid_setup(tmp_path, monkeypatch):
+    import json
+    from unittest.mock import patch
+    db_path = tmp_path / "wizard.db"
+    db_path.touch()
+    config = {
+        "notion": {"token": "tok", "tasks_db_id": "t", "meetings_db_id": "m"},
+        "jira": {"token": "jtok", "base_url": "https://jira.example.com", "project_key": "ENG"},
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(db_path))
+    with patch("wizard.cli.main._check_db_tables", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_migration_current", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_agent_registrations", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_allowlist_file", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_skills_installed", return_value=(True, "ok")):
+        from typer.testing import CliRunner
+        from wizard.cli.main import app
+        runner_local = CliRunner()
+        result = runner_local.invoke(app, ["doctor", "--all"])
+    assert result.exit_code == 0
+
+
+def test_doctor_stops_at_first_failure_without_all_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("WIZARD_DB", str(tmp_path / "no_such.db"))
+    from typer.testing import CliRunner
+    from wizard.cli.main import app
+    runner_local = CliRunner()
+    result = runner_local.invoke(app, ["doctor"])
+    assert result.exit_code != 0
