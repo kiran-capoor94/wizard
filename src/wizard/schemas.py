@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import NoteType, TaskCategory, TaskPriority, TaskStatus, MeetingCategory
+from .models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskState, TaskStatus, MeetingCategory
 
 
 class SessionState(BaseModel):
@@ -162,6 +162,36 @@ class TaskContext(BaseModel):
     last_note_type: NoteType | None  # most recent note type, or None
     last_note_preview: str | None  # first 300 chars of most recent note
     last_worked_at: datetime.datetime | None  # created_at of most recent note
+    notion_id: str | None = None
+    stale_days: int = 0
+    note_count: int = 0
+    decision_count: int = 0
+
+    @classmethod
+    def from_model(
+        cls,
+        task: Task,
+        task_state: TaskState | None,
+        latest_note: Note | None = None,
+    ) -> "TaskContext":
+        assert task.id is not None
+        return cls(
+            id=task.id,
+            name=task.name,
+            status=task.status,
+            priority=task.priority,
+            category=task.category,
+            due_date=task.due_date,
+            source_id=task.source_id,
+            source_url=task.source_url,
+            notion_id=task.notion_id,
+            last_note_type=latest_note.note_type if latest_note else None,
+            last_note_preview=latest_note.content[:300] if latest_note else None,
+            last_worked_at=task_state.last_note_at if task_state else None,
+            stale_days=task_state.stale_days if task_state else 0,
+            note_count=task_state.note_count if task_state else 0,
+            decision_count=task_state.decision_count if task_state else 0,
+        )
 
 
 class MeetingContext(BaseModel):
