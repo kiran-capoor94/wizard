@@ -626,6 +626,7 @@ async def test_task_start_logs_tool_call_without_session_id(db_session):
     db_session.add(task)
     db_session.flush()
     db_session.refresh(task)
+    assert task.id is not None
 
     ctx = MockContext()
     patches, _, _ = _patch_tools(db_session)
@@ -647,6 +648,7 @@ async def test_session_end_logs_tool_call_with_session_id(db_session):
     db_session.add(session)
     db_session.flush()
     db_session.refresh(session)
+    assert session.id is not None
 
     ctx = MockContext()
     patches, _, wb_mock = _patch_tools(db_session)
@@ -694,6 +696,7 @@ async def test_tool_call_sequence_within_session(db_session):
     db_session.add(task)
     db_session.flush()
     db_session.refresh(task)
+    assert task.id is not None
 
     ctx = MockContext()
     patches, sync_mock, wb_mock = _patch_tools(db_session)
