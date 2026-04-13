@@ -176,8 +176,8 @@ def uninstall(
             typer.echo(f"  ~/.wizard/{name}{suffix}")
         if has_wizard_dir and not existing_files:
             typer.echo("  ~/.wizard/")
-        for name in mcp_targets:
-            typer.echo(f"  wizard MCP entry from {name} config")
+        for path in mcp_targets:
+            typer.echo(f"  wizard MCP entry in {path}")
         typer.echo("")
         confirm = typer.prompt("Are you sure? [y/N]", default="N", show_default=False)
         if confirm.lower() != "y":
