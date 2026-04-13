@@ -416,7 +416,7 @@ def analytics(
 
     today = datetime.date.today()
 
-    options_set = sum([day, week, bool(from_date), bool(to_date)])
+    options_set = sum([day, week, bool(from_date or to_date)])
     if options_set > 1:
         typer.echo("Options --day, --week, --from/--to are mutually exclusive.", err=True)
         raise typer.Exit(1)

@@ -194,6 +194,14 @@ def test_read_write_registered_agents(tmp_path):
         assert read_registered_agents() == ["claude-code", "gemini"]
 
 
+def test_read_registered_agents_malformed_returns_empty(tmp_path):
+    reg_path = tmp_path / "registered_agents.json"
+    reg_path.write_text("not valid json{{{")
+    with patch("wizard.agent_registration._REGISTERED_AGENTS_PATH", reg_path):
+        from wizard.agent_registration import read_registered_agents
+        assert read_registered_agents() == []
+
+
 def test_scan_all_registered_finds_json_agent(tmp_path):
     config_path = tmp_path / "claude.json"
     config_path.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
