@@ -172,3 +172,47 @@ def test_meeting_category_has_general(db_session):
     db_session.commit()
     db_session.refresh(meeting)
     assert meeting.category == MeetingCategory.GENERAL
+
+
+# --- Task 1: SessionState schema ---
+
+from pydantic import ValidationError
+
+from wizard.schemas import SessionState
+
+
+class TestSessionState:
+    def test_round_trip_with_all_six_fields(self):
+        data = {
+            "intent": "Progress ADRs to decision",
+            "working_set": [40, 39],
+            "state_delta": "ADR 005 accepted. ADR 007 reframed.",
+            "open_loops": ["ADR changes not committed"],
+            "next_actions": ["Commit ADR 005 + 007"],
+            "closure_status": "interrupted",
+        }
+        state = SessionState.model_validate(data)
+        assert state.intent == data["intent"]
+        assert state.working_set == [40, 39]
+        assert state.closure_status == "interrupted"
+        assert state.model_dump() == data
+
+    def test_default_lists_are_empty(self):
+        state = SessionState.model_validate(
+            {"intent": "x", "state_delta": "y", "closure_status": "clean"}
+        )
+        assert state.working_set == []
+        assert state.open_loops == []
+        assert state.next_actions == []
+
+    def test_closure_status_rejects_unknown_value(self):
+        with pytest.raises(ValidationError):
+            SessionState.model_validate(
+                {"intent": "x", "state_delta": "y", "closure_status": "paused"}
+            )
+
+    def test_intent_required(self):
+        with pytest.raises(ValidationError):
+            SessionState.model_validate(
+                {"state_delta": "y", "closure_status": "clean"}
+            )
