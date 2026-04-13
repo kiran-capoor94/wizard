@@ -1265,6 +1265,7 @@ def test_what_am_i_missing_rule1_no_notes(db_session):
     from wizard.tools import what_am_i_missing
 
     task = _make_task_with_state(db_session, note_count=0)
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1279,6 +1280,7 @@ def test_what_am_i_missing_rule2_stale(db_session):
 
     last = datetime.datetime.now() - datetime.timedelta(days=5)
     task = _make_task_with_state(db_session, note_count=3, decision_count=1, stale_days=5, last_note_at=last)
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1292,6 +1294,7 @@ def test_what_am_i_missing_rules_2_and_6_both_fire_at_stale_3(db_session):
 
     last = datetime.datetime.now() - datetime.timedelta(days=3)
     task = _make_task_with_state(db_session, note_count=3, decision_count=1, stale_days=3, last_note_at=last)
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1304,6 +1307,7 @@ def test_what_am_i_missing_rule3_low_context(db_session):
     from wizard.tools import what_am_i_missing
 
     task = _make_task_with_state(db_session, note_count=2, decision_count=1, stale_days=0)
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1315,6 +1319,7 @@ def test_what_am_i_missing_rule4_no_decisions(db_session):
     from wizard.tools import what_am_i_missing
 
     task = _make_task_with_state(db_session, note_count=3, decision_count=0, stale_days=0)
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1336,6 +1341,7 @@ def test_what_am_i_missing_rule5_analysis_loop(db_session):
         ))
     db_session.flush()
 
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1359,6 +1365,7 @@ def test_what_am_i_missing_rule7_no_mental_model(db_session):
         ))
     db_session.flush()
 
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1371,6 +1378,7 @@ def test_what_am_i_missing_severity_sort_order(db_session):
 
     # note_count=0 fires Rule 1 (high); stale_days=3 fires Rule 2 (medium) + Rule 6 (medium)
     task = _make_task_with_state(db_session, note_count=0, stale_days=3)
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1398,6 +1406,7 @@ def test_what_am_i_missing_healthy_task_no_signals(db_session):
         ))
     db_session.flush()
 
+    assert task.id is not None
     patches, _, _ = _patch_tools(db_session)
     with patch.multiple("wizard.tools", **patches):
         result = what_am_i_missing(task_id=task.id)
@@ -1412,3 +1421,136 @@ def test_what_am_i_missing_not_found_raises_tool_error(db_session):
     with patch.multiple("wizard.tools", **patches):
         with pytest.raises(ToolError, match="Task 9999 not found"):
             what_am_i_missing(task_id=9999)
+
+
+# ---------------------------------------------------------------------------
+# resume_session tests
+# ---------------------------------------------------------------------------
+
+
+def test_resume_session_explicit_session_id_returns_new_session(db_session):
+    from wizard.tools import resume_session
+    from wizard.models import WizardSession, Task, TaskState, Note, NoteType
+    from wizard.models import TaskCategory, TaskPriority, TaskStatus
+    from wizard.schemas import WriteBackStatus
+
+    prior = WizardSession()
+    db_session.add(prior)
+    db_session.flush()
+    db_session.refresh(prior)
+    assert prior.id is not None
+
+    task = Task(
+        name="old task",
+        status=TaskStatus.IN_PROGRESS,
+        priority=TaskPriority.HIGH,
+        category=TaskCategory.ISSUE,
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ts = TaskState(task_id=task.id, note_count=0, decision_count=0, stale_days=0,
+                   last_touched_at=task.created_at)
+    db_session.add(ts)
+    note = Note(
+        task_id=task.id, session_id=prior.id,
+        note_type=NoteType.INVESTIGATION, content="prior context",
+    )
+    db_session.add(note)
+    db_session.flush()
+
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_all = MagicMock(return_value=[])
+    with patch.multiple("wizard.tools", **patches):
+        result = resume_session(session_id=prior.id)
+
+    assert result.resumed_from_session_id == prior.id
+    assert result.session_id != prior.id
+    assert len(result.prior_notes) == 1
+    assert result.prior_notes[0].notes[0].content == "prior context"
+
+
+def test_resume_session_no_session_state_working_set_empty(db_session):
+    from wizard.tools import resume_session
+    from wizard.models import WizardSession
+
+    prior = WizardSession()  # session_state is None by default
+    db_session.add(prior)
+    db_session.flush()
+    db_session.refresh(prior)
+    assert prior.id is not None
+
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_all = MagicMock(return_value=[])
+    with patch.multiple("wizard.tools", **patches):
+        result = resume_session(session_id=prior.id)
+
+    assert result.working_set_tasks == []
+    assert result.session_state is None
+
+
+def test_resume_session_with_valid_session_state_populates_working_set(db_session):
+    import json
+    from wizard.tools import resume_session
+    from wizard.models import WizardSession, Task, TaskState, TaskCategory, TaskPriority, TaskStatus
+
+    task = Task(
+        name="ws task",
+        status=TaskStatus.IN_PROGRESS,
+        priority=TaskPriority.MEDIUM,
+        category=TaskCategory.ISSUE,
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+    assert task.id is not None
+    ts = TaskState(task_id=task.id, note_count=0, decision_count=0, stale_days=0,
+                   last_touched_at=task.created_at)
+    db_session.add(ts)
+    db_session.flush()
+
+    state_json = json.dumps({
+        "intent": "finish feature X",
+        "working_set": [task.id],
+        "state_delta": "wrote tests",
+        "open_loops": [],
+        "next_actions": ["implement"],
+        "closure_status": "clean",
+    })
+    prior = WizardSession(session_state=state_json)
+    db_session.add(prior)
+    db_session.flush()
+    db_session.refresh(prior)
+    assert prior.id is not None
+
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_all = MagicMock(return_value=[])
+    with patch.multiple("wizard.tools", **patches):
+        result = resume_session(session_id=prior.id)
+
+    assert result.session_state is not None
+    assert result.session_state.intent == "finish feature X"
+    assert len(result.working_set_tasks) == 1
+    assert result.working_set_tasks[0].id == task.id
+
+
+def test_resume_session_no_sessions_raises_tool_error(db_session):
+    from fastmcp.exceptions import ToolError
+    from wizard.tools import resume_session
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        with pytest.raises(ToolError, match="No sessions with notes found"):
+            resume_session()
+
+
+def test_resume_session_explicit_not_found_raises_tool_error(db_session):
+    from fastmcp.exceptions import ToolError
+    from wizard.tools import resume_session
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        with pytest.raises(ToolError, match="Session 9999 not found"):
+            resume_session(session_id=9999)
