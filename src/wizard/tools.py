@@ -109,7 +109,12 @@ def task_start(task_id: int) -> TaskStartResponse:
         raise ToolError(str(e)) from e
 
 
-def save_note(task_id: int, note_type: NoteType, content: str) -> SaveNoteResponse:
+def save_note(
+    task_id: int,
+    note_type: NoteType,
+    content: str,
+    mental_model: str | None = None,
+) -> SaveNoteResponse:
     """Scrubs and persists a note. note_type: investigation|decision|docs|learnings|session_summary."""
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
@@ -120,13 +125,15 @@ def save_note(task_id: int, note_type: NoteType, content: str) -> SaveNoteRespon
             note = Note(
                 note_type=note_type,
                 content=clean,
+                mental_model=mental_model,
                 task_id=task.id,
                 source_id=task.source_id,
                 source_type=task.source_type,
             )
             saved = note_repo().save(db, note)
             assert saved.id is not None
-            return SaveNoteResponse(note_id=saved.id)
+            task_state_repo().on_note_saved(db, task_id)
+            return SaveNoteResponse(note_id=saved.id, mental_model=saved.mental_model)
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
