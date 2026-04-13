@@ -214,6 +214,16 @@ class WriteBackService:
             "WriteBack push_task_status (Notion)",
         )
 
+    def append_task_outcome(self, task: Task, summary: str) -> WriteBackStatus:
+        """Append a plain-text outcome paragraph to the task's Notion page."""
+        if not task.notion_id:
+            return WriteBackStatus(ok=False, error="Task has no notion_id")
+        notion_id = task.notion_id
+        return self._call(
+            lambda: self._notion.append_paragraph_to_page(notion_id, summary),
+            "WriteBack append_task_outcome",
+        )
+
     def push_task_to_notion(self, task: Task) -> WriteBackStatus:
         """Create or update task in Notion. Returns page_id in WriteBackStatus on success."""
         if task.notion_id:
