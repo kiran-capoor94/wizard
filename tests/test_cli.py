@@ -175,16 +175,22 @@ def test_doctor_reports_missing_wizard_home(tmp_path):
 
 def test_setup_registers_mcp_in_claude_configs(tmp_path):
     wizard_dir = tmp_path / ".wizard"
-    code_cfg = tmp_path / "claude.json"
-    desktop_cfg = tmp_path / "desktop_config.json"
+    code_cfg = tmp_path / "claude_code_config.json"
     code_cfg.write_text(json.dumps({}))
-    desktop_cfg.write_text(json.dumps({}))
+
+    from wizard.agent_registration import AgentConfig
+
+    patched_agents = {
+        "claude-code": AgentConfig(
+            agent_id="claude-code",
+            config_path=code_cfg,
+            format="json",
+            mcp_key="mcpServers",
+        )
+    }
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
-        ):
+        with patch("wizard.mcp_config.agent_registration._AGENTS", patched_agents):
             result = runner.invoke(ctx.app, ["setup"])
 
     assert result.exit_code == 0
@@ -220,34 +226,36 @@ def test_uninstall_removes_wizard_dir_and_mcp(tmp_path):
     skills = wizard_dir / "skills" / "test-skill"
     skills.mkdir(parents=True)
 
-    code_cfg = tmp_path / "claude.json"
-    desktop_cfg = tmp_path / "desktop_config.json"
+    code_cfg = tmp_path / "claude_code_config.json"
     code_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
-    desktop_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
+
+    from wizard.agent_registration import AgentConfig
+
+    patched_agents = {
+        "claude-code": AgentConfig(
+            agent_id="claude-code",
+            config_path=code_cfg,
+            format="json",
+            mcp_key="mcpServers",
+        )
+    }
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
-        ):
+        with patch("wizard.mcp_config.agent_registration._AGENTS", patched_agents):
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
     assert not wizard_dir.exists()
     assert "wizard" not in json.loads(code_cfg.read_text()).get("mcpServers", {})
-    assert "wizard" not in json.loads(desktop_cfg.read_text()).get("mcpServers", {})
 
 
 def test_uninstall_nothing_to_do(tmp_path):
     wizard_dir = tmp_path / ".wizard"  # does not exist
-    code_cfg = tmp_path / "claude.json"  # does not exist
-    desktop_cfg = tmp_path / "desktop_config.json"  # does not exist
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", desktop_cfg),
-        ):
+        with patch("wizard.mcp_config.agent_registration") as mock_ar:
+            mock_ar.scan_all_registered.return_value = []
+            mock_ar._AGENTS = {}
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
@@ -314,10 +322,9 @@ def test_uninstall_is_idempotent(tmp_path):
     (wizard_dir / "config.json").write_text("{}")
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
-        ):
+        with patch("wizard.mcp_config.agent_registration") as mock_ar:
+            mock_ar.scan_all_registered.return_value = []
+            mock_ar._AGENTS = {}
             runner.invoke(ctx.app, ["uninstall", "--yes"])
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
