@@ -11,6 +11,7 @@ from .models import (
     TaskPriority,
     TaskState,
     TaskStatus,
+    WizardSession,
 )
 from .schemas import MeetingContext, TaskContext
 
@@ -47,22 +48,11 @@ def _latest_note_subquery():
 
 
 def _task_context_from_row(
-    task: Task, last_worked_at, latest_note: Note | None
+    task: Task,
+    task_state: TaskState | None,
+    latest_note: Note | None = None,
 ) -> TaskContext:
-    assert task.id is not None
-    return TaskContext(
-        id=task.id,
-        name=task.name,
-        status=task.status,
-        priority=task.priority,
-        category=task.category,
-        due_date=task.due_date,
-        source_id=task.source_id,
-        source_url=task.source_url,
-        last_note_type=latest_note.note_type if latest_note else None,
-        last_note_preview=latest_note.content[:300] if latest_note else None,
-        last_worked_at=last_worked_at,
-    )
+    return TaskContext.from_model(task, task_state, latest_note)
 
 
 # ---------------------------------------------------------------------------
@@ -98,22 +88,65 @@ class TaskRepository:
             .where(*where)
             .order_by(_PRIORITY_ORDER, func.coalesce(last_worked, 0).desc())
         )
-        rows = db.exec(stmt).all()
+        rows = db.execute(stmt).all()
+        if not rows:
+            return []
+
+        tasks: list[Task] = [row[0] for row in rows]
+        task_ids = [t.id for t in tasks if t.id is not None]
+
+        # Batch load TaskStates — one query replaces N db.get calls
+        task_states: dict[int, TaskState] = {}
+        if task_ids:
+            for ts in db.execute(
+                select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+            ).scalars().all():
+                task_states[ts.task_id] = ts
+
+        # Batch load latest note per task — one query replaces N _latest_note_for calls
+        jira_source_ids = [t.source_id for t in tasks if t.source_id is not None]
+        source_id_to_task_id: dict[str, int] = {
+            t.source_id: t.id
+            for t in tasks
+            if t.source_id is not None and t.id is not None
+        }
+        note_conditions: list = []
+        if task_ids:
+            note_conditions.append(col(Note.task_id).in_(task_ids))
+        if jira_source_ids:
+            note_conditions.append(
+                and_(col(Note.source_id).in_(jira_source_ids), Note.source_type == "JIRA")
+            )
+        latest_notes: dict[int, Note] = {}
+        if note_conditions:
+            for n in db.execute(
+                select(Note)
+                .where(or_(*note_conditions))
+                .order_by(col(Note.created_at).desc())
+            ).scalars().all():
+                if n.task_id is not None:
+                    if n.task_id not in latest_notes:
+                        latest_notes[n.task_id] = n
+                elif n.source_id is not None and n.source_type == "JIRA":
+                    tid = source_id_to_task_id.get(n.source_id)
+                    if tid is not None and tid not in latest_notes:
+                        latest_notes[tid] = n
 
         results: list[TaskContext] = []
-        for task, lw_at in rows:
-            latest = self._latest_note_for(db, task)
-            results.append(_task_context_from_row(task, lw_at, latest))
+        for task in tasks:
+            tid = task.id
+            results.append(_task_context_from_row(
+                task,
+                task_states.get(tid) if tid is not None else None,
+                latest_notes.get(tid) if tid is not None else None,
+            ))
         return results
 
     def build_task_context(self, db: Session, task: Task) -> TaskContext:
         """Build a single TaskContext for a known task."""
+        task_state = db.get(TaskState, task.id)
         latest = self._latest_note_for(db, task)
-        return _task_context_from_row(
-            task,
-            latest.created_at if latest else None,
-            latest,
-        )
+        return _task_context_from_row(task, task_state, latest)
 
     def _latest_note_for(self, db: Session, task: Task) -> Note | None:
         conditions = []
@@ -158,7 +191,9 @@ class MeetingRepository:
                     title=m.title,
                     category=m.category,
                     created_at=m.created_at,
-                    has_summary=False,
+                    already_summarised=False,
+                    source_url=m.source_url,
+                    source_type=m.source_type,
                 )
             )
         return results
@@ -292,3 +327,21 @@ class TaskStateRepository:
             task.id,
         )
         return self.create_for_task(db, task)
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+
+def find_latest_session_with_notes(db: Session) -> WizardSession | None:
+    """Most recent WizardSession that has at least one associated Note."""
+    subq = select(Note).where(Note.session_id == WizardSession.id).exists()
+    stmt = (
+        select(WizardSession)
+        .where(subq)
+        .order_by(col(WizardSession.created_at).desc())
+        .limit(1)
+    )
+    results = db.execute(stmt).scalars().all()
+    return results[0] if results else None
