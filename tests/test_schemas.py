@@ -160,3 +160,18 @@ def test_rewind_response_empty_timeline():
     )
     assert resp.timeline == []
     assert resp.summary.total_notes == 0
+
+
+def test_signal_severity_literal():
+    from wizard.schemas import Signal
+
+    s = Signal(type="stale", severity="high", message="No activity for 5 days")
+    assert s.severity == "high"
+    assert s.type == "stale"
+
+
+def test_missing_response_empty_signals():
+    from wizard.schemas import MissingResponse
+
+    resp = MissingResponse(signals=[])
+    assert resp.signals == []
