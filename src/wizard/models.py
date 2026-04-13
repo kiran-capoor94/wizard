@@ -2,6 +2,7 @@ import datetime
 from enum import Enum
 
 from pydantic import ConfigDict
+from sqlalchemy import Column, ForeignKey, Integer
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -112,6 +113,14 @@ class WizardSession(TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
     summary: str | None = None
     daily_page_id: str | None = None
+    session_state: str | None = Field(
+        default=None,
+        description=(
+            "JSON-serialised SessionState (see schemas.SessionState). "
+            "Null until session_end (M2) populates it. "
+            "Read by resume_session (M3)."
+        ),
+    )
     notes: list["Note"] = Relationship(back_populates="session")
 
 
@@ -119,6 +128,14 @@ class Note(TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
     note_type: NoteType = Field(index=True)
     content: str
+    mental_model: str | None = Field(
+        default=None,
+        description=(
+            "1-2 sentence causal abstraction written by the engineer; "
+            "soft cap 1500 chars at the application display layer; "
+            "stored as-is, not scrubbed"
+        ),
+    )
     source_id: str | None = Field(
         default=None,
         index=True,
@@ -143,3 +160,31 @@ class ToolCall(SQLModel, table=True):
     called_at: datetime.datetime = Field(
         default_factory=datetime.datetime.now, index=True
     )
+
+
+class TaskState(TimestampMixin, table=True):
+    """Derived signals per Task. One-to-one with Task. Updated synchronously
+    by TaskStateRepository on note save, status change, and task creation.
+    Never recomputed on read.
+
+    stale_days reflects cognitive activity (notes) only — status changes
+    deliberately do NOT reset it. last_status_change_at is tracked separately
+    for any query that needs to distinguish administrative from cognitive
+    activity.
+    """
+
+    __tablename__ = "task_state"  # pyright: ignore[reportAssignmentType, reportIncompatibleVariableOverride]
+
+    task_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("task.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+    )
+    note_count: int = Field(default=0, nullable=False)
+    decision_count: int = Field(default=0, nullable=False)
+    last_note_at: datetime.datetime | None = Field(default=None)
+    last_status_change_at: datetime.datetime | None = Field(default=None)
+    last_touched_at: datetime.datetime = Field(nullable=False)
+    stale_days: int = Field(default=0, nullable=False)
