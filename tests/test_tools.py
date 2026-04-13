@@ -971,3 +971,186 @@ async def test_session_end_clears_current_session_id_from_ctx_state(db_session):
         await session_end(ctx, session_id=session.id, summary="done")
 
     assert await ctx.get_state("current_session_id") is None
+
+
+# --- progress ---
+
+async def test_session_start_reports_progress(db_session):
+    patches, sync_mock, _ = _patch_tools(db_session)
+    sync_mock.sync_jira = MagicMock(return_value=None)
+    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
+    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
+
+    ctx = MockContext()
+    with patch.multiple("wizard.tools", **patches):
+        from wizard.tools import session_start
+        await session_start(ctx)
+
+    assert len(ctx.progress_calls) == 4
+    assert ctx.progress_calls[0] == (0, 3, "Syncing Jira...")
+    assert ctx.progress_calls[1] == (1, 3, "Syncing Notion tasks...")
+    assert ctx.progress_calls[2] == (2, 3, "Syncing Notion meetings...")
+    assert ctx.progress_calls[3] == (3, 3, "Sync complete.")
+
+
+# --- elicitation: save_note ---
+
+async def test_save_note_elicits_mental_model_for_investigation(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="I now understand the root cause is X")
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(
+            ctx, task_id=task.id, note_type=NoteType.INVESTIGATION, content="looked at logs"
+        )
+
+    note = db_session.get(Note, result.note_id)
+    assert note.mental_model == "I now understand the root cause is X"
+
+
+async def test_save_note_elicits_mental_model_for_decision(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="We chose approach B for simplicity")
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(
+            ctx, task_id=task.id, note_type=NoteType.DECISION, content="chose B"
+        )
+
+    note = db_session.get(Note, result.note_id)
+    assert note.mental_model == "We chose approach B for simplicity"
+
+
+async def test_save_note_does_not_elicit_for_docs_notes(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="should not be used")
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(ctx, task_id=task.id, note_type=NoteType.DOCS, content="docs")
+
+    note = db_session.get(Note, result.note_id)
+    # DOCS note: elicit should NOT have been called, mental_model stays None
+    assert note.mental_model is None
+
+
+async def test_save_note_mental_model_param_skips_elicitation(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType, Note
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="this should not win")
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(
+            ctx,
+            task_id=task.id,
+            note_type=NoteType.INVESTIGATION,
+            content="investigation",
+            mental_model="caller provided this",
+        )
+
+    note = db_session.get(Note, result.note_id)
+    assert note.mental_model == "caller provided this"
+
+
+async def test_save_note_handles_elicit_failure_gracefully(db_session):
+    from wizard.tools import save_note
+    from wizard.models import Task, TaskStatus, NoteType
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(supports_elicit=False)
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_note(
+            ctx, task_id=task.id, note_type=NoteType.INVESTIGATION, content="investigation"
+        )
+
+    assert result.note_id is not None  # tool succeeded despite elicit failure
+
+
+# --- elicitation: update_task_status ---
+
+async def test_update_task_status_elicits_outcome_when_done(db_session):
+    from wizard.tools import update_task_status
+    from wizard.models import Task, TaskStatus
+    from wizard.schemas import WriteBackStatus
+
+    task = Task(name="task", status=TaskStatus.IN_PROGRESS, notion_id="notion-page-123")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="Shipped the fix to production.")
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+    wb_mock.append_task_outcome.return_value = WriteBackStatus(ok=True)
+
+    with patch.multiple("wizard.tools", **patches):
+        await update_task_status(ctx, task_id=task.id, new_status=TaskStatus.DONE)
+
+    wb_mock.append_task_outcome.assert_called_once()
+    call_args = wb_mock.append_task_outcome.call_args
+    assert "Shipped the fix" in call_args[0][1]
+
+
+async def test_update_task_status_does_not_elicit_for_in_progress(db_session):
+    from wizard.tools import update_task_status
+    from wizard.models import Task, TaskStatus
+    from wizard.schemas import WriteBackStatus
+
+    task = Task(name="task", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    ctx = MockContext(elicit_response="should not be called")
+    patches, _, wb_mock = _patch_tools(db_session)
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+
+    with patch.multiple("wizard.tools", **patches):
+        await update_task_status(ctx, task_id=task.id, new_status=TaskStatus.IN_PROGRESS)
+
+    wb_mock.append_task_outcome.assert_not_called()

@@ -412,6 +412,29 @@ class NotionClient:
             logger.warning("Notion update_meeting_summary failed: %s", e)
             return False
 
+    def append_paragraph_to_page(self, page_id: str, text: str) -> bool:
+        """Append a paragraph block to an existing Notion page."""
+        client = self._require_client()
+        try:
+            client.blocks.children.append(
+                block_id=page_id,
+                children=[
+                    {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [
+                                {"type": "text", "text": {"content": text}}
+                            ]
+                        },
+                    }
+                ],
+            )
+            return True
+        except Exception as e:
+            logger.warning("Notion append_paragraph_to_page failed: %s", e)
+            return False
+
     def update_daily_page(self, page_id: str, summary: str) -> bool:
         """Update Session Summary property on a daily page."""
         client = self._require_client()

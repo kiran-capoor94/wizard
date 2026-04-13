@@ -71,17 +71,20 @@ async def session_start(ctx: Context) -> SessionStartResponse:
 
         svc = sync_service()
         sync_results: list[SourceSyncStatus] = []
-        for source, fn in [
-            ("jira", svc.sync_jira),
-            ("notion_tasks", svc.sync_notion_tasks),
-            ("notion_meetings", svc.sync_notion_meetings),
-        ]:
+        sync_steps = [
+            ("jira", svc.sync_jira, "Syncing Jira..."),
+            ("notion_tasks", svc.sync_notion_tasks, "Syncing Notion tasks..."),
+            ("notion_meetings", svc.sync_notion_meetings, "Syncing Notion meetings..."),
+        ]
+        for i, (source, fn, label) in enumerate(sync_steps):
+            await ctx.report_progress(i, 3, label)
             try:
                 fn(db)
                 sync_results.append(SourceSyncStatus(source=source, ok=True))
             except Exception as e:
                 logger.warning("Sync failed for %s: %s", source, e)
                 sync_results.append(SourceSyncStatus(source=source, ok=False, error=str(e)))
+        await ctx.report_progress(3, 3, "Sync complete.")
 
         await ctx.set_state("current_session_id", session.id)
         await ctx.info(f"Session {session.id} started.")
@@ -154,6 +157,18 @@ async def save_note(
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "save_note", session_id=session_id)
             task = task_repo().get_by_id(db, task_id)
+            if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
+                try:
+                    from fastmcp.server.elicitation import AcceptedElicitation
+                    result = await ctx.elicit(
+                        "Optional: summarise what you now understand in 1-2 sentences (mental model). "
+                        "Press Enter to skip.",
+                        response_type=str,
+                    )
+                    if isinstance(result, AcceptedElicitation) and result.data:
+                        mental_model = result.data
+                except Exception as e:
+                    logger.debug("ctx.elicit unavailable for mental_model: %s", e)
             clean = security().scrub(content).clean
             note = Note(
                 note_type=note_type,
@@ -192,6 +207,25 @@ async def update_task_status(
             assert task.id is not None
 
             task_state_repo().on_status_changed(db, task.id)
+
+            if new_status == TaskStatus.DONE:
+                try:
+                    from fastmcp.server.elicitation import AcceptedElicitation
+                    elicit_result = await ctx.elicit(
+                        "Task closed. What was the outcome? (1-2 sentences, or press Enter to skip)",
+                        response_type=str,
+                    )
+                    if isinstance(elicit_result, AcceptedElicitation) and elicit_result.data:
+                        scrubbed_outcome = security().scrub(elicit_result.data).clean
+                        if task.notion_id:
+                            writeback().append_task_outcome(task, scrubbed_outcome)
+                        else:
+                            logger.info(
+                                "Task %d done with outcome but no notion_id; skipping notion append",
+                                task.id,
+                            )
+                except Exception as e:
+                    logger.debug("ctx.elicit unavailable for task outcome: %s", e)
 
             jira_wb = writeback().push_task_status(task)
             notion_wb = writeback().push_task_status_to_notion(task)
