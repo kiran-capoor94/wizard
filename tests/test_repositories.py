@@ -131,24 +131,25 @@ def test_get_for_task_source_type_guard_includes_jira(db_session):
     assert results[0].source_type == "JIRA"
 
 
-def test_save_note_propagates_source_type_from_task(db_session):
+async def test_save_note_propagates_source_type_from_task(db_session):
     """save_note copies source_type from the task onto the note."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
     from wizard.tools import save_note
     from wizard.models import Task, Note, NoteType
-    from sqlmodel import select
-    from tests.helpers import mock_session
+    from tests.helpers import MockContext, mock_session
 
     task = Task(name="auth fix", source_id="PD-10", source_type="JIRA")
     db_session.add(task)
     db_session.flush()
     db_session.refresh(task)
 
+    ctx = MockContext()
     patches = {
         "get_session": mock_session(db_session),
     }
     with patch.multiple("wizard.tools", **patches):
-        result = save_note(
+        result = await save_note(
+            ctx,
             task_id=task.id,
             note_type=NoteType.INVESTIGATION,
             content="found the bug",
