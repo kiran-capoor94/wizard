@@ -461,3 +461,38 @@ def test_task_state_repo_singleton_is_cached():
     b = task_state_repo()
     assert a is b
     assert isinstance(a, TaskStateRepository)
+
+
+# ---------------------------------------------------------------------------
+# TaskContext construction via TaskState
+# ---------------------------------------------------------------------------
+
+def test_build_task_context_includes_task_state_fields(db_session):
+    from wizard.models import Task, TaskState, TaskPriority, TaskCategory, TaskStatus
+    from wizard.repositories import TaskRepository
+    repo = TaskRepository()
+
+    task = Task(
+        name="T",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.HIGH,
+        category=TaskCategory.ISSUE,
+    )
+    db_session.add(task)
+    db_session.flush()
+    assert task.id is not None
+
+    import datetime as _dt
+    ts = TaskState(
+        task_id=task.id,
+        stale_days=4,
+        note_count=2,
+        decision_count=0,
+        last_touched_at=_dt.datetime.now(),
+    )
+    db_session.add(ts)
+    db_session.flush()
+
+    ctx = repo.build_task_context(db_session, task)
+    assert ctx.stale_days == 4
+    assert ctx.note_count == 2
