@@ -1,7 +1,7 @@
 import datetime as _dt
 import logging
 
-from sqlmodel import Session, and_, case, col, exists, func, select, or_
+from sqlmodel import Session, and_, case, col, func, select, or_
 
 from .models import (
     Meeting,
@@ -295,7 +295,7 @@ def find_latest_session_with_notes(db: Session) -> WizardSession | None:
     stmt = (
         select(WizardSession)
         .where(subq)
-        .order_by(WizardSession.created_at.desc())
+        .order_by(col(WizardSession.created_at).desc())
         .limit(1)
     )
     results = db.execute(stmt).scalars().all()
