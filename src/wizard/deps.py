@@ -9,7 +9,7 @@ from functools import lru_cache
 
 from .config import settings
 from .integrations import JiraClient, NotionClient
-from .repositories import MeetingRepository, NoteRepository, TaskRepository
+from .repositories import MeetingRepository, NoteRepository, TaskRepository, TaskStateRepository
 from .security import SecurityService
 from .services import SyncService, WriteBackService
 
@@ -75,3 +75,9 @@ def meeting_repo() -> MeetingRepository:
 def note_repo() -> NoteRepository:
     logger.debug("Creating NoteRepository singleton")
     return NoteRepository()
+
+
+@lru_cache
+def task_state_repo() -> TaskStateRepository:
+    logger.debug("Creating TaskStateRepository singleton")
+    return TaskStateRepository()
