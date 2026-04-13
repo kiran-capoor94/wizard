@@ -281,6 +281,7 @@ class SaveMeetingSummaryResponse(BaseModel):
 class SessionEndResponse(BaseModel):
     note_id: int
     notion_write_back: WriteBackStatus
+    session_state_saved: bool = False
 
 
 class IngestMeetingResponse(BaseModel):
