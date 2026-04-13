@@ -28,6 +28,7 @@ from .schemas import (
     SaveNoteResponse,
     SessionEndResponse,
     SessionStartResponse,
+    SessionState,
     TaskStartResponse,
     UpdateTaskStatusResponse,
 )
@@ -254,7 +255,11 @@ def save_meeting_summary(
         raise ToolError(str(e)) from e
 
 
-def session_end(session_id: int, summary: str) -> SessionEndResponse:
+def session_end(
+    session_id: int,
+    summary: str,
+    session_state: SessionState | None = None,
+) -> SessionEndResponse:
     """Persists session summary note and attempts Notion daily page write-back."""
     logger.info("session_end session_id=%d", session_id)
     with get_session() as db:
@@ -280,9 +285,20 @@ def session_end(session_id: int, summary: str) -> SessionEndResponse:
 
         wb_result = writeback().push_session_summary(session)
 
+        session_state_saved = False
+        if session_state is not None:
+            try:
+                session.session_state = session_state.model_dump_json()
+                db.add(session)
+                db.commit()
+                session_state_saved = True
+            except Exception as e:
+                logger.warning("Failed to persist session_state: %s", e)
+
         return SessionEndResponse(
             note_id=saved.id,
             notion_write_back=wb_result,
+            session_state_saved=session_state_saved,
         )
 
 
