@@ -134,7 +134,10 @@ def save_note(
             saved = note_repo().save(db, note)
             assert saved.id is not None
             task_state_repo().on_note_saved(db, task_id)
-            return SaveNoteResponse(note_id=saved.id, mental_model=saved.mental_model)
+            return SaveNoteResponse(
+                note_id=saved.id,
+                mental_model_saved=saved.mental_model is not None,
+            )
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
