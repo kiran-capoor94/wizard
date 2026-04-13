@@ -274,3 +274,64 @@ class TestWizardSessionState:
         assert session.session_state is not None
         loaded = SessionState.model_validate_json(session.session_state)
         assert loaded == state
+
+
+# --- Task 4: TaskState model ---
+
+import datetime as _dt
+
+
+class TestTaskStateModel:
+    def test_task_state_defaults(self, db_session):
+        from wizard.models import Task, TaskState
+
+        task = Task(name="t")
+        db_session.add(task)
+        db_session.flush()
+        assert task.id is not None
+
+        state = TaskState(
+            task_id=task.id,
+            last_touched_at=task.created_at,
+        )
+        db_session.add(state)
+        db_session.flush()
+        db_session.refresh(state)
+
+        assert state.task_id == task.id
+        assert state.note_count == 0
+        assert state.decision_count == 0
+        assert state.last_note_at is None
+        assert state.last_status_change_at is None
+        assert state.last_touched_at == task.created_at
+        assert state.stale_days == 0
+
+    def test_task_state_table_name_is_snake_case(self):
+        from wizard.models import TaskState
+
+        assert TaskState.__tablename__ == "task_state"
+
+    def test_task_state_can_store_all_fields(self, db_session):
+        from wizard.models import Task, TaskState
+
+        task = Task(name="t")
+        db_session.add(task)
+        db_session.flush()
+
+        now = _dt.datetime.now()
+        state = TaskState(
+            task_id=task.id,
+            note_count=4,
+            decision_count=1,
+            last_note_at=now,
+            last_status_change_at=now,
+            last_touched_at=now,
+            stale_days=2,
+        )
+        db_session.add(state)
+        db_session.flush()
+        db_session.refresh(state)
+        assert state.note_count == 4
+        assert state.decision_count == 1
+        assert state.last_note_at == now
+        assert state.stale_days == 2
