@@ -99,11 +99,17 @@ def task_start(task_id: int) -> TaskStartResponse:
 
             prior_notes = [NoteDetail.from_model(n) for n in notes]
 
+            latest_mental_model = next(
+                (n.mental_model for n in notes if n.mental_model is not None),
+                None,
+            )
+
             return TaskStartResponse(
                 task=task_ctx,
                 compounding=len(notes) > 0,
                 notes_by_type=notes_by_type,
                 prior_notes=prior_notes,
+                latest_mental_model=latest_mental_model,
             )
     except ValueError as e:
         logger.warning("task_start failed: %s", e)

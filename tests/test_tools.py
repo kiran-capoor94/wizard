@@ -174,6 +174,70 @@ def test_task_start_raises_when_task_not_found(db_session):
             task_start(task_id=999)
 
 
+def test_task_start_latest_mental_model_returns_newest_note_model(db_session):
+    import datetime
+    from wizard.tools import task_start
+    from wizard.models import Task, Note, NoteType
+
+    task = Task(name="state machine refactor")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    # older note — has a mental_model but should NOT be returned
+    older_note = Note(
+        note_type=NoteType.INVESTIGATION,
+        content="earlier investigation",
+        task_id=task.id,
+        mental_model="Observer pattern",
+        created_at=datetime.datetime(2024, 1, 1, 10, 0, 0),
+    )
+    # newer note — has a mental_model and SHOULD be returned
+    newer_note = Note(
+        note_type=NoteType.DECISION,
+        content="decision made",
+        task_id=task.id,
+        mental_model="State machine",
+        created_at=datetime.datetime(2024, 1, 2, 10, 0, 0),
+    )
+    db_session.add(older_note)
+    db_session.add(newer_note)
+    db_session.commit()
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = task_start(task_id=task.id)
+
+    assert result.latest_mental_model == "State machine"
+
+
+def test_task_start_latest_mental_model_none_when_no_notes_have_model(db_session):
+    from wizard.tools import task_start
+    from wizard.models import Task, Note, NoteType
+
+    task = Task(name="simple fix")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    note = Note(
+        note_type=NoteType.INVESTIGATION,
+        content="investigation without model",
+        task_id=task.id,
+        mental_model=None,
+    )
+    db_session.add(note)
+    db_session.commit()
+
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = task_start(task_id=task.id)
+
+    assert result.latest_mental_model is None
+
+
 # ---------------------------------------------------------------------------
 # save_note
 # ---------------------------------------------------------------------------
