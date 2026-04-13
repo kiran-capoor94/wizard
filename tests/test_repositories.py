@@ -404,3 +404,50 @@ class TestTaskStateRepository:
 
         state = repo.on_note_saved(db_session, task.id)
         assert state.note_count == 1
+
+    def test_on_status_changed_sets_timestamp_and_preserves_other_fields(self, db_session):
+        import datetime as _dt
+        from wizard.models import Note, NoteType, Task, TaskState
+        from wizard.repositories import TaskStateRepository
+        task = Task(name="t")
+        db_session.add(task)
+        db_session.flush()
+        assert task.id is not None
+        repo = TaskStateRepository()
+        repo.create_for_task(db_session, task)
+
+        db_session.add(Note(note_type=NoteType.INVESTIGATION, content="i", task_id=task.id))
+        db_session.add(Note(note_type=NoteType.DECISION, content="d", task_id=task.id))
+        db_session.flush()
+        repo.on_note_saved(db_session, task.id)
+
+        before = db_session.get(TaskState, task.id)
+        assert before is not None
+        old_note_count = before.note_count
+        old_decision_count = before.decision_count
+        old_last_note_at = before.last_note_at
+        old_last_touched_at = before.last_touched_at
+        old_stale_days = before.stale_days
+
+        result = repo.on_status_changed(db_session, task.id)
+
+        assert result.last_status_change_at is not None
+        assert (_dt.datetime.now() - result.last_status_change_at).total_seconds() < 5
+        assert result.note_count == old_note_count
+        assert result.decision_count == old_decision_count
+        assert result.last_note_at == old_last_note_at
+        assert result.last_touched_at == old_last_touched_at
+        assert result.stale_days == old_stale_days
+
+    def test_on_status_changed_creates_state_if_missing(self, db_session):
+        from wizard.models import Task
+        from wizard.repositories import TaskStateRepository
+        task = Task(name="t")
+        db_session.add(task)
+        db_session.flush()
+        assert task.id is not None
+
+        repo = TaskStateRepository()
+        result = repo.on_status_changed(db_session, task.id)
+        assert result.task_id == task.id
+        assert result.last_status_change_at is not None
