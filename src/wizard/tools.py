@@ -69,7 +69,22 @@ async def session_start(ctx: Context) -> SessionStartResponse:
         assert session.id is not None
         await _log_tool_call(db, "session_start", session_id=session.id)
 
-        sync_results = sync_service().sync_all(db)
+        svc = sync_service()
+        sync_results: list[SourceSyncStatus] = []
+        for source, fn in [
+            ("jira", svc.sync_jira),
+            ("notion_tasks", svc.sync_notion_tasks),
+            ("notion_meetings", svc.sync_notion_meetings),
+        ]:
+            try:
+                fn(db)
+                sync_results.append(SourceSyncStatus(source=source, ok=True))
+            except Exception as e:
+                logger.warning("Sync failed for %s: %s", source, e)
+                sync_results.append(SourceSyncStatus(source=source, ok=False, error=str(e)))
+
+        await ctx.set_state("current_session_id", session.id)
+        await ctx.info(f"Session {session.id} started.")
 
         daily_page = None
         try:
@@ -99,7 +114,8 @@ async def task_start(ctx: Context, task_id: int) -> TaskStartResponse:
     logger.info("task_start task_id=%d", task_id)
     try:
         with get_session() as db:
-            await _log_tool_call(db, "task_start")
+            session_id: int | None = await ctx.get_state("current_session_id")
+            await _log_tool_call(db, "task_start", session_id=session_id)
             task = task_repo().get_by_id(db, task_id)
             task_ctx = task_repo().build_task_context(db, task)
 
@@ -135,7 +151,8 @@ async def save_note(
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
         with get_session() as db:
-            await _log_tool_call(db, "save_note")
+            session_id: int | None = await ctx.get_state("current_session_id")
+            await _log_tool_call(db, "save_note", session_id=session_id)
             task = task_repo().get_by_id(db, task_id)
             clean = security().scrub(content).clean
             note = Note(
@@ -145,6 +162,7 @@ async def save_note(
                 task_id=task.id,
                 source_id=task.source_id,
                 source_type=task.source_type,
+                session_id=session_id,
             )
             saved = note_repo().save(db, note)
             assert saved.id is not None
@@ -164,7 +182,8 @@ async def update_task_status(
     )
     try:
         with get_session() as db:
-            await _log_tool_call(db, "update_task_status")
+            session_id: int | None = await ctx.get_state("current_session_id")
+            await _log_tool_call(db, "update_task_status", session_id=session_id)
             task = task_repo().get_by_id(db, task_id)
             task.status = new_status
             db.add(task)
@@ -198,7 +217,8 @@ async def get_meeting(ctx: Context, meeting_id: int) -> GetMeetingResponse:
     logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
         with get_session() as db:
-            await _log_tool_call(db, "get_meeting")
+            session_id: int | None = await ctx.get_state("current_session_id")
+            await _log_tool_call(db, "get_meeting", session_id=session_id)
             meeting = meeting_repo().get_by_id(db, meeting_id)
             assert meeting.id is not None
 
@@ -305,6 +325,7 @@ async def session_end(ctx: Context, session_id: int, summary: str) -> SessionEnd
 
         wb_result = writeback().push_session_summary(session)
 
+        await ctx.delete_state("current_session_id")
         return SessionEndResponse(
             note_id=saved.id,
             notion_write_back=wb_result,
