@@ -285,4 +285,10 @@ class TaskStateRepository:
         state = db.get(TaskState, task.id)
         if state is not None:
             return state
+        logger.warning(
+            "TaskState missing for task %d; creating defensively. "
+            "This indicates the task pre-dates the data layer migration "
+            "or was inserted outside the create_task tool.",
+            task.id,
+        )
         return self.create_for_task(db, task)
