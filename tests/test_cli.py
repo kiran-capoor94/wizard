@@ -48,7 +48,7 @@ def test_setup_creates_default_config(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
+            runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
 
     config = json.loads((wizard_dir / "config.json").read_text())
     assert "jira" in config
@@ -349,8 +349,6 @@ def test_uninstall_is_idempotent(tmp_path):
 
 
 def test_setup_agent_flag_registers_gemini(tmp_path):
-    from unittest.mock import MagicMock
-
     wizard_dir = tmp_path / ".wizard"
 
     with _fresh_app(wizard_dir) as ctx:
