@@ -270,7 +270,7 @@ def test_unsummarised_contexts(db_session):
     contexts = repo.get_unsummarised_contexts(db_session)
     assert len(contexts) == 1
     assert contexts[0].title == "standup"
-    assert contexts[0].has_summary is False
+    assert contexts[0].already_summarised is False
 
 
 # ---------------------------------------------------------------------------
@@ -461,3 +461,86 @@ def test_task_state_repo_singleton_is_cached():
     b = task_state_repo()
     assert a is b
     assert isinstance(a, TaskStateRepository)
+
+
+# ---------------------------------------------------------------------------
+# TaskContext construction via TaskState
+# ---------------------------------------------------------------------------
+
+def test_build_task_context_includes_task_state_fields(db_session):
+    from wizard.models import Task, TaskState, TaskPriority, TaskCategory, TaskStatus
+    from wizard.repositories import TaskRepository
+    repo = TaskRepository()
+
+    task = Task(
+        name="T",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.HIGH,
+        category=TaskCategory.ISSUE,
+    )
+    db_session.add(task)
+    db_session.flush()
+    assert task.id is not None
+
+    import datetime as _dt
+    ts = TaskState(
+        task_id=task.id,
+        stale_days=4,
+        note_count=2,
+        decision_count=0,
+        last_touched_at=_dt.datetime.now(),
+    )
+    db_session.add(ts)
+    db_session.flush()
+
+    ctx = repo.build_task_context(db_session, task)
+    assert ctx.stale_days == 4
+    assert ctx.note_count == 2
+
+
+# ---------------------------------------------------------------------------
+# find_latest_session_with_notes
+# ---------------------------------------------------------------------------
+
+
+def test_find_latest_session_with_notes_returns_none_when_no_sessions(db_session):
+    from wizard.repositories import find_latest_session_with_notes
+    result = find_latest_session_with_notes(db_session)
+    assert result is None
+
+
+def test_find_latest_session_with_notes_returns_none_when_sessions_have_no_notes(db_session):
+    from wizard.models import WizardSession
+    from wizard.repositories import find_latest_session_with_notes
+
+    s = WizardSession()
+    db_session.add(s)
+    db_session.flush()
+    result = find_latest_session_with_notes(db_session)
+    assert result is None
+
+
+def test_find_latest_session_with_notes_returns_most_recent_session_with_notes(db_session):
+    from wizard.models import WizardSession, Task, Note, NoteType, TaskPriority, TaskCategory, TaskStatus
+    from wizard.repositories import find_latest_session_with_notes
+    import datetime
+
+    s1 = WizardSession(created_at=datetime.datetime(2026, 4, 1))
+    s2 = WizardSession(created_at=datetime.datetime(2026, 4, 5))
+    s3 = WizardSession(created_at=datetime.datetime(2026, 4, 10))  # most recent but no notes
+    db_session.add_all([s1, s2, s3])
+    db_session.flush()
+
+    task = Task(name="T", status=TaskStatus.TODO, priority=TaskPriority.HIGH,
+                category=TaskCategory.ISSUE)
+    db_session.add(task)
+    db_session.flush()
+
+    n1 = Note(task_id=task.id, session_id=s1.id, note_type=NoteType.INVESTIGATION, content="a")
+    n2 = Note(task_id=task.id, session_id=s2.id, note_type=NoteType.INVESTIGATION, content="b")
+    db_session.add_all([n1, n2])
+    db_session.flush()
+
+    result = find_latest_session_with_notes(db_session)
+    assert result is not None
+    assert result.id == s2.id  # s2 is most recent with notes; s3 has no notes
