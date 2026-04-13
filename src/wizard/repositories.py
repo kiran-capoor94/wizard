@@ -1,3 +1,4 @@
+import datetime as _dt
 import logging
 
 from sqlmodel import Session, and_, case, col, func, select, or_
@@ -7,6 +8,7 @@ from .models import (
     Note,
     Task,
     TaskPriority,
+    TaskState,
     TaskStatus,
 )
 from .schemas import MeetingContext, TaskContext
@@ -192,3 +194,36 @@ class NoteRepository:
             select(Note).where(or_(*conditions)).order_by(col(Note.created_at).desc())
         )
         return list(db.exec(stmt).all())
+
+
+# ---------------------------------------------------------------------------
+# TaskStateRepository
+# ---------------------------------------------------------------------------
+
+
+class TaskStateRepository:
+    """Pre-computes derived signals per Task. Updated synchronously by
+    create_task / save_note / update_task_status tools — never lazily on read.
+
+    stale_days is computed at write time and stored. Status changes do NOT
+    reset stale_days; only cognitive activity (note saves) advances it.
+    """
+
+    def create_for_task(self, db: Session, task: Task) -> TaskState:
+        """Insert a fresh TaskState row for a newly created Task.
+        All counts zero; stale_days computed from task.created_at."""
+        assert task.id is not None, "Task must be flushed before creating TaskState"
+        now = _dt.datetime.now()
+        state = TaskState(
+            task_id=task.id,
+            note_count=0,
+            decision_count=0,
+            last_note_at=None,
+            last_status_change_at=None,
+            last_touched_at=task.created_at,
+            stale_days=(now - task.created_at).days,
+        )
+        db.add(state)
+        db.flush()
+        db.refresh(state)
+        return state
