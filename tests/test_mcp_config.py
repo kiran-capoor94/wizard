@@ -77,8 +77,8 @@ def test_find_wizard_mcp_targets_returns_empty_when_none_registered():
     assert result == []
 
 
-def test_register_is_idempotent_via_delegation():
-    """Idempotency is guaranteed by agent_registration.register — verify it is called."""
+def test_register_wizard_mcp_calls_through_each_invocation():
+    """Each call to register_wizard_mcp delegates to agent_registration.register."""
     with patch("wizard.mcp_config.agent_registration") as mock_ar:
         register_wizard_mcp()
         register_wizard_mcp()
