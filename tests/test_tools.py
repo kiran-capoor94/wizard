@@ -1282,6 +1282,7 @@ async def test_session_end_emits_confirmation_via_ctx_info(db_session):
 
 
 async def test_session_end_rejects_invalid_closure_status(db_session):
+    from fastmcp.exceptions import ToolError
     from wizard.tools import session_end
     from wizard.models import WizardSession
 
@@ -1296,7 +1297,7 @@ async def test_session_end_rejects_invalid_closure_status(db_session):
     wb_mock.push_session_summary = MagicMock()
 
     with patch.multiple("wizard.tools", **patches):
-        with pytest.raises(Exception):
+        with pytest.raises(ToolError):
             await session_end(
                 ctx,
                 session_id=session.id,
