@@ -60,7 +60,7 @@ class _MockContextImpl:
     async def delete_state(self, key: str) -> None:
         self._state.pop(key, None)
 
-    async def elicit(self, _message: str, _response_type=None):
+    async def elicit(self, _message: str, response_type=None, **kwargs):
         from fastmcp.server.elicitation import AcceptedElicitation
         from mcp.server.elicitation import DeclinedElicitation
 
