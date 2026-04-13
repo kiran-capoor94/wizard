@@ -155,12 +155,19 @@ def _extract_krisp_id(url: str | None) -> str | None:
 
 class NotionClient:
     def __init__(
-        self, token: str, sisu_work_page_id: str, tasks_db_id: str, meetings_db_id: str
+        self,
+        token: str,
+        sisu_work_page_id: str,
+        tasks_db_id: str,
+        meetings_db_id: str,
+        schema=None,
     ):
+        from .config import NotionSchemaSettings
         self._sisu_work_page_id = sisu_work_page_id
         self._tasks_db_id = tasks_db_id
         self._meetings_db_id = meetings_db_id
         self._client = NotionSdkClient(auth=token) if token else None
+        self._schema = schema if schema is not None else NotionSchemaSettings()
 
     def _require_client(self) -> NotionSdkClient:
         if self._client is None:
@@ -270,15 +277,15 @@ class NotionClient:
                 page_id = page.get("id")
                 props = page.get("properties", {})
 
-                jira_url = NotionUrl.model_validate(props.get("Jira", {})).url
+                jira_url = NotionUrl.model_validate(props.get(self._schema.task_jira_key, {})).url
                 task = NotionTaskData(
                     notion_id=page_id,
-                    name=NotionTitle.model_validate(props.get("Task", {})).text,
-                    status=NotionStatus.model_validate(props.get("Status", {})).name,
+                    name=NotionTitle.model_validate(props.get(self._schema.task_name, {})).text,
+                    status=NotionStatus.model_validate(props.get(self._schema.task_status, {})).name,
                     priority=NotionSelect.model_validate(
-                        props.get("Priority", {})
+                        props.get(self._schema.task_priority, {})
                     ).name,
-                    due_date=NotionDate.model_validate(props.get("Due date", {})).start,
+                    due_date=NotionDate.model_validate(props.get(self._schema.task_due_date, {})).start,
                     jira_url=jira_url,
                     jira_key=_extract_jira_key(jira_url),
                 )
@@ -304,16 +311,16 @@ class NotionClient:
                 meeting = NotionMeetingData(
                     notion_id=page_id,
                     title=NotionTitle.model_validate(
-                        props.get("Meeting name", {})
+                        props.get(self._schema.meeting_title, {})
                     ).text,
                     categories=NotionMultiSelect.model_validate(
                         props.get("Category", {})
                     ).names,
                     summary=NotionRichText.model_validate(
-                        props.get("Summary", {})
+                        props.get(self._schema.meeting_summary, {})
                     ).text,
-                    krisp_url=NotionUrl.model_validate(props.get("Krisp URL", {})).url,
-                    date=NotionDate.model_validate(props.get("Date", {})).start,
+                    krisp_url=NotionUrl.model_validate(props.get(self._schema.meeting_url, {})).url,
+                    date=NotionDate.model_validate(props.get(self._schema.meeting_date, {})).start,
                 )
                 meetings.append(meeting)
             return meetings
