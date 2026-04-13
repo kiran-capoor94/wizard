@@ -145,7 +145,9 @@ class MeetingRepository:
                     title=m.title,
                     category=m.category,
                     created_at=m.created_at,
-                    has_summary=False,
+                    already_summarised=False,
+                    source_url=m.source_url,
+                    source_type=m.source_type,
                 )
             )
         return results

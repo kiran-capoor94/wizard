@@ -270,7 +270,7 @@ def test_unsummarised_contexts(db_session):
     contexts = repo.get_unsummarised_contexts(db_session)
     assert len(contexts) == 1
     assert contexts[0].title == "standup"
-    assert contexts[0].has_summary is False
+    assert contexts[0].already_summarised is False
 
 
 # ---------------------------------------------------------------------------
