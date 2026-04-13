@@ -8,6 +8,7 @@ from notion_client import Client as NotionSdkClient
 from notion_client.errors import APIResponseError
 from notion_client.helpers import collect_paginated_api
 
+from .config import NotionSchemaSettings
 from .schemas import (
     DailyPageResult,
     JiraTaskData,
@@ -160,9 +161,8 @@ class NotionClient:
         sisu_work_page_id: str,
         tasks_db_id: str,
         meetings_db_id: str,
-        schema=None,
+        schema: NotionSchemaSettings | None = None,
     ):
-        from .config import NotionSchemaSettings
         self._sisu_work_page_id = sisu_work_page_id
         self._tasks_db_id = tasks_db_id
         self._meetings_db_id = meetings_db_id
