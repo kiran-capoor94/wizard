@@ -145,6 +145,7 @@ Three tools gain one call each. No signature changes except `save_note` adds an 
 **`save_note`** — Add `mental_model: str | None = None` as the last parameter (preserves positional compatibility with the existing `task_id, note_type, content` callers). After persisting the note (and storing `mental_model` if provided), call `task_state_repo().on_note_saved(db, task_id)`.
 
 **`update_task_status`** — Sequence inside the existing `with get_session() as db:` block:
+
 1. Load task.
 2. Update `task.status`.
 3. `db.flush()`.
@@ -247,18 +248,19 @@ Add `task_state_repo()` as an `lru_cache` singleton matching the existing reposi
 
 ## Reviewer decisions (2026-04-13)
 
-| # | Decision |
-|---|---|
-| 1 | `last_status_change_at` left null on backfill — no historical reconstruction. |
-| 2 | `mental_model` soft cap **1500 chars** at the application display layer; no DB constraint. |
-| 3 | `session_state` stored as TEXT, parsed via Pydantic at the application layer. |
-| 4 | `task_state.task_id` uses `ON DELETE CASCADE`. **Policy going forward:** all new FK columns must declare `ON DELETE CASCADE` unless an explicit reason to do otherwise is documented in the spec that introduces them. |
+| #   | Decision                                                                                                                                                                                                               |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `last_status_change_at` left null on backfill — no historical reconstruction.                                                                                                                                          |
+| 2   | `mental_model` soft cap **1500 chars** at the application display layer; no DB constraint.                                                                                                                             |
+| 3   | `session_state` stored as TEXT, parsed via Pydantic at the application layer.                                                                                                                                          |
+| 4   | `task_state.task_id` uses `ON DELETE CASCADE`. **Policy going forward:** all new FK columns must declare `ON DELETE CASCADE` unless an explicit reason to do otherwise is documented in the spec that introduces them. |
 
 ### Cascade policy — implications
 
 The new policy ("all on deletes should cascade unless set explicitly") applies to **new** FKs added from this release onward. Existing FKs (`Note.session_id`, `Note.task_id`, `Note.meeting_id`, `ToolCall.session_id`, `MeetingTasks.*`) currently have no `ON DELETE` action — they are bare FKs.
 
 **Decision for sub-project A:** do **not** retrofit cascade onto existing FKs in this release. Reasons:
+
 - SQLite cannot `ALTER` an FK constraint — retrofitting requires the table-rebuild dance (rename old, create new, copy data, drop old, rename new) for each affected table. Substantial separate migration with its own blast radius.
 - No code path in the current codebase deletes rows from `task`, `meeting`, or `wizardsession`, so existing bare FKs are not actively wrong today — only inconsistent with the new policy.
 - Mixing the policy retrofit into A would inflate the diff and dilute the data-layer intent.
