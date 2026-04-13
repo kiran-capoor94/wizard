@@ -221,3 +221,39 @@ def test_scan_all_registered_ignores_malformed(tmp_path):
         from wizard.agent_registration import scan_all_registered
         found = scan_all_registered()  # must not raise
     assert "claude-code" not in found
+
+
+def test_deregister_raises_on_malformed_json(tmp_path):
+    import pytest
+    config_path = tmp_path / "bad.json"
+    config_path.write_text("not valid json {{{")
+    from wizard.agent_registration import AgentConfig
+    cfg = AgentConfig(
+        agent_id="claude-code",
+        config_path=config_path,
+        format="json",
+        mcp_key="mcpServers",
+    )
+    with patch("wizard.agent_registration._AGENTS", {"claude-code": cfg}):
+        from wizard.agent_registration import deregister
+        from wizard.integrations import ConfigurationError
+        with pytest.raises(ConfigurationError):
+            deregister("claude-code")
+
+
+def test_deregister_raises_on_malformed_toml(tmp_path):
+    import pytest
+    config_path = tmp_path / "bad.toml"
+    config_path.write_text("not valid toml {{{")
+    from wizard.agent_registration import AgentConfig
+    cfg = AgentConfig(
+        agent_id="codex",
+        config_path=config_path,
+        format="toml",
+        mcp_key="mcpServers",
+    )
+    with patch("wizard.agent_registration._AGENTS", {"codex": cfg}):
+        from wizard.agent_registration import deregister
+        from wizard.integrations import ConfigurationError
+        with pytest.raises(ConfigurationError):
+            deregister("codex")
