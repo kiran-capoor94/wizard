@@ -4,7 +4,7 @@ from typing import Literal
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from .database import get_session
 from .deps import (
@@ -382,7 +382,12 @@ async def session_end(
                 next_actions=next_actions,
                 closure_status=closure_status,
             )
-            session.session_state = state.model_dump_json()
+            session_state_saved = False
+            try:
+                session.session_state = state.model_dump_json()
+                session_state_saved = True
+            except Exception as e:
+                logger.warning("session_end: failed to serialise session_state: %s", e)
 
             clean_summary = security().scrub(summary).clean
             session.summary = clean_summary
@@ -410,6 +415,7 @@ async def session_end(
             return SessionEndResponse(
                 note_id=saved.id,
                 notion_write_back=wb_result,
+                session_state_saved=session_state_saved,
                 closure_status=closure_status,
                 open_loops_count=len(open_loops),
                 next_actions_count=len(next_actions),
@@ -516,11 +522,11 @@ async def create_task(
         )
 
 
-def rewind_task(task_id: int) -> RewindResponse:
+async def rewind_task(task_id: int) -> RewindResponse:
     """Reconstruct the full note timeline for a task, oldest first."""
     logger.info("rewind_task task_id=%d", task_id)
     with get_session() as db:
-        _log_tool_call(db, "rewind_task")
+        await _log_tool_call(db, "rewind_task")
 
         task = db.get(Task, task_id)
         if task is None:
@@ -563,11 +569,11 @@ def rewind_task(task_id: int) -> RewindResponse:
         return RewindResponse(task=ctx, timeline=timeline, summary=summary)
 
 
-def what_am_i_missing(task_id: int) -> MissingResponse:
+async def what_am_i_missing(task_id: int) -> MissingResponse:
     """Surface cognitive gaps for a task using seven diagnostic rules."""
     logger.info("what_am_i_missing task_id=%d", task_id)
     with get_session() as db:
-        _log_tool_call(db, "what_am_i_missing")
+        await _log_tool_call(db, "what_am_i_missing")
         task = db.get(Task, task_id)
         if task is None:
             raise ToolError(f"Task {task_id} not found")
@@ -626,11 +632,11 @@ def what_am_i_missing(task_id: int) -> MissingResponse:
         return MissingResponse(signals=signals)
 
 
-def resume_session(session_id: int | None = None) -> ResumeSessionResponse:
+async def resume_session(session_id: int | None = None) -> ResumeSessionResponse:
     """Resume a prior session in a new thread. Creates a new session and syncs."""
     logger.info("resume_session session_id=%s", session_id)
     with get_session() as db:
-        _log_tool_call(db, "resume_session")
+        await _log_tool_call(db, "resume_session")
 
         # Find prior session
         if session_id is not None:
