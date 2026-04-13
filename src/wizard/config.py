@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 logger = logging.getLogger(__name__)
@@ -53,13 +53,11 @@ class NotionSchemaSettings(BaseModel):
 
 
 class NotionSettings(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     sisu_work_page_id: str = ""
     tasks_db_id: str = ""
     meetings_db_id: str = ""
     token: str = ""
-    notion_schema: NotionSchemaSettings = Field(default_factory=NotionSchemaSettings, alias="schema")
+    notion_schema: NotionSchemaSettings = Field(default_factory=NotionSchemaSettings)
 
 
 class ScrubbingSettings(BaseModel):
