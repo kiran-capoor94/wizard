@@ -1,11 +1,12 @@
 import logging
 
 from fastmcp.exceptions import ToolError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from .database import get_session
 from .deps import meeting_repo, note_repo, notion_client, security, sync_service, task_repo, task_state_repo, writeback
 from .mcp_instance import mcp
+from .repositories import find_latest_session_with_notes
 from .models import (
     Meeting,
     MeetingCategory,
@@ -15,6 +16,7 @@ from .models import (
     Task,
     TaskCategory,
     TaskPriority,
+    TaskState,
     TaskStatus,
     ToolCall,
     WizardSession,
@@ -23,16 +25,27 @@ from .schemas import (
     CreateTaskResponse,
     GetMeetingResponse,
     IngestMeetingResponse,
+    MissingResponse,
     NoteDetail,
+    ResumedTaskNotes,
+    ResumeSessionResponse,
+    RewindResponse,
+    RewindSummary,
     SaveMeetingSummaryResponse,
     SaveNoteResponse,
     SessionEndResponse,
     SessionStartResponse,
+    SessionState,
+    Signal,
+    TaskContext,
     TaskStartResponse,
+    TimelineEntry,
     UpdateTaskStatusResponse,
 )
 
 logger = logging.getLogger(__name__)
+
+_SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
 def _log_tool_call(db: Session, tool_name: str, session_id: int | None = None) -> None:
@@ -98,11 +111,17 @@ def task_start(task_id: int) -> TaskStartResponse:
 
             prior_notes = [NoteDetail.from_model(n) for n in notes]
 
+            latest_mental_model = next(
+                (n.mental_model for n in notes if n.mental_model is not None),
+                None,
+            )
+
             return TaskStartResponse(
                 task=task_ctx,
                 compounding=len(notes) > 0,
                 notes_by_type=notes_by_type,
                 prior_notes=prior_notes,
+                latest_mental_model=latest_mental_model,
             )
     except ValueError as e:
         logger.warning("task_start failed: %s", e)
@@ -133,7 +152,10 @@ def save_note(
             saved = note_repo().save(db, note)
             assert saved.id is not None
             task_state_repo().on_note_saved(db, task_id)
-            return SaveNoteResponse(note_id=saved.id, mental_model=saved.mental_model)
+            return SaveNoteResponse(
+                note_id=saved.id,
+                mental_model_saved=saved.mental_model is not None,
+            )
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
@@ -242,11 +264,11 @@ def save_meeting_summary(
             db.flush()
             wb_result = writeback().push_meeting_summary(meeting)
 
-            linked_task_ids = [t.id for t in meeting.tasks if t.id is not None]
+            linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
             return SaveMeetingSummaryResponse(
                 note_id=saved.id,
-                linked_task_ids=linked_task_ids,
+                tasks_linked=len(linked_ids),
                 notion_write_back=wb_result,
             )
     except ValueError as e:
@@ -254,7 +276,11 @@ def save_meeting_summary(
         raise ToolError(str(e)) from e
 
 
-def session_end(session_id: int, summary: str) -> SessionEndResponse:
+def session_end(
+    session_id: int,
+    summary: str,
+    session_state: SessionState | None = None,
+) -> SessionEndResponse:
     """Persists session summary note and attempts Notion daily page write-back."""
     logger.info("session_end session_id=%d", session_id)
     with get_session() as db:
@@ -280,9 +306,20 @@ def session_end(session_id: int, summary: str) -> SessionEndResponse:
 
         wb_result = writeback().push_session_summary(session)
 
+        session_state_saved = False
+        if session_state is not None:
+            try:
+                session.session_state = session_state.model_dump_json()
+                db.add(session)
+                db.flush()
+                session_state_saved = True
+            except Exception as e:
+                logger.warning("Failed to persist session_state: %s", e)
+
         return SessionEndResponse(
             note_id=saved.id,
             notion_write_back=wb_result,
+            session_state_saved=session_state_saved,
         )
 
 
@@ -380,6 +417,214 @@ def create_task(
         )
 
 
+def rewind_task(task_id: int) -> RewindResponse:
+    """Reconstruct the full note timeline for a task, oldest first."""
+    logger.info("rewind_task task_id=%d", task_id)
+    with get_session() as db:
+        _log_tool_call(db, "rewind_task")
+
+        task = db.get(Task, task_id)
+        if task is None:
+            raise ToolError(f"Task {task_id} not found")
+
+        task_state = db.get(TaskState, task_id)
+        if task_state is None:
+            raise ToolError(f"TaskState missing for task {task_id}")
+
+        notes_desc = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
+        # Filter persisted notes only (id is None only for unpersisted models; DB rows always have id)
+        notes_asc = [n for n in reversed(notes_desc) if n.id is not None]
+
+        timeline = [
+            TimelineEntry(
+                note_id=n.id,  # type: ignore[arg-type]  # id is not None: filtered above
+                created_at=n.created_at,
+                note_type=n.note_type,
+                preview=n.content[:200],
+                mental_model=n.mental_model,
+            )
+            for n in notes_asc
+        ]
+
+        total_notes = len(notes_asc)
+        if total_notes >= 2:
+            duration_days = (notes_asc[-1].created_at - notes_asc[0].created_at).days
+        else:
+            duration_days = 0
+        last_activity = notes_asc[-1].created_at if notes_asc else task.created_at
+
+        summary = RewindSummary(
+            total_notes=total_notes,
+            duration_days=duration_days,
+            last_activity=last_activity,
+        )
+
+        ctx = TaskContext.from_model(task, task_state)
+
+        return RewindResponse(task=ctx, timeline=timeline, summary=summary)
+
+
+def what_am_i_missing(task_id: int) -> MissingResponse:
+    """Surface cognitive gaps for a task using seven diagnostic rules."""
+    logger.info("what_am_i_missing task_id=%d", task_id)
+    with get_session() as db:
+        _log_tool_call(db, "what_am_i_missing")
+        task = db.get(Task, task_id)
+        if task is None:
+            raise ToolError(f"Task {task_id} not found")
+        task_state = db.get(TaskState, task_id)
+        if task_state is None:
+            raise ToolError(f"TaskState missing for task {task_id}")
+
+        signals: list[Signal] = []
+        nc = task_state.note_count
+        dc = task_state.decision_count
+        sd = task_state.stale_days
+
+        # Rule 1: no notes at all
+        if nc == 0:
+            signals.append(Signal(type="no_context", severity="high",
+                                  message="No notes recorded for this task"))
+        # Rule 2: stale
+        if sd >= 3:
+            signals.append(Signal(type="stale", severity="medium",
+                                  message=f"No activity for {sd} days"))
+        # Rule 3: very few notes
+        if 0 < nc <= 2:
+            signals.append(Signal(type="low_context", severity="medium",
+                                  message="Very few notes — context may be shallow"))
+        # Rule 4: notes exist but no decisions
+        if dc == 0 and nc > 0:
+            signals.append(Signal(type="no_decisions", severity="medium",
+                                  message="No decisions recorded"))
+        # Rule 5: many investigations, no decisions (inline count query)
+        inv_stmt = (
+            select(Note)
+            .where(Note.task_id == task_id)
+            .where(Note.note_type == NoteType.INVESTIGATION)
+        )
+        inv_notes = list(db.execute(inv_stmt).scalars().all())
+        if len(inv_notes) > 3 and dc == 0:
+            signals.append(Signal(type="analysis_loop", severity="high",
+                                  message="Multiple investigations without a decision"))
+        # Rule 6: has notes but stale for 2+ days
+        if task_state.last_note_at is not None and sd >= 2:
+            signals.append(Signal(type="lost_context", severity="medium",
+                                  message="Context may be degrading due to inactivity"))
+        # Rule 7: no mental model captured (inline existence query)
+        model_stmt = (
+            select(Note)
+            .where(Note.task_id == task_id)
+            .where(Note.mental_model.is_not(None))  # type: ignore[union-attr]
+            .limit(1)
+        )
+        has_model = db.execute(model_stmt).scalars().first() is not None
+        if nc >= 2 and not has_model:
+            signals.append(Signal(type="no_model", severity="medium",
+                                  message="No mental model captured — understanding may be shallow"))
+
+        signals.sort(key=lambda s: _SEVERITY_ORDER[s.severity])
+        return MissingResponse(signals=signals)
+
+
+def resume_session(session_id: int | None = None) -> ResumeSessionResponse:
+    """Resume a prior session in a new thread. Creates a new session and syncs."""
+    logger.info("resume_session session_id=%s", session_id)
+    with get_session() as db:
+        _log_tool_call(db, "resume_session")
+
+        # Find prior session
+        if session_id is not None:
+            prior = db.get(WizardSession, session_id)
+            if prior is None:
+                raise ToolError(f"Session {session_id} not found")
+        else:
+            prior = find_latest_session_with_notes(db)
+            if prior is None:
+                raise ToolError("No sessions with notes found")
+
+        assert prior.id is not None
+
+        # Create new session
+        new_session = WizardSession()
+        db.add(new_session)
+        db.flush()
+        db.refresh(new_session)
+        assert new_session.id is not None
+
+        # Sync
+        sync_results = sync_service().sync_all(db)
+
+        # Daily page
+        daily_page = None
+        try:
+            daily_page = notion_client().ensure_daily_page()
+            new_session.daily_page_id = daily_page.page_id
+            db.add(new_session)
+            db.flush()
+        except Exception as e:
+            logger.warning("ensure_daily_page failed: %s", e)
+
+        # Deserialise prior session_state
+        session_state: SessionState | None = None
+        working_set_tasks: list[TaskContext] = []
+        if prior.session_state is not None:
+            try:
+                session_state = SessionState.model_validate_json(prior.session_state)
+                for tid in session_state.working_set:
+                    t = db.get(Task, tid)
+                    ts = db.get(TaskState, tid)
+                    if t is not None:
+                        working_set_tasks.append(TaskContext.from_model(t, ts))
+            except Exception as e:
+                logger.warning("Failed to deserialise session_state: %s", e)
+                session_state = None
+        else:
+            logger.warning(
+                "Session %d was not cleanly closed — no structured state available. "
+                "Falling back to note history.",
+                prior.id,
+            )
+
+        # Fetch prior notes grouped by task
+        note_stmt = (
+            select(Note)
+            .where(Note.session_id == prior.id)
+            .order_by(col(Note.created_at).asc())
+        )
+        all_prior_notes = list(db.execute(note_stmt).scalars().all())
+        by_task: dict[int, list[Note]] = {}
+        for n in all_prior_notes:
+            if n.task_id is not None:
+                by_task.setdefault(n.task_id, []).append(n)
+
+        prior_notes: list[ResumedTaskNotes] = []
+        for tid, notes in by_task.items():
+            t = db.get(Task, tid)
+            ts = db.get(TaskState, tid)
+            if t is not None:
+                latest_mm = next(
+                    (n.mental_model for n in reversed(notes) if n.mental_model is not None),
+                    None,
+                )
+                prior_notes.append(ResumedTaskNotes(
+                    task=TaskContext.from_model(t, ts),
+                    notes=[NoteDetail.from_model(n) for n in notes],
+                    latest_mental_model=latest_mm,
+                ))
+
+        return ResumeSessionResponse(
+            session_id=new_session.id,
+            resumed_from_session_id=prior.id,
+            session_state=session_state,
+            working_set_tasks=working_set_tasks,
+            prior_notes=prior_notes,
+            unsummarised_meetings=meeting_repo().get_unsummarised_contexts(db),
+            sync_results=sync_results,
+            daily_page=daily_page,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Register tools with MCP
 # ---------------------------------------------------------------------------
@@ -393,3 +638,6 @@ mcp.tool()(save_meeting_summary)
 mcp.tool()(session_end)
 mcp.tool()(ingest_meeting)
 mcp.tool()(create_task)
+mcp.tool()(rewind_task)
+mcp.tool()(what_am_i_missing)
+mcp.tool()(resume_session)
