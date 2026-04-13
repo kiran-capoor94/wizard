@@ -309,7 +309,9 @@ class TestTaskStateModel:
     def test_task_state_table_name_is_snake_case(self):
         from wizard.models import TaskState
 
-        assert TaskState.__tablename__ == "task_state"
+        # __tablename__ is a SQLAlchemy declared_attr at the type level but a
+        # plain string at runtime; cast for the assertion.
+        assert str(TaskState.__tablename__) == "task_state"
 
     def test_task_state_can_store_all_fields(self, db_session):
         from wizard.models import Task, TaskState
@@ -317,6 +319,7 @@ class TestTaskStateModel:
         task = Task(name="t")
         db_session.add(task)
         db_session.flush()
+        assert task.id is not None
 
         now = _dt.datetime.now()
         state = TaskState(
