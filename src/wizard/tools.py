@@ -457,7 +457,7 @@ async def ingest_meeting(
                 title=clean_title,
                 content=clean_content,
                 source_id=source_id,
-                source_type="KRISP" if source_id else None,
+                source_type="TRANSCRIPT" if source_id else None,
                 source_url=source_url,
                 category=category,
             )
