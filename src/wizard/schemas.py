@@ -247,6 +247,7 @@ class TaskStartResponse(BaseModel):
     compounding: bool  # True if prior notes exist for this task
     notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
     prior_notes: list[NoteDetail]  # all notes, oldest first
+    latest_mental_model: str | None = None
 
 
 class SaveNoteResponse(BaseModel):
