@@ -88,13 +88,58 @@ class TaskRepository:
             .where(*where)
             .order_by(_PRIORITY_ORDER, func.coalesce(last_worked, 0).desc())
         )
-        rows = db.exec(stmt).all()
+        rows = db.execute(stmt).all()
+        if not rows:
+            return []
+
+        tasks: list[Task] = [row[0] for row in rows]
+        task_ids = [t.id for t in tasks if t.id is not None]
+
+        # Batch load TaskStates — one query replaces N db.get calls
+        task_states: dict[int, TaskState] = {}
+        if task_ids:
+            for ts in db.execute(
+                select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+            ).scalars().all():
+                task_states[ts.task_id] = ts
+
+        # Batch load latest note per task — one query replaces N _latest_note_for calls
+        jira_source_ids = [t.source_id for t in tasks if t.source_id is not None]
+        source_id_to_task_id: dict[str, int] = {
+            t.source_id: t.id
+            for t in tasks
+            if t.source_id is not None and t.id is not None
+        }
+        note_conditions: list = []
+        if task_ids:
+            note_conditions.append(col(Note.task_id).in_(task_ids))
+        if jira_source_ids:
+            note_conditions.append(
+                and_(col(Note.source_id).in_(jira_source_ids), Note.source_type == "JIRA")
+            )
+        latest_notes: dict[int, Note] = {}
+        if note_conditions:
+            for n in db.execute(
+                select(Note)
+                .where(or_(*note_conditions))
+                .order_by(col(Note.created_at).desc())
+            ).scalars().all():
+                if n.task_id is not None:
+                    if n.task_id not in latest_notes:
+                        latest_notes[n.task_id] = n
+                elif n.source_id is not None and n.source_type == "JIRA":
+                    tid = source_id_to_task_id.get(n.source_id)
+                    if tid is not None and tid not in latest_notes:
+                        latest_notes[tid] = n
 
         results: list[TaskContext] = []
-        for task, _lw_at in rows:  # pyright: ignore[reportUnknownVariableType]
-            task_state = db.get(TaskState, task.id)
-            latest = self._latest_note_for(db, task)
-            results.append(_task_context_from_row(task, task_state, latest))
+        for task in tasks:
+            tid = task.id
+            results.append(_task_context_from_row(
+                task,
+                task_states.get(tid) if tid is not None else None,
+                latest_notes.get(tid) if tid is not None else None,
+            ))
         return results
 
     def build_task_context(self, db: Session, task: Task) -> TaskContext:

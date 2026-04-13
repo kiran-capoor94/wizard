@@ -45,6 +45,8 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
+_SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
 
 def _log_tool_call(db: Session, tool_name: str, session_id: int | None = None) -> None:
     db.add(ToolCall(tool_name=tool_name, session_id=session_id))
@@ -430,18 +432,18 @@ def rewind_task(task_id: int) -> RewindResponse:
             raise ToolError(f"TaskState missing for task {task_id}")
 
         notes_desc = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
-        notes_asc = list(reversed(notes_desc))
+        # Filter persisted notes only (id is None only for unpersisted models; DB rows always have id)
+        notes_asc = [n for n in reversed(notes_desc) if n.id is not None]
 
         timeline = [
             TimelineEntry(
-                note_id=n.id,
+                note_id=n.id,  # type: ignore[arg-type]  # id is not None: filtered above
                 created_at=n.created_at,
                 note_type=n.note_type,
                 preview=n.content[:200],
                 mental_model=n.mental_model,
             )
             for n in notes_asc
-            if n.id is not None
         ]
 
         total_notes = len(notes_asc)
@@ -465,8 +467,6 @@ def rewind_task(task_id: int) -> RewindResponse:
 def what_am_i_missing(task_id: int) -> MissingResponse:
     """Surface cognitive gaps for a task using seven diagnostic rules."""
     logger.info("what_am_i_missing task_id=%d", task_id)
-    SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-
     with get_session() as db:
         _log_tool_call(db, "what_am_i_missing")
         task = db.get(Task, task_id)
@@ -523,7 +523,7 @@ def what_am_i_missing(task_id: int) -> MissingResponse:
             signals.append(Signal(type="no_model", severity="medium",
                                   message="No mental model captured — understanding may be shallow"))
 
-        signals.sort(key=lambda s: SEVERITY_ORDER[s.severity])
+        signals.sort(key=lambda s: _SEVERITY_ORDER[s.severity])
         return MissingResponse(signals=signals)
 
 
