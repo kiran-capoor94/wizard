@@ -223,6 +223,7 @@ class UpdateTaskStatusResponse(BaseModel):
     new_status: TaskStatus
     jira_write_back: WriteBackStatus
     notion_write_back: WriteBackStatus
+    task_state_updated: bool = True
 
 
 class GetMeetingResponse(BaseModel):

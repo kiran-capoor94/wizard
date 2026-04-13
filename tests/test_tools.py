@@ -769,3 +769,72 @@ def test_save_note_updates_task_state(db_session):
     assert state.note_count == 1
     assert state.decision_count == 1
     assert state.last_note_at is not None
+
+
+# ---------------------------------------------------------------------------
+# update_task_status — TaskState wiring
+# ---------------------------------------------------------------------------
+
+def test_update_task_status_records_last_status_change_at(db_session):
+    import datetime as _dt
+    from wizard.tools import update_task_status
+    from wizard.models import Task, TaskState, TaskStatus
+    from wizard.schemas import WriteBackStatus
+    from wizard.deps import task_state_repo
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+
+    task = Task(name="t", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+    task_state_repo().create_for_task(db_session, task)
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        update_task_status(task_id=task.id, new_status=TaskStatus.IN_PROGRESS)
+
+    state = db_session.get(TaskState, task.id)
+    db_session.refresh(state)
+    assert state is not None
+    assert state.last_status_change_at is not None
+    delta = _dt.datetime.now() - state.last_status_change_at
+    assert delta.total_seconds() < 5
+
+
+def test_update_task_status_does_not_reset_stale_days(db_session):
+    from wizard.tools import update_task_status
+    from wizard.models import Task, TaskState, TaskStatus
+    from wizard.schemas import WriteBackStatus
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
+    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
+
+    task = Task(name="t", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
+    assert task.id is not None
+
+    state = TaskState(
+        task_id=task.id,
+        last_touched_at=task.created_at,
+        stale_days=7,
+        note_count=3,
+        decision_count=1,
+    )
+    db_session.add(state)
+    db_session.commit()
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        update_task_status(task_id=task.id, new_status=TaskStatus.DONE)
+
+    db_session.refresh(state)
+    assert state.stale_days == 7
+    assert state.note_count == 3
+    assert state.decision_count == 1

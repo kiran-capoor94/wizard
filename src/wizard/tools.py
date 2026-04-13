@@ -154,6 +154,8 @@ def update_task_status(
             db.refresh(task)
             assert task.id is not None
 
+            task_state_repo().on_status_changed(db, task.id)
+
             jira_wb = writeback().push_task_status(task)
             notion_wb = writeback().push_task_status_to_notion(task)
 
@@ -162,6 +164,7 @@ def update_task_status(
                 new_status=task.status,
                 jira_write_back=jira_wb,
                 notion_write_back=notion_wb,
+                task_state_updated=True,
             )
     except ValueError as e:
         logger.warning("update_task_status failed: %s", e)
