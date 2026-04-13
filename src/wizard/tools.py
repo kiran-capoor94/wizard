@@ -166,7 +166,7 @@ async def save_note(
                         response_type=str,
                     )
                     if isinstance(result, AcceptedElicitation) and result.data:
-                        mental_model = result.data
+                        mental_model = security().scrub(result.data).clean
                 except Exception as e:
                     logger.debug("ctx.elicit unavailable for mental_model: %s", e)
             clean = security().scrub(content).clean
@@ -346,54 +346,58 @@ async def session_end(
 ) -> SessionEndResponse:
     """Persists session summary + six-field SessionState to WizardSession. Writes Notion daily page."""
     logger.info("session_end session_id=%d", session_id)
-    with get_session() as db:
-        await _log_tool_call(db, "session_end", session_id=session_id)
-        session = db.get(WizardSession, session_id)
-        if session is None:
-            await ctx.error(f"Session {session_id} not found")
-            raise ToolError(f"Session {session_id} not found")
+    try:
+        with get_session() as db:
+            await _log_tool_call(db, "session_end", session_id=session_id)
+            session = db.get(WizardSession, session_id)
+            if session is None:
+                await ctx.error(f"Session {session_id} not found")
+                raise ToolError(f"Session {session_id} not found")
 
-        state = SessionState(
-            intent=intent,
-            working_set=working_set,
-            state_delta=state_delta,
-            open_loops=open_loops,
-            next_actions=next_actions,
-            closure_status=closure_status,
-        )
-        session.session_state = state.model_dump_json()
+            state = SessionState(
+                intent=intent,
+                working_set=working_set,
+                state_delta=state_delta,
+                open_loops=open_loops,
+                next_actions=next_actions,
+                closure_status=closure_status,
+            )
+            session.session_state = state.model_dump_json()
 
-        clean_summary = security().scrub(summary).clean
-        session.summary = clean_summary
-        db.add(session)
-        db.flush()
-        db.refresh(session)
-        assert session.id is not None
+            clean_summary = security().scrub(summary).clean
+            session.summary = clean_summary
+            db.add(session)
+            db.flush()
+            db.refresh(session)
+            assert session.id is not None
 
-        note = Note(
-            note_type=NoteType.SESSION_SUMMARY,
-            content=clean_summary,
-            session_id=session.id,
-        )
-        saved = note_repo().save(db, note)
-        assert saved.id is not None
+            note = Note(
+                note_type=NoteType.SESSION_SUMMARY,
+                content=clean_summary,
+                session_id=session.id,
+            )
+            saved = note_repo().save(db, note)
+            assert saved.id is not None
 
-        wb_result = writeback().push_session_summary(session)
+            wb_result = writeback().push_session_summary(session)
 
-        await ctx.delete_state("current_session_id")
-        await ctx.info(
-            f"Session {session.id} closed. Status: {closure_status}. "
-            f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
-        )
+            await ctx.delete_state("current_session_id")
+            await ctx.info(
+                f"Session {session.id} closed. Status: {closure_status}. "
+                f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
+            )
 
-        return SessionEndResponse(
-            note_id=saved.id,
-            notion_write_back=wb_result,
-            closure_status=closure_status,
-            open_loops_count=len(open_loops),
-            next_actions_count=len(next_actions),
-            intent=intent,
-        )
+            return SessionEndResponse(
+                note_id=saved.id,
+                notion_write_back=wb_result,
+                closure_status=closure_status,
+                open_loops_count=len(open_loops),
+                next_actions_count=len(next_actions),
+                intent=intent,
+            )
+    except ValueError as e:
+        logger.warning("session_end failed: %s", e)
+        raise ToolError(str(e)) from e
 
 
 async def ingest_meeting(
