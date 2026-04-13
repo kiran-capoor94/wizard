@@ -242,6 +242,7 @@ def test_uninstall_removes_wizard_dir_and_mcp(tmp_path):
     code_cfg = tmp_path / "claude_code_config.json"
     code_cfg.write_text(json.dumps({"mcpServers": {"wizard": {"command": "uv"}}}))
 
+    import wizard.agent_registration as ar
     from wizard.agent_registration import AgentConfig
 
     patched_agents = {
@@ -254,7 +255,10 @@ def test_uninstall_removes_wizard_dir_and_mcp(tmp_path):
     }
 
     with _fresh_app(wizard_dir) as ctx:
-        with patch("wizard.mcp_config.agent_registration._AGENTS", patched_agents):
+        with (
+            patch.object(ar, "read_registered_agents", return_value=["claude-code"]),
+            patch.object(ar, "_AGENTS", patched_agents),
+        ):
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
@@ -266,9 +270,9 @@ def test_uninstall_nothing_to_do(tmp_path):
     wizard_dir = tmp_path / ".wizard"  # does not exist
 
     with _fresh_app(wizard_dir) as ctx:
-        with patch("wizard.mcp_config.agent_registration") as mock_ar:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
             mock_ar.scan_all_registered.return_value = []
-            mock_ar._AGENTS = {}
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
@@ -281,10 +285,9 @@ def test_uninstall_aborts_without_confirmation(tmp_path):
     (wizard_dir / "config.json").write_text("{}")
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
-        ):
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = []
             result = runner.invoke(ctx.app, ["uninstall"], input="n\n")
 
     assert result.exit_code == 0
@@ -297,10 +300,9 @@ def test_uninstall_proceeds_with_confirmation(tmp_path):
     (wizard_dir / "config.json").write_text("{}")
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", tmp_path / "nope.json"),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope2.json"),
-        ):
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = []
             result = runner.invoke(ctx.app, ["uninstall"], input="y\n")
 
     assert result.exit_code == 0
@@ -317,15 +319,14 @@ def test_uninstall_partial_state(tmp_path):
     code_cfg.write_text(json.dumps({"mcpServers": {"other": {}}}))  # no wizard entry
 
     with _fresh_app(wizard_dir) as ctx:
-        with (
-            patch("wizard.mcp_config.CLAUDE_CODE_CONFIG", code_cfg),
-            patch("wizard.mcp_config.CLAUDE_DESKTOP_CONFIG", tmp_path / "nope.json"),
-        ):
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = []
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
     assert not wizard_dir.exists()
-    # Other MCP entries preserved
+    # Other MCP entries preserved (unaffected since no agents deregistered)
     assert json.loads(code_cfg.read_text()) == {"mcpServers": {"other": {}}}
 
 
@@ -335,14 +336,46 @@ def test_uninstall_is_idempotent(tmp_path):
     (wizard_dir / "config.json").write_text("{}")
 
     with _fresh_app(wizard_dir) as ctx:
-        with patch("wizard.mcp_config.agent_registration") as mock_ar:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
             mock_ar.scan_all_registered.return_value = []
-            mock_ar._AGENTS = {}
             runner.invoke(ctx.app, ["uninstall", "--yes"])
             result = runner.invoke(ctx.app, ["uninstall", "--yes"])
 
     assert result.exit_code == 0
     assert "nothing to uninstall" in result.output.lower()
+
+
+def test_uninstall_reads_registered_agents_and_deregisters(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = ["claude-code", "gemini"]
+            result = runner.invoke(ctx.app, ["uninstall", "--yes"])
+
+    deregistered = [call.args[0] for call in mock_ar.deregister.call_args_list]
+    assert "claude-code" in deregistered
+    assert "gemini" in deregistered
+    assert result.exit_code == 0
+
+
+def test_uninstall_falls_back_to_scan_if_no_registered_agents_file(tmp_path):
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text("{}")
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            mock_ar.scan_all_registered.return_value = ["claude-desktop"]
+            result = runner.invoke(ctx.app, ["uninstall", "--yes"])
+
+    mock_ar.scan_all_registered.assert_called_once()
+    mock_ar.deregister.assert_called_with("claude-desktop")
+    assert result.exit_code == 0
 
 
 # --- setup --agent flag tests ---
