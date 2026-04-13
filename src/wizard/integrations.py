@@ -314,7 +314,7 @@ class NotionClient:
                         props.get(self._schema.meeting_title, {})
                     ).text,
                     categories=NotionMultiSelect.model_validate(
-                        props.get("Category", {})
+                        props.get("Category", {})  # not configurable via schema — intentional
                     ).names,
                     summary=NotionRichText.model_validate(
                         props.get(self._schema.meeting_summary, {})
