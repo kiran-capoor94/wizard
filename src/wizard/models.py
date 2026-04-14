@@ -1,7 +1,7 @@
 import datetime
 from enum import Enum
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import Column, ForeignKey, Integer
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -23,6 +23,17 @@ class TimestampMixin(SQLModel):
         sa_column_kwargs={"onupdate": datetime.datetime.now},
         nullable=False,
     )
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def _strip_timezone(cls, v: object) -> object:
+        # pydantic v2 with validate_default=True converts naive datetime.now()
+        # to UTC-aware. SQLite stores and returns naive datetimes only.
+        # Strip timezone so in-memory objects are always consistent with
+        # what comes back from the DB after a round-trip.
+        if isinstance(v, datetime.datetime) and v.tzinfo is not None:
+            return v.replace(tzinfo=None)
+        return v
 
 
 class TaskPriority(str, Enum):
@@ -158,7 +169,7 @@ class ToolCall(SQLModel, table=True):
     session_id: int | None = Field(default=None, foreign_key="wizardsession.id")
     tool_name: str
     called_at: datetime.datetime = Field(
-        default_factory=datetime.datetime.now, index=True
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc), index=True
     )
 
 
