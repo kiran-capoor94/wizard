@@ -2254,3 +2254,84 @@ async def test_save_note_scrubs_mental_model_when_passed_directly(db_session):
     assert note is not None
     assert "john@example.com" not in note.mental_model
     assert "[EMAIL_1]" in note.mental_model
+
+
+# ---------------------------------------------------------------------------
+# Fix 11: what_am_i_missing rule 6 does not overlap rule 2
+# ---------------------------------------------------------------------------
+
+
+async def test_what_am_i_missing_stale_2_days_fires_lost_context_not_stale(db_session):
+    """stale_days=2 with notes → lost_context fires; stale must NOT fire (threshold is >= 3)."""
+    from wizard.tools import what_am_i_missing
+    from wizard.models import Task, TaskStatus, TaskPriority, TaskCategory, Note, NoteType, TaskState
+    import datetime
+
+    task = Task(name="T", status=TaskStatus.IN_PROGRESS, priority=TaskPriority.MEDIUM, category=TaskCategory.ISSUE)
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    note = Note(task_id=task.id, note_type=NoteType.INVESTIGATION, content="some work")
+    db_session.add(note)
+    db_session.flush()
+    db_session.refresh(note)
+
+    last_note = datetime.datetime.now() - datetime.timedelta(days=2)
+    state = TaskState(
+        task_id=task.id,
+        note_count=1,
+        decision_count=0,
+        last_note_at=last_note,
+        last_touched_at=last_note,
+        stale_days=2,
+    )
+    db_session.add(state)
+    db_session.commit()
+
+    ctx = MockContext()
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await what_am_i_missing(ctx, task_id=task.id)
+
+    signal_types = [s.type for s in result.signals]
+    assert "lost_context" in signal_types
+    assert "stale" not in signal_types
+
+
+async def test_what_am_i_missing_stale_3_days_fires_stale_not_lost_context(db_session):
+    """stale_days=3 with notes → stale fires; lost_context must NOT fire (no double-signal)."""
+    from wizard.tools import what_am_i_missing
+    from wizard.models import Task, TaskStatus, TaskPriority, TaskCategory, Note, NoteType, TaskState
+    import datetime
+
+    task = Task(name="T", status=TaskStatus.IN_PROGRESS, priority=TaskPriority.MEDIUM, category=TaskCategory.ISSUE)
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    note = Note(task_id=task.id, note_type=NoteType.INVESTIGATION, content="some work")
+    db_session.add(note)
+    db_session.flush()
+    db_session.refresh(note)
+
+    last_note = datetime.datetime.now() - datetime.timedelta(days=3)
+    state = TaskState(
+        task_id=task.id,
+        note_count=1,
+        decision_count=0,
+        last_note_at=last_note,
+        last_touched_at=last_note,
+        stale_days=3,
+    )
+    db_session.add(state)
+    db_session.commit()
+
+    ctx = MockContext()
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await what_am_i_missing(ctx, task_id=task.id)
+
+    signal_types = [s.type for s in result.signals]
+    assert "stale" in signal_types
+    assert "lost_context" not in signal_types
