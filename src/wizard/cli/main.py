@@ -525,6 +525,7 @@ def analytics(
 @app.command()
 def update() -> None:
     """Pull latest code, sync deps, run migrations, and refresh skills."""
+    # main.py lives at src/wizard/cli/main.py — 3 levels up is the repo root
     repo_root = Path(__file__).resolve().parents[3]
     sync_args = ["uv", "sync"] if shutil.which("uv") else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
 
