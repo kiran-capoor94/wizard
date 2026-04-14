@@ -199,14 +199,16 @@ def make_notion_client(
     token="tok",
     sisu_work_page_id="parent-abc",
     tasks_db_id="db-tasks",
-    meetings_db_id="db-meetings"
+    meetings_db_id="db-meetings",
+    schema=None,
 ):
     from wizard.integrations import NotionClient
     return NotionClient(
         token=token,
         sisu_work_page_id=sisu_work_page_id,
         tasks_db_id=tasks_db_id,
-        meetings_db_id=meetings_db_id
+        meetings_db_id=meetings_db_id,
+        schema=schema
     )
 
 
@@ -421,8 +423,8 @@ def test_notion_create_task_page_requires_name_and_status():
     assert "properties" in call_args.kwargs
 
 
-def test_notion_create_task_page_returns_none_on_api_error():
-    """create_task_page should return None on Notion API error"""
+def test_notion_create_task_page_propagates_api_error_from_pages_create():
+    """create_task_page propagates APIResponseError from pages.create."""
     error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
     with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
         mock_client_instance = MagicMock()
@@ -430,9 +432,8 @@ def test_notion_create_task_page_returns_none_on_api_error():
         mock_client_instance.pages.create.side_effect = error
 
         client = make_notion_client()
-        page_id = client.create_task_page(name="Task", status="Backlog")
-
-    assert page_id is None
+        with pytest.raises(APIResponseError):
+            client.create_task_page(name="Task", status="Backlog")
 
 
 def test_notion_create_task_page_raises_error_without_token():
@@ -441,6 +442,53 @@ def test_notion_create_task_page_raises_error_without_token():
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.create_task_page(name="Task", status="Backlog")
+
+
+def test_notion_create_task_page_uses_schema_property_names():
+    """create_task_page must use schema field names, not hardcoded strings."""
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings(
+        task_name="Name",
+        task_status="State",
+        task_priority="Prio",
+        task_jira_key="Jira Link",
+        task_due_date="Deadline",
+    )
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
+        mock_client_instance = MagicMock()
+        mock_notion_class.return_value = mock_client_instance
+        mock_client_instance.pages.create.return_value = {"id": "page-id"}
+
+        client = make_notion_client(schema=schema)
+        client.create_task_page(
+            name="My task",
+            status="Not started",
+            priority="High",
+            jira_url="https://org.atlassian.net/browse/ENG-1",
+            due_date="2026-04-20",
+        )
+
+    props = mock_client_instance.pages.create.call_args.kwargs["properties"]
+    assert "Name" in props
+    assert "State" in props
+    assert "Prio" in props
+    assert "Jira Link" in props
+    assert "Deadline" in props
+    assert "Task" not in props
+    assert "Status" not in props
+
+
+def test_notion_create_task_page_propagates_api_error():
+    """create_task_page must propagate APIResponseError, not return None."""
+    error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
+        mock_client_instance = MagicMock()
+        mock_notion_class.return_value = mock_client_instance
+        mock_client_instance.pages.create.side_effect = error
+
+        client = make_notion_client()
+        with pytest.raises(APIResponseError):
+            client.create_task_page(name="Task", status="Backlog")
 
 
 # ---- create_meeting_page tests ----
