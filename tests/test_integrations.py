@@ -617,6 +617,23 @@ def test_notion_update_task_status_raises_error_without_token():
         client.update_task_status("task-id", "Done")
 
 
+def test_notion_update_task_status_uses_schema_property_name():
+    """update_task_status must use schema.task_status as property key, not hardcoded 'Status'."""
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings(task_status="State")
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
+        mock_client_instance = MagicMock()
+        mock_notion_class.return_value = mock_client_instance
+        mock_client_instance.pages.update.return_value = {}
+
+        client = make_notion_client(schema=schema)
+        client.update_task_status("task-id", "Done")
+
+    props = mock_client_instance.pages.update.call_args.kwargs["properties"]
+    assert "State" in props
+    assert "Status" not in props
+
+
 # ---- update_meeting_summary tests ----
 
 def test_notion_update_meeting_summary_returns_true_on_success():
@@ -654,6 +671,23 @@ def test_notion_update_meeting_summary_raises_error_without_token():
     client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
     with pytest.raises(ConfigurationError):
         client.update_meeting_summary("meeting-id", "Summary")
+
+
+def test_notion_update_meeting_summary_uses_schema_property_name():
+    """update_meeting_summary must use schema.meeting_summary as property key, not hardcoded 'Summary'."""
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings(meeting_summary="Notes")
+    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
+        mock_client_instance = MagicMock()
+        mock_notion_class.return_value = mock_client_instance
+        mock_client_instance.pages.update.return_value = {}
+
+        client = make_notion_client(schema=schema)
+        client.update_meeting_summary("meeting-id", "Great sprint")
+
+    props = mock_client_instance.pages.update.call_args.kwargs["properties"]
+    assert "Notes" in props
+    assert "Summary" not in props
 
 
 # ---- update_daily_page tests ----

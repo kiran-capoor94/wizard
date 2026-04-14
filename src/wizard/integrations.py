@@ -390,7 +390,7 @@ class NotionClient:
         try:
             client.pages.update(
                 page_id=page_id,
-                properties={"Status": {"status": {"name": status}}},
+                properties={self._schema.task_status: {"status": {"name": status}}},
             )
             return True
         except APIResponseError as e:
@@ -404,7 +404,7 @@ class NotionClient:
         try:
             client.pages.update(
                 page_id=page_id,
-                properties={"Summary": {"rich_text": [{"text": {"content": summary}}]}},
+                properties={self._schema.meeting_summary: {"rich_text": [{"text": {"content": summary}}]}},
             )
             return True
         except APIResponseError as e:
