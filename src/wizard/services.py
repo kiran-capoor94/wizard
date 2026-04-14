@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 from .integrations import JiraClient, NotionClient, _extract_krisp_id
 from .mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
 from .models import Meeting, MeetingCategory, Task, WizardSession
+from .repositories import TaskStateRepository
 from .schemas import SourceSyncStatus, WriteBackStatus
 from .security import SecurityService
 
@@ -16,11 +17,16 @@ logger = logging.getLogger(__name__)
 
 class SyncService:
     def __init__(
-        self, jira: JiraClient, notion: NotionClient, security: SecurityService
+        self,
+        jira: JiraClient,
+        notion: NotionClient,
+        security: SecurityService,
+        task_state_repo: TaskStateRepository | None = None,
     ):
         self._jira = jira
         self._notion = notion
         self._security = security
+        self._task_state_repo = task_state_repo or TaskStateRepository()
 
     def sync_all(self, db: Session) -> list[SourceSyncStatus]:
         results: list[SourceSyncStatus] = []
@@ -60,6 +66,9 @@ class SyncService:
                     status=StatusMapper.jira_to_local(raw.status),
                 )
                 db.add(task)
+                db.flush()
+                db.refresh(task)
+                self._task_state_repo.create_for_task(db, task)
         db.flush()
 
     def sync_notion_tasks(self, db: Session) -> None:
@@ -120,6 +129,9 @@ class SyncService:
                     status=StatusMapper.notion_to_local(raw_status),
                 )
                 db.add(task)
+                db.flush()
+                db.refresh(task)
+                self._task_state_repo.create_for_task(db, task)
         db.flush()
 
     def sync_notion_meetings(self, db: Session) -> None:

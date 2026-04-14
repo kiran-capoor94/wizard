@@ -730,3 +730,20 @@ def test_check_notion_schema_fails_when_one_db_unreachable(tmp_path, monkeypatch
     assert ok is False
     assert "Tasks DB" in msg
     assert "Meetings DB" not in msg
+
+
+def test_check_db_tables_fails_when_task_state_missing(tmp_path, monkeypatch):
+    """_check_db_tables must flag a DB that is missing the task_state table."""
+    import sqlite3
+    db_path = tmp_path / "wizard.db"
+    conn = sqlite3.connect(str(db_path))
+    for table in ["task", "note", "meeting", "wizardsession", "toolcall"]:
+        conn.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("WIZARD_DB", str(db_path))
+    from wizard.cli.main import _check_db_tables
+    ok, msg = _check_db_tables()
+    assert ok is False
+    assert "task_state" in msg
