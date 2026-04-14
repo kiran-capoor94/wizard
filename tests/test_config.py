@@ -100,3 +100,10 @@ def test_notion_settings_has_schema():
     notion = NotionSettings()
     assert hasattr(notion, "notion_schema")
     assert isinstance(notion.notion_schema, NotionSchemaSettings)
+
+
+def test_notion_schema_has_meeting_category_field():
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings()
+    assert hasattr(schema, "meeting_category")
+    assert schema.meeting_category == "Category"

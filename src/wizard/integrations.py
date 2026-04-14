@@ -80,7 +80,7 @@ class JiraClient:
                     status=issue["fields"]["status"]["name"],
                     priority=issue["fields"]["priority"]["name"],
                     issue_type=issue["fields"]["issuetype"]["name"],
-                    url=issue["fields"].get("self", ""),
+                    url=f"{self._base_url}/browse/{issue['key']}",
                 )
                 for issue in issues
             ]
@@ -177,9 +177,7 @@ class NotionClient:
     def _query_database(self, database_id: str, **kwargs) -> dict:
         """Query a database by ID using data_sources API (v3.0)."""
         client = self._require_client()
-        return client.data_sources.query(
-            data_source_id=database_id, **kwargs
-        )  # pyright: ignore[reportReturnType]
+        return client.data_sources.query(data_source_id=database_id, **kwargs)  # pyright: ignore[reportReturnType]
 
     def _list_sisu_work_children(self) -> list[dict]:
         """Return non-archived child_page blocks under the SISU Work page."""
@@ -277,15 +275,23 @@ class NotionClient:
                 page_id = page.get("id")
                 props = page.get("properties", {})
 
-                jira_url = NotionUrl.model_validate(props.get(self._schema.task_jira_key, {})).url
+                jira_url = NotionUrl.model_validate(
+                    props.get(self._schema.task_jira_key, {})
+                ).url
                 task = NotionTaskData(
                     notion_id=page_id,
-                    name=NotionTitle.model_validate(props.get(self._schema.task_name, {})).text,
-                    status=NotionStatus.model_validate(props.get(self._schema.task_status, {})).name,
+                    name=NotionTitle.model_validate(
+                        props.get(self._schema.task_name, {})
+                    ).text,
+                    status=NotionStatus.model_validate(
+                        props.get(self._schema.task_status, {})
+                    ).name,
                     priority=NotionSelect.model_validate(
                         props.get(self._schema.task_priority, {})
                     ).name,
-                    due_date=NotionDate.model_validate(props.get(self._schema.task_due_date, {})).start,
+                    due_date=NotionDate.model_validate(
+                        props.get(self._schema.task_due_date, {})
+                    ).start,
                     jira_url=jira_url,
                     jira_key=_extract_jira_key(jira_url),
                 )
@@ -314,13 +320,17 @@ class NotionClient:
                         props.get(self._schema.meeting_title, {})
                     ).text,
                     categories=NotionMultiSelect.model_validate(
-                        props.get("Category", {})  # not configurable via schema — intentional
+                        props.get(self._schema.meeting_category, {})
                     ).names,
                     summary=NotionRichText.model_validate(
                         props.get(self._schema.meeting_summary, {})
                     ).text,
-                    krisp_url=NotionUrl.model_validate(props.get(self._schema.meeting_url, {})).url,
-                    date=NotionDate.model_validate(props.get(self._schema.meeting_date, {})).start,
+                    krisp_url=NotionUrl.model_validate(
+                        props.get(self._schema.meeting_url, {})
+                    ).url,
+                    date=NotionDate.model_validate(
+                        props.get(self._schema.meeting_date, {})
+                    ).start,
                 )
                 meetings.append(meeting)
             return meetings
@@ -369,13 +379,15 @@ class NotionClient:
 
         properties: dict = {
             self._schema.meeting_title: {"title": [{"text": {"content": title}}]},
-            "Category": {"multi_select": [{"name": category}]},
+            self._schema.meeting_category: {"multi_select": [{"name": category}]},
         }
 
         if krisp_url:
             properties[self._schema.meeting_url] = {"url": krisp_url}
         if summary:
-            properties[self._schema.meeting_summary] = {"rich_text": [{"text": {"content": summary}}]}
+            properties[self._schema.meeting_summary] = {
+                "rich_text": [{"text": {"content": summary}}]
+            }
 
         response = client.pages.create(
             parent={"database_id": self._meetings_db_id},
@@ -397,6 +409,32 @@ class NotionClient:
             logger.warning("Notion update_task_status failed: %s", e)
             return False
 
+    def update_task_due_date(self, page_id: str, due_date: str) -> bool:
+        """Update due_date property on task page. due_date in ISO format."""
+        client = self._require_client()
+        try:
+            client.pages.update(
+                page_id=page_id,
+                properties={self._schema.task_due_date: {"date": {"start": due_date}}},
+            )
+            return True
+        except APIResponseError as e:
+            logger.warning("Notion update_task_due_date failed: %s", e)
+            return False
+
+    def update_task_priority(self, page_id: str, priority: str) -> bool:
+        """Update priority select property on task page."""
+        client = self._require_client()
+        try:
+            client.pages.update(
+                page_id=page_id,
+                properties={self._schema.task_priority: {"select": {"name": priority}}},
+            )
+            return True
+        except APIResponseError as e:
+            logger.warning("Notion update_task_priority failed: %s", e)
+            return False
+
     def update_meeting_summary(self, page_id: str, summary: str) -> bool:
         """Update Summary property on meeting page."""
         client = self._require_client()
@@ -404,7 +442,11 @@ class NotionClient:
         try:
             client.pages.update(
                 page_id=page_id,
-                properties={self._schema.meeting_summary: {"rich_text": [{"text": {"content": summary}}]}},
+                properties={
+                    self._schema.meeting_summary: {
+                        "rich_text": [{"text": {"content": summary}}]
+                    }
+                },
             )
             return True
         except APIResponseError as e:
