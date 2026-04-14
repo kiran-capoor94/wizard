@@ -385,7 +385,7 @@ def _check_notion_schema() -> tuple[bool, str]:
         (schema.meeting_date, "date"),
         (schema.meeting_url, "url"),
         (schema.meeting_summary, "rich_text"),
-        ("Category", "multi_select"),
+        (schema.meeting_category, "multi_select"),
     ]
 
     task_errors = _validate_properties(tasks_props, task_fields)

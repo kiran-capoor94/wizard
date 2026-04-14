@@ -747,3 +747,35 @@ def test_check_db_tables_fails_when_task_state_missing(tmp_path, monkeypatch):
     ok, msg = _check_db_tables()
     assert ok is False
     assert "task_state" in msg
+
+
+def test_check_notion_schema_uses_schema_meeting_category_field(tmp_path, monkeypatch):
+    """schema.meeting_category is used — not the hardcoded string 'Category'."""
+    import json
+    from unittest.mock import patch
+    config = {
+        "notion": {
+            "token": "tok",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+            "notion_schema": {"meeting_category": "Meeting Type"},
+        }
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+
+    tasks_props = {
+        "Task": "title", "Status": "status",
+        "Priority": "select", "Due date": "date", "Jira": "url",
+    }
+    meetings_props = {
+        "Meeting name": "title", "Date": "date",
+        "Krisp URL": "url", "Summary": "rich_text",
+        "Meeting Type": "multi_select",  # custom name, not "Category"
+    }
+    with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[tasks_props, meetings_props]), \
+         patch("wizard.integrations.NotionSdkClient"):
+        from wizard.cli.main import _check_notion_schema
+        ok, msg = _check_notion_schema()
+
+    assert ok is True, f"Expected pass but got: {msg}"
