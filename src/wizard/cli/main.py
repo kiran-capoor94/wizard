@@ -1,6 +1,8 @@
 import json
 import logging
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -103,6 +105,15 @@ def _refresh_skills(dest: Path) -> None:
         typer.echo(f"Installed skills to {dest}")
     else:
         typer.echo("No skills found in package — skipping skill install")
+
+
+def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
+    """Run a subprocess step, printing label and ok/FAILED. Returns (success, output)."""
+    typer.echo(f"  {label}...", nl=False)
+    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    ok = result.returncode == 0
+    typer.echo(" ok" if ok else " FAILED")
+    return ok, (result.stdout + result.stderr).strip()
 
 
 @app.command()
