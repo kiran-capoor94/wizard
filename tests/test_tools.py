@@ -2033,6 +2033,61 @@ async def test_update_task_source_url(db_session):
 
 
 # ---------------------------------------------------------------------------
+# Fix 7: task_start returns prior notes oldest-first
+# ---------------------------------------------------------------------------
+
+
+async def test_task_start_returns_prior_notes_oldest_first(db_session):
+    """prior_notes must be ordered oldest-first (matching rewind_task convention)."""
+    from wizard.tools import task_start
+    from wizard.models import Task, TaskStatus, TaskPriority, TaskCategory, Note, NoteType, TaskState
+    import datetime
+
+    task = Task(
+        name="Fix auth",
+        status=TaskStatus.IN_PROGRESS,
+        priority=TaskPriority.MEDIUM,
+        category=TaskCategory.ISSUE,
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    state = TaskState(
+        task_id=task.id,
+        note_count=2,
+        decision_count=0,
+        last_touched_at=datetime.datetime.now(),
+        stale_days=0,
+    )
+    db_session.add(state)
+
+    older = Note(
+        task_id=task.id,
+        note_type=NoteType.INVESTIGATION,
+        content="older note",
+        created_at=datetime.datetime(2026, 1, 1, 10, 0, 0),
+    )
+    newer = Note(
+        task_id=task.id,
+        note_type=NoteType.DECISION,
+        content="newer note",
+        created_at=datetime.datetime(2026, 1, 3, 10, 0, 0),
+    )
+    db_session.add_all([older, newer])
+    db_session.commit()
+
+    ctx = MockContext()
+    patches, _, _ = _patch_tools(db_session)
+    with patch.multiple("wizard.tools", **patches):
+        result = await task_start(ctx, task_id=task.id)
+
+    assert len(result.prior_notes) == 2
+    assert result.prior_notes[0].content == "older note"
+    assert result.prior_notes[1].content == "newer note"
+
+
+# ---------------------------------------------------------------------------
 # Fix 2: update_task outcome writeback called before context exits (no double-commit)
 # ---------------------------------------------------------------------------
 
