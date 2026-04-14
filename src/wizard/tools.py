@@ -300,16 +300,14 @@ async def get_meeting(ctx: Context, meeting_id: int) -> GetMeetingResponse:
 async def save_meeting_summary(
     ctx: Context,
     meeting_id: int,
-    session_id: int,
     summary: str,
     task_ids: list[int] | None = None,
 ) -> SaveMeetingSummaryResponse:
     """Scrubs and persists the LLM-generated meeting summary. Attempts Notion write-back."""
-    logger.info(
-        "save_meeting_summary meeting_id=%d session_id=%d", meeting_id, session_id
-    )
+    logger.info("save_meeting_summary meeting_id=%d", meeting_id)
     try:
         with get_session() as db:
+            session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "save_meeting_summary", session_id=session_id)
             meeting = meeting_repo().get_by_id(db, meeting_id)
             assert meeting.id is not None
@@ -437,7 +435,8 @@ async def ingest_meeting(
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
     logger.info("ingest_meeting source_id=%s", source_id)
     with get_session() as db:
-        await _log_tool_call(db, "ingest_meeting")
+        session_id: int | None = await ctx.get_state("current_session_id")
+        await _log_tool_call(db, "ingest_meeting", session_id=session_id)
         clean_title = security().scrub(title).clean
         clean_content = security().scrub(content).clean
 
@@ -491,7 +490,8 @@ async def create_task(
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
     with get_session() as db:
-        await _log_tool_call(db, "create_task")
+        session_id: int | None = await ctx.get_state("current_session_id")
+        await _log_tool_call(db, "create_task", session_id=session_id)
         clean_name = security().scrub(name).clean
         task = Task(
             name=clean_name,
