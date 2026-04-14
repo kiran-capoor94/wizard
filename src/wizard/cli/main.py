@@ -1,6 +1,8 @@
 import json
 import logging
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +28,7 @@ WIZARD_HOME = Path.home() / ".wizard"
 
 _DEFAULT_CONFIG = {
     "jira": {"base_url": "", "project_key": "", "token": "", "email": ""},
-    "notion": {"token": "", "daily_page_id": "", "sisu_work_page_id": "", "tasks_db_id": "", "meetings_db_id": ""},
+    "notion": {"token": "", "sisu_work_page_id": "", "tasks_db_id": "", "meetings_db_id": ""},
     "scrubbing": {"enabled": True, "allowlist": []},
 }
 
@@ -93,6 +95,27 @@ def _run_notion_discovery(config_path: Path) -> None:
         typer.echo(f"  {k}: {v}")
 
 
+def _refresh_skills(dest: Path) -> None:
+    """Copy skills from the package into dest, replacing any existing copy."""
+    source = _package_skills_dir()
+    if source.exists():
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(source, dest)
+        typer.echo(f"Installed skills to {dest}")
+    else:
+        typer.echo("No skills found in package — skipping skill install")
+
+
+def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
+    """Run a subprocess step, printing label and ok/FAILED. Returns (success, output)."""
+    typer.echo(f"  {label}...", nl=False)
+    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    ok = result.returncode == 0
+    typer.echo(" ok" if ok else " FAILED")
+    return ok, (result.stdout + result.stderr).strip()
+
+
 @app.command()
 def setup(
     agent: Optional[str] = typer.Option(
@@ -120,15 +143,7 @@ def setup(
         typer.echo(f"Config already exists at {config_path}")
 
     # Copy skills from package to ~/.wizard/skills/
-    source = _package_skills_dir()
-    dest = WIZARD_HOME / "skills"
-    if source.exists():
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(source, dest)
-        typer.echo(f"Installed skills to {dest}")
-    else:
-        typer.echo("No skills found in package — skipping skill install")
+    _refresh_skills(WIZARD_HOME / "skills")
 
     # Determine which agent(s) to register
     if agent is None:
@@ -277,13 +292,65 @@ def _check_skills_installed() -> tuple[bool, str]:
     return False, f"Skills not installed at {skills_dir} — run 'wizard setup --agent claude-code'"
 
 
+def _validate_properties(
+    available: dict[str, str], expected: list[tuple[str, str]]
+) -> list[str]:
+    """Return error strings for each property that is missing or has the wrong type."""
+    errors = []
+    for name, expected_type in expected:
+        if name not in available:
+            errors.append(f"'{name}' not found (expected {expected_type})")
+        elif available[name] != expected_type:
+            errors.append(f"'{name}' is {available[name]}, expected {expected_type}")
+    return errors
+
+
 def _check_notion_schema() -> tuple[bool, str]:
     from wizard.config import Settings
+    from wizard.integrations import NotionSdkClient
+    from wizard import notion_discovery
+
     s = Settings()
-    schema = s.notion.notion_schema  # NOTE: field is notion_schema, NOT schema
-    if schema.task_name and schema.task_status and schema.meeting_title:
-        return True, "Notion schema configured"
-    return False, "Notion schema incomplete — run 'wizard setup --reconfigure-notion'"
+    notion = s.notion
+    schema = notion.notion_schema
+
+    if not notion.token or not notion.tasks_db_id or not notion.meetings_db_id:
+        return False, "Notion not configured — run 'wizard setup --reconfigure-notion'"
+
+    client = NotionSdkClient(auth=notion.token)
+    tasks_props = notion_discovery.fetch_db_properties(client, notion.tasks_db_id)
+    meetings_props = notion_discovery.fetch_db_properties(client, notion.meetings_db_id)
+
+    if not tasks_props and not meetings_props:
+        return False, "Could not reach Notion API — check token and network"
+
+    task_fields: list[tuple[str, str]] = [
+        (schema.task_name, "title"),
+        (schema.task_status, "status"),
+        (schema.task_priority, "select"),
+        (schema.task_due_date, "date"),
+        (schema.task_jira_key, "url"),
+    ]
+    meeting_fields: list[tuple[str, str]] = [
+        (schema.meeting_title, "title"),
+        (schema.meeting_date, "date"),
+        (schema.meeting_url, "url"),
+        (schema.meeting_summary, "rich_text"),
+        ("Category", "multi_select"),
+    ]
+
+    task_errors = _validate_properties(tasks_props, task_fields)
+    meeting_errors = _validate_properties(meetings_props, meeting_fields)
+
+    parts = []
+    if task_errors:
+        parts.append(f"Tasks DB: {'; '.join(task_errors)}")
+    if meeting_errors:
+        parts.append(f"Meetings DB: {'; '.join(meeting_errors)}")
+
+    if parts:
+        return False, " | ".join(parts)
+    return True, "Notion schema matches live DB"
 
 
 _DOCTOR_CHECK_NAMES = [
@@ -453,3 +520,26 @@ def analytics(
         "compounding": compounding,
     }
     typer.echo(analytics_module.format_table(combined, start, end))
+
+
+@app.command()
+def update() -> None:
+    """Pull latest code, sync deps, run migrations, and refresh skills."""
+    # main.py lives at src/wizard/cli/main.py — 3 levels up is the repo root
+    repo_root = Path(__file__).resolve().parents[3]
+    sync_args = ["uv", "sync"] if shutil.which("uv") else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
+
+    steps: list[tuple[str, list[str]]] = [
+        ("git pull", ["git", "pull"]),
+        ("sync deps", sync_args),
+        ("run migrations", ["alembic", "upgrade", "head"]),
+    ]
+
+    for label, args in steps:
+        ok, output = _run_update_step(label, args, repo_root)
+        if not ok:
+            typer.echo(output, err=True)
+            raise typer.Exit(1)
+
+    _refresh_skills(WIZARD_HOME / "skills")
+    typer.echo("Wizard updated.")
