@@ -277,13 +277,62 @@ def _check_skills_installed() -> tuple[bool, str]:
     return False, f"Skills not installed at {skills_dir} — run 'wizard setup --agent claude-code'"
 
 
+def _validate_properties(
+    available: dict[str, str], expected: list[tuple[str, str]]
+) -> list[str]:
+    """Return error strings for each property that is missing or has the wrong type."""
+    errors = []
+    for name, expected_type in expected:
+        if name not in available:
+            errors.append(f"'{name}' not found (expected {expected_type})")
+        elif available[name] != expected_type:
+            errors.append(f"'{name}' is {available[name]}, expected {expected_type}")
+    return errors
+
+
 def _check_notion_schema() -> tuple[bool, str]:
     from wizard.config import Settings
+    from wizard.integrations import NotionSdkClient
+    from wizard import notion_discovery
+
     s = Settings()
-    schema = s.notion.notion_schema  # NOTE: field is notion_schema, NOT schema
-    if schema.task_name and schema.task_status and schema.meeting_title:
-        return True, "Notion schema configured"
-    return False, "Notion schema incomplete — run 'wizard setup --reconfigure-notion'"
+    notion = s.notion
+    schema = notion.notion_schema
+
+    if not notion.tasks_db_id or not notion.meetings_db_id:
+        return False, "Notion DB IDs not configured — run 'wizard setup --reconfigure-notion'"
+
+    client = NotionSdkClient(auth=notion.token)
+    tasks_props = notion_discovery.fetch_db_properties(client, notion.tasks_db_id)
+    meetings_props = notion_discovery.fetch_db_properties(client, notion.meetings_db_id)
+
+    task_fields: list[tuple[str, str]] = [
+        (schema.task_name, "title"),
+        (schema.task_status, "status"),
+        (schema.task_priority, "select"),
+        (schema.task_due_date, "date"),
+        (schema.task_jira_key, "url"),
+    ]
+    meeting_fields: list[tuple[str, str]] = [
+        (schema.meeting_title, "title"),
+        (schema.meeting_date, "date"),
+        (schema.meeting_url, "url"),
+        (schema.meeting_summary, "rich_text"),
+        ("Category", "multi_select"),
+    ]
+
+    task_errors = _validate_properties(tasks_props, task_fields)
+    meeting_errors = _validate_properties(meetings_props, meeting_fields)
+
+    parts = []
+    if task_errors:
+        parts.append(f"Tasks DB: {'; '.join(task_errors)}")
+    if meeting_errors:
+        parts.append(f"Meetings DB: {'; '.join(meeting_errors)}")
+
+    if parts:
+        return False, " | ".join(parts)
+    return True, "Notion schema matches live DB"
 
 
 _DOCTOR_CHECK_NAMES = [

@@ -525,7 +525,8 @@ def test_doctor_all_checks_pass_with_valid_setup(tmp_path, monkeypatch):
          patch("wizard.cli.main._check_migration_current", return_value=(True, "ok")), \
          patch("wizard.cli.main._check_agent_registrations", return_value=(True, "ok")), \
          patch("wizard.cli.main._check_allowlist_file", return_value=(True, "ok")), \
-         patch("wizard.cli.main._check_skills_installed", return_value=(True, "ok")):
+         patch("wizard.cli.main._check_skills_installed", return_value=(True, "ok")), \
+         patch("wizard.cli.main._check_notion_schema", return_value=(True, "Notion schema matches live DB")):
         from typer.testing import CliRunner
         from wizard.cli.main import app
         runner_local = CliRunner()
@@ -541,3 +542,117 @@ def test_doctor_stops_at_first_failure_without_all_flag(tmp_path, monkeypatch):
     runner_local = CliRunner()
     result = runner_local.invoke(app, ["doctor"])
     assert result.exit_code != 0
+
+
+# --- _check_notion_schema unit tests ---
+
+
+def test_check_notion_schema_passes_when_live_db_matches(tmp_path, monkeypatch):
+    """_check_notion_schema returns True when all expected properties exist with correct types."""
+    import json
+    config = {
+        "notion": {
+            "token": "tok",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+        }
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+
+    tasks_props = {
+        "Task": "title",
+        "Status": "status",
+        "Priority": "select",
+        "Due date": "date",
+        "Jira": "url",
+    }
+    meetings_props = {
+        "Meeting name": "title",
+        "Date": "date",
+        "Krisp URL": "url",
+        "Summary": "rich_text",
+        "Category": "multi_select",
+    }
+    with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[tasks_props, meetings_props]), \
+         patch("wizard.integrations.NotionSdkClient"):
+        from wizard.cli.main import _check_notion_schema
+        ok, msg = _check_notion_schema()
+
+    assert ok is True
+    assert "matches" in msg
+
+
+def test_check_notion_schema_fails_when_task_property_missing(tmp_path, monkeypatch):
+    """_check_notion_schema returns False when a tasks DB property is absent."""
+    import json
+    config = {
+        "notion": {
+            "token": "tok",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+        }
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+
+    tasks_props = {
+        # "Task" title property is missing
+        "Status": "status",
+        "Priority": "select",
+        "Due date": "date",
+        "Jira": "url",
+    }
+    meetings_props = {
+        "Meeting name": "title",
+        "Date": "date",
+        "Krisp URL": "url",
+        "Summary": "rich_text",
+        "Category": "multi_select",
+    }
+    with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[tasks_props, meetings_props]), \
+         patch("wizard.integrations.NotionSdkClient"):
+        from wizard.cli.main import _check_notion_schema
+        ok, msg = _check_notion_schema()
+
+    assert ok is False
+    assert "Tasks DB" in msg
+    assert "'Task'" in msg
+
+
+def test_check_notion_schema_fails_when_property_has_wrong_type(tmp_path, monkeypatch):
+    """_check_notion_schema returns False when a property exists but has the wrong type."""
+    import json
+    config = {
+        "notion": {
+            "token": "tok",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+        }
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+
+    tasks_props = {
+        "Task": "title",
+        "Status": "status",
+        "Priority": "multi_select",  # wrong — should be "select"
+        "Due date": "date",
+        "Jira": "url",
+    }
+    meetings_props = {
+        "Meeting name": "title",
+        "Date": "date",
+        "Krisp URL": "url",
+        "Summary": "rich_text",
+        "Category": "multi_select",
+    }
+    with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[tasks_props, meetings_props]), \
+         patch("wizard.integrations.NotionSdkClient"):
+        from wizard.cli.main import _check_notion_schema
+        ok, msg = _check_notion_schema()
+
+    assert ok is False
+    assert "Tasks DB" in msg
+    assert "multi_select" in msg
+    assert "select" in msg
