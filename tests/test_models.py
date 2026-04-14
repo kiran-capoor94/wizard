@@ -359,3 +359,10 @@ class TestTaskStateModel:
         assert state.decision_count == 1
         assert state.last_note_at == now
         assert state.stale_days == 2
+
+
+def test_toolcall_called_at_is_naive():
+    """ToolCall.called_at default must be timezone-naive (consistent with SQLite storage)."""
+    from wizard.models import ToolCall
+    tc = ToolCall(tool_name="test_tool")
+    assert tc.called_at.tzinfo is None

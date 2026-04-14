@@ -142,9 +142,8 @@ class Note(TimestampMixin, table=True):
     mental_model: str | None = Field(
         default=None,
         description=(
-            "1-2 sentence causal abstraction written by the engineer; "
-            "soft cap 1500 chars at the application display layer; "
-            "stored as-is, not scrubbed"
+            "1-2 sentence causal abstraction written by the engineer. "
+            "Soft cap 1500 chars at the application display layer."
         ),
     )
     source_id: str | None = Field(
@@ -169,7 +168,7 @@ class ToolCall(SQLModel, table=True):
     session_id: int | None = Field(default=None, foreign_key="wizardsession.id")
     tool_name: str
     called_at: datetime.datetime = Field(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc), index=True
+        default_factory=datetime.datetime.now, index=True
     )
 
 
