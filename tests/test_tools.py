@@ -2033,6 +2033,53 @@ async def test_update_task_source_url(db_session):
 
 
 # ---------------------------------------------------------------------------
+# Fix 2: update_task outcome writeback called before context exits (no double-commit)
+# ---------------------------------------------------------------------------
+
+
+async def test_update_task_outcome_writeback_called_when_elicited(db_session):
+    """Outcome writeback must be called when elicitation returns text."""
+    from wizard.tools import update_task
+    from wizard.models import Task, TaskStatus, TaskPriority, TaskCategory, TaskState
+    import datetime
+
+    task = Task(
+        name="Fix auth",
+        status=TaskStatus.IN_PROGRESS,
+        priority=TaskPriority.MEDIUM,
+        category=TaskCategory.ISSUE,
+        notion_id="notion-page-123",
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+    state = TaskState(
+        task_id=task.id,
+        note_count=0,
+        decision_count=0,
+        last_touched_at=datetime.datetime.now(),
+        stale_days=0,
+    )
+    db_session.add(state)
+    db_session.commit()
+
+    ctx = MockContext(elicit_response="Shipped the fix.")
+    wb_mock = MagicMock()
+    wb_mock.push_task_status.return_value = MagicMock(ok=True, error=None)
+    wb_mock.push_task_status_to_notion.return_value = MagicMock(ok=True, error=None, page_id="notion-page-123")
+    wb_mock.append_task_outcome.return_value = MagicMock(ok=True, error=None)
+
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        result = await update_task(ctx, task_id=task.id, status=TaskStatus.DONE)
+
+    wb_mock.append_task_outcome.assert_called_once()
+    call_args = wb_mock.append_task_outcome.call_args
+    assert "Shipped the fix." in call_args[0][1]
+    assert result.updated_fields == ["status"]
+
+
+# ---------------------------------------------------------------------------
 # Fix 1: rewind_task + what_am_i_missing session linkage
 # ---------------------------------------------------------------------------
 

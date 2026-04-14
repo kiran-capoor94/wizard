@@ -154,6 +154,15 @@ def _extract_krisp_id(url: str | None) -> str | None:
 # ============================================================================
 
 
+def _is_daily_page_title(title: str) -> bool:
+    """Return True if title matches the daily-page format, e.g. 'Wednesday 9 April 2026'."""
+    try:
+        datetime.datetime.strptime(title, "%A %d %B %Y")
+        return True
+    except ValueError:
+        return False
+
+
 class NotionClient:
     def __init__(
         self,
@@ -241,8 +250,9 @@ class NotionClient:
             block_title = block.get("child_page", {}).get("title", "")
             if block_title == title:
                 page_id = block["id"]
-            else:
+            elif _is_daily_page_title(block_title):
                 stale_ids.append(block["id"])
+            # Non-daily pages are left untouched
 
         created = False
         if page_id is None:
