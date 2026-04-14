@@ -28,7 +28,7 @@ WIZARD_HOME = Path.home() / ".wizard"
 
 _DEFAULT_CONFIG = {
     "jira": {"base_url": "", "project_key": "", "token": "", "email": ""},
-    "notion": {"token": "", "daily_page_id": "", "sisu_work_page_id": "", "tasks_db_id": "", "meetings_db_id": ""},
+    "notion": {"token": "", "sisu_work_page_id": "", "tasks_db_id": "", "meetings_db_id": ""},
     "scrubbing": {"enabled": True, "allowlist": []},
 }
 
@@ -520,3 +520,25 @@ def analytics(
         "compounding": compounding,
     }
     typer.echo(analytics_module.format_table(combined, start, end))
+
+
+@app.command()
+def update() -> None:
+    """Pull latest code, sync deps, run migrations, and refresh skills."""
+    repo_root = Path(__file__).resolve().parents[3]
+    sync_args = ["uv", "sync"] if shutil.which("uv") else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
+
+    steps: list[tuple[str, list[str]]] = [
+        ("git pull", ["git", "pull"]),
+        ("sync deps", sync_args),
+        ("run migrations", ["alembic", "upgrade", "head"]),
+    ]
+
+    for label, args in steps:
+        ok, output = _run_update_step(label, args, repo_root)
+        if not ok:
+            typer.echo(output, err=True)
+            raise typer.Exit(1)
+
+    _refresh_skills(WIZARD_HOME / "skills")
+    typer.echo("Wizard updated.")
