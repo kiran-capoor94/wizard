@@ -299,12 +299,15 @@ def _check_notion_schema() -> tuple[bool, str]:
     notion = s.notion
     schema = notion.notion_schema
 
-    if not notion.tasks_db_id or not notion.meetings_db_id:
-        return False, "Notion DB IDs not configured — run 'wizard setup --reconfigure-notion'"
+    if not notion.token or not notion.tasks_db_id or not notion.meetings_db_id:
+        return False, "Notion not configured — run 'wizard setup --reconfigure-notion'"
 
     client = NotionSdkClient(auth=notion.token)
     tasks_props = notion_discovery.fetch_db_properties(client, notion.tasks_db_id)
     meetings_props = notion_discovery.fetch_db_properties(client, notion.meetings_db_id)
+
+    if not tasks_props and not meetings_props:
+        return False, "Could not reach Notion API — check token and network"
 
     task_fields: list[tuple[str, str]] = [
         (schema.task_name, "title"),
