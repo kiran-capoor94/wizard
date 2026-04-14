@@ -987,3 +987,85 @@ def test_notion_client_uses_schema_for_meeting_url():
         meetings = client.fetch_meetings()
     assert len(meetings) == 1
     assert meetings[0].krisp_url == "https://fathom.video/123"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: meeting_category uses schema field
+# ---------------------------------------------------------------------------
+
+
+def test_notion_fetch_meetings_uses_schema_meeting_category():
+    """fetch_meetings reads category using the schema meeting_category field name."""
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings(meeting_category="Meeting Type")
+    mock_pages = [
+        {
+            "id": "m-1",
+            "properties": {
+                "Meeting name": {"title": [{"plain_text": "Sprint Retro"}]},
+                "Meeting Type": {"multi_select": [{"name": "Retro"}]},
+                "Summary": {"rich_text": []},
+                "Krisp URL": {"url": None},
+                "Date": {"date": None},
+            },
+        }
+    ]
+    with patch("wizard.integrations.collect_paginated_api", return_value=mock_pages):
+        client = make_notion_client(schema=schema)
+        meetings = client.fetch_meetings()
+
+    assert len(meetings) == 1
+    assert meetings[0].categories == ["Retro"]
+
+
+def test_notion_create_meeting_page_uses_schema_meeting_category():
+    """create_meeting_page uses schema.meeting_category as the property key."""
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings(meeting_category="Meeting Type")
+
+    with patch("wizard.integrations.NotionSdkClient") as mock_cls:
+        mock_instance = MagicMock()
+        mock_cls.return_value = mock_instance
+        mock_instance.pages.create.return_value = {"id": "new-page"}
+
+        client = make_notion_client(schema=schema)
+        page_id = client.create_meeting_page(title="Standup", category="Standup")
+
+    assert page_id == "new-page"
+    call_props = mock_instance.pages.create.call_args.kwargs["properties"]
+    assert "Meeting Type" in call_props
+    assert "Category" not in call_props
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: Jira URL uses browse URL format
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_jira_fetch_open_tasks_uses_browse_url():
+    """fetch_open_tasks should return the browse URL, not the REST API self URL."""
+    respx.post("https://jira.example.com/rest/api/3/search/jql").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "issues": [
+                    {
+                        "key": "ENG-42",
+                        "fields": {
+                            "summary": "Some task",
+                            "status": {"name": "To Do"},
+                            "priority": {"name": "Medium"},
+                            "issuetype": {"name": "Story"},
+                            "self": "https://jira.example.com/rest/api/3/issue/12345",
+                        },
+                    }
+                ]
+            },
+        )
+    )
+    client = make_jira_client()
+    tasks = client.fetch_open_tasks()
+
+    assert len(tasks) == 1
+    assert tasks[0].url == "https://jira.example.com/browse/ENG-42"
