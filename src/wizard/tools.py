@@ -150,7 +150,7 @@ async def task_start(ctx: Context, task_id: int) -> TaskStartResponse:
                 key = note.note_type.value
                 notes_by_type[key] = notes_by_type.get(key, 0) + 1
 
-            prior_notes = [NoteDetail.from_model(n) for n in notes]
+            prior_notes = [NoteDetail.from_model(n) for n in reversed(notes) if n.id is not None]
 
             latest_mental_model = next(
                 (n.mental_model for n in notes if n.mental_model is not None),
@@ -239,6 +239,8 @@ async def update_task(
     - status: Jira + Notion
     - due_date: Notion only
     - priority: Notion only
+    - name: local only (no external writeback)
+    - source_url: local only (no external writeback)
     """
     logger.info("update_task task_id=%d", task_id)
 
