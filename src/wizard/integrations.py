@@ -339,27 +339,23 @@ class NotionClient:
         """Create page in Tasks DB, return page_id."""
         client = self._require_client()
 
-        try:
-            properties: dict = {
-                "Task": {"title": [{"text": {"content": name}}]},
-                "Status": {"status": {"name": status}},
-            }
+        properties: dict = {
+            self._schema.task_name: {"title": [{"text": {"content": name}}]},
+            self._schema.task_status: {"status": {"name": status}},
+        }
 
-            if priority:
-                properties["Priority"] = {"select": {"name": priority}}
-            if jira_url:
-                properties["Jira"] = {"url": jira_url}
-            if due_date:
-                properties["Due date"] = {"date": {"start": due_date}}
+        if priority:
+            properties[self._schema.task_priority] = {"select": {"name": priority}}
+        if jira_url:
+            properties[self._schema.task_jira_key] = {"url": jira_url}
+        if due_date:
+            properties[self._schema.task_due_date] = {"date": {"start": due_date}}
 
-            response = client.pages.create(
-                parent={"database_id": self._tasks_db_id},
-                properties=properties,
-            )
-            return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
-        except APIResponseError as e:
-            logger.warning("Notion create_task_page failed: %s", e)
-            return None
+        response = client.pages.create(
+            parent={"database_id": self._tasks_db_id},
+            properties=properties,
+        )
+        return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
 
     def create_meeting_page(
         self,
@@ -371,25 +367,21 @@ class NotionClient:
         """Create page in Meeting Notes DB, return page_id."""
         client = self._require_client()
 
-        try:
-            properties = {
-                "Meeting name": {"title": [{"text": {"content": title}}]},
-                "Category": {"multi_select": [{"name": category}]},
-            }
+        properties: dict = {
+            self._schema.meeting_title: {"title": [{"text": {"content": title}}]},
+            "Category": {"multi_select": [{"name": category}]},
+        }
 
-            if krisp_url:
-                properties["Krisp URL"] = {"url": krisp_url}
-            if summary:
-                properties["Summary"] = {"rich_text": [{"text": {"content": summary}}]}
+        if krisp_url:
+            properties[self._schema.meeting_url] = {"url": krisp_url}
+        if summary:
+            properties[self._schema.meeting_summary] = {"rich_text": [{"text": {"content": summary}}]}
 
-            response = client.pages.create(
-                parent={"database_id": self._meetings_db_id},
-                properties=properties,
-            )
-            return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
-        except APIResponseError as e:
-            logger.warning("Notion create_meeting_page failed: %s", e)
-            return None
+        response = client.pages.create(
+            parent={"database_id": self._meetings_db_id},
+            properties=properties,
+        )
+        return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
 
     def update_task_status(self, page_id: str, status: str) -> bool:
         """Update Status property on task page."""
@@ -398,7 +390,7 @@ class NotionClient:
         try:
             client.pages.update(
                 page_id=page_id,
-                properties={"Status": {"status": {"name": status}}},
+                properties={self._schema.task_status: {"status": {"name": status}}},
             )
             return True
         except APIResponseError as e:
@@ -412,7 +404,7 @@ class NotionClient:
         try:
             client.pages.update(
                 page_id=page_id,
-                properties={"Summary": {"rich_text": [{"text": {"content": summary}}]}},
+                properties={self._schema.meeting_summary: {"rich_text": [{"text": {"content": summary}}]}},
             )
             return True
         except APIResponseError as e:
