@@ -52,7 +52,7 @@ Extract the skills-copy block from `setup()` into a `_refresh_skills()` helper. 
 
 ### `uv` detection
 
-`shutil.which("uv")` — if found, use `["uv", "sync"]`; otherwise fall back to `["pip", "install", "-e", str(repo_root)]`.
+`shutil.which("uv")` — if found, use `["uv", "sync"]`; otherwise fall back to `[sys.executable, "-m", "pip", "install", "-e", str(repo_root)]` to ensure the same Python interpreter that runs wizard installs the deps.
 
 ### Alembic step
 
