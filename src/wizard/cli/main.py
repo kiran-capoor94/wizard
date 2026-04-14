@@ -93,6 +93,18 @@ def _run_notion_discovery(config_path: Path) -> None:
         typer.echo(f"  {k}: {v}")
 
 
+def _refresh_skills(dest: Path) -> None:
+    """Copy skills from the package into dest, replacing any existing copy."""
+    source = _package_skills_dir()
+    if source.exists():
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(source, dest)
+        typer.echo(f"Installed skills to {dest}")
+    else:
+        typer.echo("No skills found in package — skipping skill install")
+
+
 @app.command()
 def setup(
     agent: Optional[str] = typer.Option(
@@ -120,15 +132,7 @@ def setup(
         typer.echo(f"Config already exists at {config_path}")
 
     # Copy skills from package to ~/.wizard/skills/
-    source = _package_skills_dir()
-    dest = WIZARD_HOME / "skills"
-    if source.exists():
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(source, dest)
-        typer.echo(f"Installed skills to {dest}")
-    else:
-        typer.echo("No skills found in package — skipping skill install")
+    _refresh_skills(WIZARD_HOME / "skills")
 
     # Determine which agent(s) to register
     if agent is None:
