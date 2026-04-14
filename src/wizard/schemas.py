@@ -1,7 +1,24 @@
 import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, WrapSerializer
+
+def _ensure_utc_z(v, handler) -> str:
+    """Ensure datetime is serialized as UTC ISO-8601 with 'Z' suffix."""
+    dt = handler(v)
+    if isinstance(dt, str):
+        if "+" in dt:
+            return dt.split("+")[0] + "Z"
+        if not dt.endswith("Z"):
+            return dt + "Z"
+        return dt
+    return dt
+
+UTCDateTime = Annotated[
+    datetime.datetime,
+    WrapSerializer(_ensure_utc_z, when_used="json"),
+    Field(json_schema_extra={"format": "date-time"})
+]
 
 from .models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskState, TaskStatus, MeetingCategory
 
@@ -156,12 +173,12 @@ class TaskContext(BaseModel):
     status: TaskStatus
     priority: TaskPriority
     category: TaskCategory
-    due_date: datetime.datetime | None
+    due_date: UTCDateTime | None
     source_id: str | None
     source_url: str | None
     last_note_type: NoteType | None  # most recent note type, or None
     last_note_preview: str | None  # first 300 chars of most recent note
-    last_worked_at: datetime.datetime | None  # created_at of most recent note
+    last_worked_at: UTCDateTime | None  # created_at of most recent note
     notion_id: str | None = None
     stale_days: int = 0
     note_count: int = 0
@@ -199,7 +216,7 @@ class MeetingContext(BaseModel):
     id: int
     title: str
     category: MeetingCategory
-    created_at: datetime.datetime
+    created_at: UTCDateTime
     already_summarised: bool
     source_url: str | None = None
     source_type: str | None = None
@@ -207,7 +224,7 @@ class MeetingContext(BaseModel):
 
 class TimelineEntry(BaseModel):
     note_id: int
-    created_at: datetime.datetime
+    created_at: UTCDateTime
     note_type: NoteType
     preview: str               # content[:200]
     mental_model: str | None
@@ -216,7 +233,7 @@ class TimelineEntry(BaseModel):
 class RewindSummary(BaseModel):
     total_notes: int
     duration_days: int         # 0 if fewer than 2 notes
-    last_activity: datetime.datetime
+    last_activity: UTCDateTime
 
 
 class RewindResponse(BaseModel):
@@ -229,7 +246,7 @@ class NoteDetail(BaseModel):
     id: int
     note_type: NoteType
     content: str
-    created_at: datetime.datetime
+    created_at: UTCDateTime
     source_id: str | None
     mental_model: str | None = None
 
