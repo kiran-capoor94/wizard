@@ -656,3 +656,47 @@ def test_check_notion_schema_fails_when_property_has_wrong_type(tmp_path, monkey
     assert "Tasks DB" in msg
     assert "multi_select" in msg
     assert "select" in msg
+
+
+def test_check_notion_schema_fails_when_token_not_configured(tmp_path, monkeypatch):
+    """_check_notion_schema returns False immediately when Notion token is empty."""
+    import json
+    config = {
+        "notion": {
+            "token": "",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+        }
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+
+    with patch("wizard.integrations.NotionSdkClient") as mock_client:
+        from wizard.cli.main import _check_notion_schema
+        ok, msg = _check_notion_schema()
+
+    mock_client.assert_not_called()
+    assert ok is False
+    assert "configured" in msg
+
+
+def test_check_notion_schema_fails_on_connectivity_error(tmp_path, monkeypatch):
+    """_check_notion_schema returns a connectivity error when fetch_db_properties returns {} for both DBs."""
+    import json
+    config = {
+        "notion": {
+            "token": "tok",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+        }
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+
+    with patch("wizard.notion_discovery.fetch_db_properties", return_value={}), \
+         patch("wizard.integrations.NotionSdkClient"):
+        from wizard.cli.main import _check_notion_schema
+        ok, msg = _check_notion_schema()
+
+    assert ok is False
+    assert "Notion API" in msg or "network" in msg.lower() or "token" in msg.lower()
