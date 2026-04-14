@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, WrapSerializer
 
+
 def _ensure_utc_z(v, handler) -> str:
     """Ensure datetime is serialized as UTC ISO-8601 with 'Z' suffix."""
     dt = handler(v)
@@ -14,13 +15,23 @@ def _ensure_utc_z(v, handler) -> str:
         return dt
     return dt
 
+
 UTCDateTime = Annotated[
     datetime.datetime,
     WrapSerializer(_ensure_utc_z, when_used="json"),
-    Field(json_schema_extra={"format": "date-time"})
+    Field(json_schema_extra={"format": "date-time"}),
 ]
 
-from .models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskState, TaskStatus, MeetingCategory
+from .models import (
+    Note,
+    NoteType,
+    Task,
+    TaskCategory,
+    TaskPriority,
+    TaskState,
+    TaskStatus,
+    MeetingCategory,
+)
 
 
 class SessionState(BaseModel):
@@ -35,6 +46,7 @@ class SessionState(BaseModel):
     open_loops: list[str] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
     closure_status: Literal["clean", "interrupted", "blocked"]
+
 
 # --- Integration response models (typed outputs from Jira/Notion clients) ---
 
@@ -192,7 +204,9 @@ class TaskContext(BaseModel):
         latest_note: Note | None = None,
     ) -> "TaskContext":
         if task.id is None:
-            raise ValueError("Cannot build TaskContext from an unpersisted Task (id is None)")
+            raise ValueError(
+                "Cannot build TaskContext from an unpersisted Task (id is None)"
+            )
         return cls(
             id=task.id,
             name=task.name,
@@ -226,13 +240,13 @@ class TimelineEntry(BaseModel):
     note_id: int
     created_at: UTCDateTime
     note_type: NoteType
-    preview: str               # content[:200]
+    preview: str  # content[:200]
     mental_model: str | None
 
 
 class RewindSummary(BaseModel):
     total_notes: int
-    duration_days: int         # 0 if fewer than 2 notes
+    duration_days: int  # 0 if fewer than 2 notes
     last_activity: UTCDateTime
 
 
@@ -253,7 +267,9 @@ class NoteDetail(BaseModel):
     @classmethod
     def from_model(cls, note) -> "NoteDetail":
         if note.id is None:
-            raise ValueError("Cannot build NoteDetail from an unpersisted Note (id is None)")
+            raise ValueError(
+                "Cannot build NoteDetail from an unpersisted Note (id is None)"
+            )
         return cls(
             id=note.id,
             note_type=note.note_type,
@@ -298,6 +314,18 @@ class UpdateTaskStatusResponse(BaseModel):
     jira_write_back: WriteBackStatus
     notion_write_back: WriteBackStatus
     task_state_updated: bool = True
+    deprecation_warning: str | None = (
+        "Use update_task instead. Run 'wizard update' to upgrade."
+    )
+
+
+class UpdateTaskResponse(BaseModel):
+    task_id: int
+    updated_fields: list[str]
+    status_writeback: WriteBackStatus | None = None
+    due_date_writeback: WriteBackStatus | None = None
+    priority_writeback: WriteBackStatus | None = None
+    task_state_updated: bool = False
 
 
 class GetMeetingResponse(BaseModel):
