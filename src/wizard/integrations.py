@@ -367,7 +367,7 @@ class NotionClient:
         """Create page in Meeting Notes DB, return page_id."""
         client = self._require_client()
 
-        properties = {
+        properties: dict = {
             self._schema.meeting_title: {"title": [{"text": {"content": title}}]},
             "Category": {"multi_select": [{"name": category}]},
         }
