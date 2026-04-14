@@ -3,25 +3,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, WrapSerializer
 
-
-def _ensure_utc_z(v, handler) -> str:
-    """Ensure datetime is serialized as UTC ISO-8601 with 'Z' suffix."""
-    dt = handler(v)
-    if isinstance(dt, str):
-        if "+" in dt:
-            return dt.split("+")[0] + "Z"
-        if not dt.endswith("Z"):
-            return dt + "Z"
-        return dt
-    return dt
-
-
-UTCDateTime = Annotated[
-    datetime.datetime,
-    WrapSerializer(_ensure_utc_z, when_used="json"),
-    Field(json_schema_extra={"format": "date-time"}),
-]
-
 from .models import (
     Note,
     NoteType,
@@ -32,6 +13,30 @@ from .models import (
     TaskStatus,
     MeetingCategory,
 )
+
+
+def _ensure_utc_z(v, handler) -> str:
+    """Serialize datetime as UTC ISO-8601 string with 'Z' suffix.
+
+    Naive datetimes are treated as UTC (SQLite always strips timezone).
+    Offset-aware datetimes are converted to UTC before formatting.
+    """
+    result = handler(v)
+    if not isinstance(result, str):
+        return result
+    if result.endswith("Z"):
+        return result
+    if isinstance(v, datetime.datetime) and v.tzinfo is not None:
+        utc_dt = v.astimezone(datetime.timezone.utc)
+        return utc_dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+    return result + "Z"
+
+
+UTCDateTime = Annotated[
+    datetime.datetime,
+    WrapSerializer(_ensure_utc_z, when_used="json"),
+    Field(json_schema_extra={"format": "date-time"}),
+]
 
 
 class SessionState(BaseModel):
