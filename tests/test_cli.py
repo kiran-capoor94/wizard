@@ -700,3 +700,33 @@ def test_check_notion_schema_fails_on_connectivity_error(tmp_path, monkeypatch):
 
     assert ok is False
     assert "Notion API" in msg or "network" in msg.lower() or "token" in msg.lower()
+
+
+def test_check_notion_schema_fails_when_one_db_unreachable(tmp_path, monkeypatch):
+    """When only tasks DB is unreachable, all task fields are reported missing; meetings pass."""
+    import json
+    config = {
+        "notion": {
+            "token": "tok",
+            "tasks_db_id": "tasks-db",
+            "meetings_db_id": "meetings-db",
+        }
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
+
+    meetings_props = {
+        "Meeting name": "title",
+        "Date": "date",
+        "Krisp URL": "url",
+        "Summary": "rich_text",
+        "Category": "multi_select",
+    }
+    with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[{}, meetings_props]), \
+         patch("wizard.integrations.NotionSdkClient"):
+        from wizard.cli.main import _check_notion_schema
+        ok, msg = _check_notion_schema()
+
+    assert ok is False
+    assert "Tasks DB" in msg
+    assert "Meetings DB" not in msg
