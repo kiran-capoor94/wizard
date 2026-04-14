@@ -71,7 +71,7 @@ def test_run_update_step_returns_false_on_failure(tmp_path):
 
 
 def test_run_update_step_passes_cwd_to_subprocess(tmp_path):
-    from unittest.mock import MagicMock, call
+    from unittest.mock import MagicMock
     from wizard.cli.main import _run_update_step
 
     mock_result = MagicMock(returncode=0, stdout="", stderr="")
@@ -100,14 +100,14 @@ def _fresh_update_app(wizard_dir):
             self.app = app
             return self
 
-        def __exit__(self, *exc):
+        def __exit__(self, *_):
             self._patcher.stop()
 
     return _Ctx()
 
 
 def test_update_runs_all_three_subprocess_steps(tmp_path):
-    from unittest.mock import MagicMock, call
+    from unittest.mock import MagicMock
 
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
@@ -128,13 +128,11 @@ def test_update_runs_all_three_subprocess_steps(tmp_path):
 
 
 def test_update_uses_uv_sync_when_uv_available(tmp_path):
-    from unittest.mock import MagicMock
-
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
     captured_calls = []
 
-    def capturing_step(label, args, cwd):
+    def capturing_step(label, args, _cwd):
         captured_calls.append((label, args))
         return True, ""
 
@@ -150,13 +148,11 @@ def test_update_uses_uv_sync_when_uv_available(tmp_path):
 
 
 def test_update_falls_back_to_pip_when_uv_missing(tmp_path):
-    from unittest.mock import MagicMock
-
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
     captured_calls = []
 
-    def capturing_step(label, args, cwd):
+    def capturing_step(label, args, _cwd):
         captured_calls.append((label, args))
         return True, ""
 
@@ -175,12 +171,10 @@ def test_update_falls_back_to_pip_when_uv_missing(tmp_path):
 
 
 def test_update_exits_1_on_step_failure(tmp_path):
-    from unittest.mock import MagicMock
-
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
 
-    def failing_step(label, args, cwd):
+    def failing_step(*_):
         return False, "fatal: not a git repo"
 
     with _fresh_update_app(wizard_dir) as ctx:
@@ -194,13 +188,11 @@ def test_update_exits_1_on_step_failure(tmp_path):
 
 
 def test_update_stops_after_first_failure(tmp_path):
-    from unittest.mock import MagicMock
-
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
     call_count = 0
 
-    def step_that_fails_first(label, args, cwd):
+    def step_that_fails_first(*_):
         nonlocal call_count
         call_count += 1
         return False, "error"
