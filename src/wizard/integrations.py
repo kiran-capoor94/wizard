@@ -367,25 +367,21 @@ class NotionClient:
         """Create page in Meeting Notes DB, return page_id."""
         client = self._require_client()
 
-        try:
-            properties = {
-                "Meeting name": {"title": [{"text": {"content": title}}]},
-                "Category": {"multi_select": [{"name": category}]},
-            }
+        properties = {
+            self._schema.meeting_title: {"title": [{"text": {"content": title}}]},
+            "Category": {"multi_select": [{"name": category}]},
+        }
 
-            if krisp_url:
-                properties["Krisp URL"] = {"url": krisp_url}
-            if summary:
-                properties["Summary"] = {"rich_text": [{"text": {"content": summary}}]}
+        if krisp_url:
+            properties[self._schema.meeting_url] = {"url": krisp_url}
+        if summary:
+            properties[self._schema.meeting_summary] = {"rich_text": [{"text": {"content": summary}}]}
 
-            response = client.pages.create(
-                parent={"database_id": self._meetings_db_id},
-                properties=properties,
-            )
-            return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
-        except APIResponseError as e:
-            logger.warning("Notion create_meeting_page failed: %s", e)
-            return None
+        response = client.pages.create(
+            parent={"database_id": self._meetings_db_id},
+            properties=properties,
+        )
+        return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
 
     def update_task_status(self, page_id: str, status: str) -> bool:
         """Update Status property on task page."""
