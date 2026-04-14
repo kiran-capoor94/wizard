@@ -1,3 +1,4 @@
+import datetime
 import logging
 from typing import Literal
 
@@ -53,7 +54,9 @@ from .schemas import (
     SourceSyncStatus,
     TaskStartResponse,
     TimelineEntry,
+    UpdateTaskResponse,
     UpdateTaskStatusResponse,
+    WriteBackStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,7 +64,9 @@ logger = logging.getLogger(__name__)
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
-async def _log_tool_call(db: Session, tool_name: str, session_id: int | None = None) -> None:
+async def _log_tool_call(
+    db: Session, tool_name: str, session_id: int | None = None
+) -> None:
     db.add(ToolCall(tool_name=tool_name, session_id=session_id))
     db.flush()
 
@@ -96,7 +101,9 @@ async def session_start(ctx: Context) -> SessionStartResponse:
                 sync_results.append(SourceSyncStatus(source=source, ok=True))
             except Exception as e:
                 logger.warning("Sync failed for %s: %s", source, e)
-                sync_results.append(SourceSyncStatus(source=source, ok=False, error=str(e)))
+                sync_results.append(
+                    SourceSyncStatus(source=source, ok=False, error=str(e))
+                )
         await ctx.report_progress(3, 3, "Sync complete.")
 
         await ctx.set_state("current_session_id", session.id)
@@ -176,7 +183,10 @@ async def save_note(
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "save_note", session_id=session_id)
             task = task_repo().get_by_id(db, task_id)
-            if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
+            if (
+                note_type in (NoteType.INVESTIGATION, NoteType.DECISION)
+                and mental_model is None
+            ):
                 try:
                     result = await ctx.elicit(
                         "Optional: summarise what you now understand in 1-2 sentences (mental model). "
@@ -188,6 +198,8 @@ async def save_note(
                 except Exception as e:
                     logger.debug("ctx.elicit unavailable for mental_model: %s", e)
             clean = security().scrub(content).clean
+            if mental_model is not None:
+                mental_model = security().scrub(mental_model).clean
             note = Note(
                 note_type=note_type,
                 content=clean,
@@ -209,10 +221,140 @@ async def save_note(
         raise ToolError(str(e)) from e
 
 
+async def update_task(
+    ctx: Context,
+    task_id: int,
+    status: TaskStatus | None = None,
+    priority: TaskPriority | None = None,
+    due_date: str | None = None,
+    notion_id: str | None = None,
+    name: str | None = None,
+    source_url: str | None = None,
+) -> UpdateTaskResponse:
+    """Atomically update task fields. Only provided (non-None) fields are updated.
+
+    Raises ToolError if no fields are provided or task not found.
+
+    Writebacks:
+    - status: Jira + Notion
+    - due_date: Notion only
+    - priority: Notion only
+    """
+    logger.info("update_task task_id=%d", task_id)
+
+    if all(
+        v is None for v in [status, priority, due_date, notion_id, name, source_url]
+    ):
+        raise ToolError("At least one field must be provided to update_task")
+
+    try:
+        with get_session() as db:
+            session_id: int | None = await ctx.get_state("current_session_id")
+            await _log_tool_call(db, "update_task", session_id=session_id)
+
+            task = task_repo().get_by_id(db, task_id)
+
+            updated_fields: list[str] = []
+
+            if status is not None:
+                task.status = status
+                updated_fields.append("status")
+
+            if priority is not None:
+                task.priority = priority
+                updated_fields.append("priority")
+
+            if due_date is not None:
+                try:
+                    due_date_dt = datetime.datetime.fromisoformat(
+                        due_date.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    raise ToolError(
+                        f"Invalid due_date format: {due_date}. Use ISO 8601."
+                    )
+                task.due_date = due_date_dt
+                updated_fields.append("due_date")
+
+            if notion_id is not None:
+                task.notion_id = notion_id
+                updated_fields.append("notion_id")
+
+            if name is not None:
+                task.name = security().scrub(name).clean
+                updated_fields.append("name")
+
+            if source_url is not None:
+                task.source_url = source_url
+                updated_fields.append("source_url")
+
+            db.add(task)
+            db.flush()
+
+            task_state_updated = False
+            if "status" in updated_fields:
+                task_state_repo().on_status_changed(db, task.id)
+                task_state_updated = True
+
+            if status == TaskStatus.DONE and task.notion_id:
+                try:
+                    result = await ctx.elicit(
+                        "Task closed. What was the outcome? (1-2 sentences, or press Enter to skip)",
+                        response_type=str,
+                    )
+                    if isinstance(result, AcceptedElicitation) and result.data:
+                        scrubbed_outcome = security().scrub(result.data).clean
+                        writeback().append_task_outcome(task, scrubbed_outcome)
+                except Exception as e:
+                    logger.debug("ctx.elicit unavailable for task outcome: %s", e)
+
+            db.commit()
+
+            status_writeback = None
+            due_date_writeback = None
+            priority_writeback = None
+
+            if "status" in updated_fields:
+                jira_wb = writeback().push_task_status(task)
+                notion_wb = writeback().push_task_status_to_notion(task)
+                status_writeback = WriteBackStatus(
+                    ok=jira_wb.ok and notion_wb.ok,
+                    error=", ".join(filter(None, [jira_wb.error, notion_wb.error])),
+                    page_id=task.notion_id,
+                )
+
+            if "due_date" in updated_fields:
+                due_date_writeback = writeback().push_task_due_date(task)
+
+            if "priority" in updated_fields:
+                priority_writeback = writeback().push_task_priority(task)
+
+            return UpdateTaskResponse(
+                task_id=task.id,
+                updated_fields=updated_fields,
+                status_writeback=status_writeback,
+                due_date_writeback=due_date_writeback,
+                priority_writeback=priority_writeback,
+                task_state_updated=task_state_updated,
+            )
+    except ValueError as e:
+        logger.warning("update_task failed: %s", e)
+        raise ToolError(str(e)) from e
+
+
 async def update_task_status(
     ctx: Context, task_id: int, new_status: TaskStatus
 ) -> UpdateTaskStatusResponse:
-    """Updates task status locally and attempts Jira and Notion write-back."""
+    """Updates task status locally and attempts Jira and Notion write-back.
+
+    .. deprecated::
+        Use update_task instead. This tool will be removed in a future version.
+        Run ``wizard update`` to upgrade Wizard.
+    """
+    logger.warning(
+        "update_task_status is deprecated. Use update_task instead. "
+        "Run 'wizard update' to upgrade."
+    )
     logger.info(
         "update_task_status task_id=%d new_status=%s", task_id, new_status.value
     )
@@ -235,7 +377,10 @@ async def update_task_status(
                         "Task closed. What was the outcome? (1-2 sentences, or press Enter to skip)",
                         response_type=str,
                     )
-                    if isinstance(elicit_result, AcceptedElicitation) and elicit_result.data:
+                    if (
+                        isinstance(elicit_result, AcceptedElicitation)
+                        and elicit_result.data
+                    ):
                         scrubbed_outcome = security().scrub(elicit_result.data).clean
                         if task.notion_id:
                             writeback().append_task_outcome(task, scrubbed_outcome)
@@ -256,6 +401,7 @@ async def update_task_status(
                 jira_write_back=jira_wb,
                 notion_write_back=notion_wb,
                 task_state_updated=True,
+                deprecation_warning="Use update_task instead. Run 'wizard update' to upgrade.",
             )
     except ValueError as e:
         logger.warning("update_task_status failed: %s", e)
@@ -522,11 +668,12 @@ async def create_task(
         )
 
 
-async def rewind_task(task_id: int) -> RewindResponse:
+async def rewind_task(ctx: Context, task_id: int) -> RewindResponse:
     """Reconstruct the full note timeline for a task, oldest first."""
     logger.info("rewind_task task_id=%d", task_id)
     with get_session() as db:
-        await _log_tool_call(db, "rewind_task")
+        session_id: int | None = await ctx.get_state("current_session_id")
+        await _log_tool_call(db, "rewind_task", session_id=session_id)
 
         task = db.get(Task, task_id)
         if task is None:
@@ -536,7 +683,9 @@ async def rewind_task(task_id: int) -> RewindResponse:
         if task_state is None:
             raise ToolError(f"TaskState missing for task {task_id}")
 
-        notes_desc = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
+        notes_desc = note_repo().get_for_task(
+            db, task_id=task.id, source_id=task.source_id
+        )
         # Filter persisted notes only (id is None only for unpersisted models; DB rows always have id)
         notes_asc = [n for n in reversed(notes_desc) if n.id is not None]
 
@@ -564,16 +713,17 @@ async def rewind_task(task_id: int) -> RewindResponse:
             last_activity=last_activity,
         )
 
-        ctx = TaskContext.from_model(task, task_state)
+        task_ctx = TaskContext.from_model(task, task_state)
 
-        return RewindResponse(task=ctx, timeline=timeline, summary=summary)
+        return RewindResponse(task=task_ctx, timeline=timeline, summary=summary)
 
 
-async def what_am_i_missing(task_id: int) -> MissingResponse:
+async def what_am_i_missing(ctx: Context, task_id: int) -> MissingResponse:
     """Surface cognitive gaps for a task using seven diagnostic rules."""
     logger.info("what_am_i_missing task_id=%d", task_id)
     with get_session() as db:
-        await _log_tool_call(db, "what_am_i_missing")
+        session_id: int | None = await ctx.get_state("current_session_id")
+        await _log_tool_call(db, "what_am_i_missing", session_id=session_id)
         task = db.get(Task, task_id)
         if task is None:
             raise ToolError(f"Task {task_id} not found")
@@ -588,20 +738,40 @@ async def what_am_i_missing(task_id: int) -> MissingResponse:
 
         # Rule 1: no notes at all
         if nc == 0:
-            signals.append(Signal(type="no_context", severity="high",
-                                  message="No notes recorded for this task"))
+            signals.append(
+                Signal(
+                    type="no_context",
+                    severity="high",
+                    message="No notes recorded for this task",
+                )
+            )
         # Rule 2: stale
         if sd >= 3:
-            signals.append(Signal(type="stale", severity="medium",
-                                  message=f"No activity for {sd} days"))
+            signals.append(
+                Signal(
+                    type="stale",
+                    severity="medium",
+                    message=f"No activity for {sd} days",
+                )
+            )
         # Rule 3: very few notes
         if 0 < nc <= 2:
-            signals.append(Signal(type="low_context", severity="medium",
-                                  message="Very few notes — context may be shallow"))
+            signals.append(
+                Signal(
+                    type="low_context",
+                    severity="medium",
+                    message="Very few notes — context may be shallow",
+                )
+            )
         # Rule 4: notes exist but no decisions
         if dc == 0 and nc > 0:
-            signals.append(Signal(type="no_decisions", severity="medium",
-                                  message="No decisions recorded"))
+            signals.append(
+                Signal(
+                    type="no_decisions",
+                    severity="medium",
+                    message="No decisions recorded",
+                )
+            )
         # Rule 5: many investigations, no decisions (inline count query)
         inv_stmt = (
             select(Note)
@@ -610,12 +780,22 @@ async def what_am_i_missing(task_id: int) -> MissingResponse:
         )
         inv_notes = list(db.execute(inv_stmt).scalars().all())
         if len(inv_notes) > 3 and dc == 0:
-            signals.append(Signal(type="analysis_loop", severity="high",
-                                  message="Multiple investigations without a decision"))
+            signals.append(
+                Signal(
+                    type="analysis_loop",
+                    severity="high",
+                    message="Multiple investigations without a decision",
+                )
+            )
         # Rule 6: has notes but stale for 2+ days
         if task_state.last_note_at is not None and sd >= 2:
-            signals.append(Signal(type="lost_context", severity="medium",
-                                  message="Context may be degrading due to inactivity"))
+            signals.append(
+                Signal(
+                    type="lost_context",
+                    severity="medium",
+                    message="Context may be degrading due to inactivity",
+                )
+            )
         # Rule 7: no mental model captured (inline existence query)
         model_stmt = (
             select(Note)
@@ -625,19 +805,24 @@ async def what_am_i_missing(task_id: int) -> MissingResponse:
         )
         has_model = db.execute(model_stmt).scalars().first() is not None
         if nc >= 2 and not has_model:
-            signals.append(Signal(type="no_model", severity="medium",
-                                  message="No mental model captured — understanding may be shallow"))
+            signals.append(
+                Signal(
+                    type="no_model",
+                    severity="medium",
+                    message="No mental model captured — understanding may be shallow",
+                )
+            )
 
         signals.sort(key=lambda s: _SEVERITY_ORDER[s.severity])
         return MissingResponse(signals=signals)
 
 
-async def resume_session(session_id: int | None = None) -> ResumeSessionResponse:
+async def resume_session(
+    ctx: Context, session_id: int | None = None
+) -> ResumeSessionResponse:
     """Resume a prior session in a new thread. Creates a new session and syncs."""
     logger.info("resume_session session_id=%s", session_id)
     with get_session() as db:
-        await _log_tool_call(db, "resume_session")
-
         # Find prior session
         if session_id is not None:
             prior = db.get(WizardSession, session_id)
@@ -656,6 +841,7 @@ async def resume_session(session_id: int | None = None) -> ResumeSessionResponse
         db.flush()
         db.refresh(new_session)
         assert new_session.id is not None
+        await _log_tool_call(db, "resume_session", session_id=new_session.id)
 
         # Sync
         sync_results = sync_service().sync_all(db)
@@ -709,14 +895,20 @@ async def resume_session(session_id: int | None = None) -> ResumeSessionResponse
             ts = db.get(TaskState, tid)
             if t is not None:
                 latest_mm = next(
-                    (n.mental_model for n in reversed(notes) if n.mental_model is not None),
+                    (
+                        n.mental_model
+                        for n in reversed(notes)
+                        if n.mental_model is not None
+                    ),
                     None,
                 )
-                prior_notes.append(ResumedTaskNotes(
-                    task=TaskContext.from_model(t, ts),
-                    notes=[NoteDetail.from_model(n) for n in notes],
-                    latest_mental_model=latest_mm,
-                ))
+                prior_notes.append(
+                    ResumedTaskNotes(
+                        task=TaskContext.from_model(t, ts),
+                        notes=[NoteDetail.from_model(n) for n in notes],
+                        latest_mental_model=latest_mm,
+                    )
+                )
 
         return ResumeSessionResponse(
             session_id=new_session.id,
@@ -737,6 +929,7 @@ async def resume_session(session_id: int | None = None) -> ResumeSessionResponse
 mcp.tool()(session_start)
 mcp.tool()(task_start)
 mcp.tool()(save_note)
+mcp.tool()(update_task)
 mcp.tool()(update_task_status)
 mcp.tool()(get_meeting)
 mcp.tool()(save_meeting_summary)
