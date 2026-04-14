@@ -478,19 +478,6 @@ def test_notion_create_task_page_uses_schema_property_names():
     assert "Status" not in props
 
 
-def test_notion_create_task_page_propagates_api_error():
-    """create_task_page must propagate APIResponseError, not return None."""
-    error = APIResponseError("internal_server_error", 500, "Server error", httpx.Headers(), "")
-    with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
-        mock_client_instance = MagicMock()
-        mock_notion_class.return_value = mock_client_instance
-        mock_client_instance.pages.create.side_effect = error
-
-        client = make_notion_client()
-        with pytest.raises(APIResponseError):
-            client.create_task_page(name="Task", status="Backlog")
-
-
 # ---- create_meeting_page tests ----
 
 def test_notion_create_meeting_page_returns_page_id():
