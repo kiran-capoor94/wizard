@@ -400,13 +400,14 @@ async def test_save_meeting_summary_scrubs_and_persists(db_session):
     assert session.id is not None
     assert meeting.id is not None
 
-    ctx = MockContext()
+    impl = _MockContextImpl()
+    impl._state["current_session_id"] = session.id
+    ctx = mock_ctx(impl)
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
         result = await save_meeting_summary(
             ctx,
             meeting_id=meeting.id,
-            session_id=session.id,
             summary="patient 943 476 5919 was discussed",
         )
 
@@ -443,13 +444,14 @@ async def test_save_meeting_summary_tasks_linked_count(db_session):
     assert task1.id is not None
     assert task2.id is not None
 
-    ctx = MockContext()
+    impl = _MockContextImpl()
+    impl._state["current_session_id"] = session.id
+    ctx = mock_ctx(impl)
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
         result = await save_meeting_summary(
             ctx,
             meeting_id=meeting.id,
-            session_id=session.id,
             summary="sprint summary",
             task_ids=[task1.id, task2.id],
         )
@@ -1555,3 +1557,95 @@ async def test_session_end_rejects_invalid_closure_status(db_session):
                 next_actions=[],
                 closure_status="invalid_value",  # type: ignore[arg-type]
             )
+
+
+# ---------------------------------------------------------------------------
+# ToolCall session_id linkage for create_task and ingest_meeting
+# ---------------------------------------------------------------------------
+
+async def test_create_task_links_tool_call_to_active_session(db_session):
+    from wizard.tools import create_task
+    from wizard.models import ToolCall, WizardSession
+    from wizard.schemas import WriteBackStatus
+    from sqlmodel import select
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.flush()
+    db_session.refresh(session)
+
+    impl = _MockContextImpl()
+    impl._state["current_session_id"] = session.id
+    ctx = mock_ctx(impl)
+
+    wb_mock = MagicMock()
+    wb_mock.push_task_to_notion.return_value = WriteBackStatus(ok=False, error="no notion")
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        await create_task(ctx, name="new task")
+
+    rows = list(db_session.execute(select(ToolCall)).scalars().all())
+    assert len(rows) == 1
+    assert rows[0].session_id == session.id
+
+
+async def test_ingest_meeting_links_tool_call_to_active_session(db_session):
+    from wizard.tools import ingest_meeting
+    from wizard.models import ToolCall, WizardSession
+    from wizard.schemas import WriteBackStatus
+    from sqlmodel import select
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.flush()
+    db_session.refresh(session)
+
+    impl = _MockContextImpl()
+    impl._state["current_session_id"] = session.id
+    ctx = mock_ctx(impl)
+
+    wb_mock = MagicMock()
+    wb_mock.push_meeting_to_notion.return_value = WriteBackStatus(ok=False, error="no notion")
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        await ingest_meeting(ctx, title="standup", content="discussed items")
+
+    rows = list(db_session.execute(select(ToolCall)).scalars().all())
+    assert len(rows) == 1
+    assert rows[0].session_id == session.id
+
+
+# ---------------------------------------------------------------------------
+# save_meeting_summary reads session_id from ctx state
+# ---------------------------------------------------------------------------
+
+async def test_save_meeting_summary_reads_session_id_from_ctx_state(db_session):
+    """session_id must come from ctx state, not as an explicit parameter."""
+    from wizard.tools import save_meeting_summary
+    from wizard.models import WizardSession, Meeting, Note
+    from wizard.schemas import WriteBackStatus
+
+    session = WizardSession()
+    meeting = Meeting(title="planning", content="content")
+    db_session.add(session)
+    db_session.add(meeting)
+    db_session.flush()
+    db_session.refresh(session)
+    db_session.refresh(meeting)
+
+    impl = _MockContextImpl()
+    impl._state["current_session_id"] = session.id
+    ctx = mock_ctx(impl)
+
+    wb_mock = MagicMock()
+    wb_mock.push_meeting_summary.return_value = WriteBackStatus(ok=True)
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        result = await save_meeting_summary(
+            ctx,
+            meeting_id=meeting.id,
+            summary="planning notes",
+        )
+
+    saved = db_session.get(Note, result.note_id)
+    assert saved.session_id == session.id

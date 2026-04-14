@@ -220,7 +220,7 @@ def _check_db_tables() -> tuple[bool, str]:
         conn = sqlite3.connect(str(db_path))
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         conn.close()
-        required = {"task", "note", "meeting", "wizardsession", "toolcall"}
+        required = {"task", "note", "meeting", "wizardsession", "toolcall", "task_state"}
         missing = required - tables
         if missing:
             return False, f"Missing tables: {missing}"

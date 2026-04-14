@@ -7,10 +7,12 @@ def make_sync_service():
     from wizard.services import SyncService
     from wizard.integrations import JiraClient, NotionClient
     from wizard.security import SecurityService
+    from wizard.repositories import TaskStateRepository
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     security = SecurityService()
-    return SyncService(jira=jira, notion=notion, security=security), jira, notion
+    task_state_repo = TaskStateRepository()
+    return SyncService(jira=jira, notion=notion, security=security, task_state_repo=task_state_repo), jira, notion
 
 
 def test_sync_creates_new_task_from_jira(db_session):
@@ -579,3 +581,68 @@ def test_sync_notion_new_meeting_stores_summary(db_session):
     meetings = list(db_session.exec(select(Meeting)).all())
     assert len(meetings) == 1
     assert meetings[0].summary == "Quick sync on sprint progress"
+
+
+# TaskState creation during sync
+
+
+def test_sync_jira_creates_task_state_for_new_task(db_session):
+    from wizard.models import TaskState
+    from sqlmodel import select
+    svc, jira, notion = make_sync_service()
+    notion.fetch_tasks.return_value = []
+    notion.fetch_meetings.return_value = []
+    jira.fetch_open_tasks.return_value = [JiraTaskData(
+        key="ENG-10", summary="new jira task", status="To Do",
+        priority="Medium", issue_type="Issue", url="",
+    )]
+
+    svc.sync_jira(db_session)
+
+    states = list(db_session.exec(select(TaskState)).all())
+    assert len(states) == 1
+    assert states[0].note_count == 0
+
+
+def test_sync_notion_tasks_creates_task_state_for_new_task(db_session):
+    from wizard.models import TaskState
+    from sqlmodel import select
+    svc, jira, notion = make_sync_service()
+    jira.fetch_open_tasks.return_value = []
+    notion.fetch_meetings.return_value = []
+    notion.fetch_tasks.return_value = [NotionTaskData(
+        notion_id="notion-abc", name="new notion task",
+    )]
+
+    svc.sync_notion_tasks(db_session)
+
+    states = list(db_session.exec(select(TaskState)).all())
+    assert len(states) == 1
+    assert states[0].note_count == 0
+
+
+def test_sync_jira_does_not_duplicate_task_state_on_upsert(db_session):
+    from wizard.models import Task, TaskState, TaskStatus
+    from sqlmodel import select
+    svc, jira, notion = make_sync_service()
+    notion.fetch_tasks.return_value = []
+    notion.fetch_meetings.return_value = []
+
+    existing = Task(name="old", source_id="ENG-10", source_type="JIRA", status=TaskStatus.BLOCKED)
+    db_session.add(existing)
+    db_session.flush()
+    db_session.refresh(existing)
+    state = TaskState(task_id=existing.id, last_touched_at=existing.created_at, stale_days=5)
+    db_session.add(state)
+    db_session.flush()
+
+    jira.fetch_open_tasks.return_value = [JiraTaskData(
+        key="ENG-10", summary="updated name", status="In Progress",
+        priority="High", issue_type="Issue", url="",
+    )]
+
+    svc.sync_jira(db_session)
+
+    states = list(db_session.exec(select(TaskState)).all())
+    assert len(states) == 1
+    assert states[0].stale_days == 5
