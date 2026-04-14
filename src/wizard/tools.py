@@ -84,7 +84,8 @@ async def session_start(ctx: Context) -> SessionStartResponse:
         db.add(session)
         db.flush()
         db.refresh(session)
-        assert session.id is not None
+        if session.id is None:
+            raise ToolError("Internal error: session was not assigned an id after flush")
         await _log_tool_call(db, "session_start", session_id=session.id)
 
         svc = sync_service()
@@ -210,7 +211,8 @@ async def save_note(
                 session_id=session_id,
             )
             saved = note_repo().save(db, note)
-            assert saved.id is not None
+            if saved.id is None:
+                raise ToolError("Internal error: note was not assigned an id after flush")
             task_state_repo().on_note_saved(db, task_id)
             return SaveNoteResponse(
                 note_id=saved.id,
@@ -367,7 +369,8 @@ async def update_task_status(
             db.add(task)
             db.flush()
             db.refresh(task)
-            assert task.id is not None
+            if task.id is None:
+                raise ToolError("Internal error: task was not assigned an id after flush")
 
             task_state_repo().on_status_changed(db, task.id)
 
@@ -420,7 +423,8 @@ async def get_meeting(ctx: Context, meeting_id: int) -> GetMeetingResponse:
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "get_meeting", session_id=session_id)
             meeting = meeting_repo().get_by_id(db, meeting_id)
-            assert meeting.id is not None
+            if meeting.id is None:
+                raise ToolError("Internal error: meeting was not assigned an id after flush")
 
             linked_tasks = [
                 task_repo().build_task_context(db, t)
@@ -456,7 +460,8 @@ async def save_meeting_summary(
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "save_meeting_summary", session_id=session_id)
             meeting = meeting_repo().get_by_id(db, meeting_id)
-            assert meeting.id is not None
+            if meeting.id is None:
+                raise ToolError("Internal error: meeting was not assigned an id after flush")
 
             clean_summary = security().scrub(summary).clean
             meeting.summary = clean_summary
@@ -469,7 +474,8 @@ async def save_meeting_summary(
                 session_id=session_id,
             )
             saved = note_repo().save(db, note)
-            assert saved.id is not None
+            if saved.id is None:
+                raise ToolError("Internal error: note was not assigned an id after flush")
 
             if task_ids:
                 for tid in task_ids:
@@ -538,7 +544,8 @@ async def session_end(
             db.add(session)
             db.flush()
             db.refresh(session)
-            assert session.id is not None
+            if session.id is None:
+                raise ToolError("Internal error: session was not assigned an id after flush")
 
             note = Note(
                 note_type=NoteType.SESSION_SUMMARY,
@@ -546,7 +553,8 @@ async def session_end(
                 session_id=session.id,
             )
             saved = note_repo().save(db, note)
-            assert saved.id is not None
+            if saved.id is None:
+                raise ToolError("Internal error: note was not assigned an id after flush")
 
             wb_result = writeback().push_session_summary(session)
 
@@ -610,7 +618,8 @@ async def ingest_meeting(
 
         db.flush()
         db.refresh(meeting)
-        assert meeting.id is not None
+        if meeting.id is None:
+            raise ToolError("Internal error: meeting was not assigned an id after flush")
 
         wb_result = writeback().push_meeting_to_notion(meeting)
         if wb_result.page_id:
@@ -650,7 +659,8 @@ async def create_task(
         db.add(task)
         db.flush()
         db.refresh(task)
-        assert task.id is not None
+        if task.id is None:
+            raise ToolError("Internal error: task was not assigned an id after flush")
 
         task_state_repo().create_for_task(db, task)
 
@@ -787,8 +797,8 @@ async def what_am_i_missing(ctx: Context, task_id: int) -> MissingResponse:
                     message="Multiple investigations without a decision",
                 )
             )
-        # Rule 6: has notes but stale for 2+ days
-        if task_state.last_note_at is not None and sd >= 2:
+        # Rule 6: has notes and stale 2-3 days (rule 2 covers >= 3 days; avoid double-signal)
+        if task_state.last_note_at is not None and 2 <= sd < 3:
             signals.append(
                 Signal(
                     type="lost_context",
@@ -833,14 +843,16 @@ async def resume_session(
             if prior is None:
                 raise ToolError("No sessions with notes found")
 
-        assert prior.id is not None
+        if prior.id is None:
+            raise ToolError("Internal error: session was not assigned an id after flush")
 
         # Create new session
         new_session = WizardSession()
         db.add(new_session)
         db.flush()
         db.refresh(new_session)
-        assert new_session.id is not None
+        if new_session.id is None:
+            raise ToolError("Internal error: session was not assigned an id after flush")
         await _log_tool_call(db, "resume_session", session_id=new_session.id)
 
         # Sync
