@@ -308,8 +308,6 @@ async def update_task(
                 except Exception as e:
                     logger.debug("ctx.elicit unavailable for task outcome: %s", e)
 
-            db.commit()
-
             status_writeback = None
             due_date_writeback = None
             priority_writeback = None
