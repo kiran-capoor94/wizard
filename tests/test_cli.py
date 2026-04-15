@@ -459,10 +459,10 @@ def test_setup_interactive_prompt_invalid_selection(tmp_path):
     assert result.exit_code != 0
 
 
-# --- setup --reconfigure-notion tests ---
+# --- configure --notion tests ---
 
 
-def test_setup_reconfigure_notion_runs_discovery(tmp_path):
+def test_configure_notion_runs_discovery(tmp_path):
     from unittest.mock import patch
     import json
     wizard_dir = tmp_path / ".wizard"
@@ -470,17 +470,15 @@ def test_setup_reconfigure_notion_runs_discovery(tmp_path):
     config = {
         "notion": {
             "token": "test-token",
-            "tasks_db_id": "tasks-db",
-            "meetings_db_id": "meetings-db",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
         }
     }
     (wizard_dir / "config.json").write_text(json.dumps(config))
 
     with _fresh_app(wizard_dir) as ctx:
-        with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main.notion_discovery") as mock_nd, \
+        with patch("wizard.cli.main.notion_discovery") as mock_nd, \
              patch("wizard.cli.main.NotionSdkClient"):
-            mock_ar.read_registered_agents.return_value = []
             mock_nd.fetch_db_properties.return_value = {"Task": "title", "Status": "status"}
             mock_nd.match_properties.return_value = {
                 "task_name": "Task", "task_status": "Status",
@@ -488,7 +486,7 @@ def test_setup_reconfigure_notion_runs_discovery(tmp_path):
                 "task_jira_key": None, "meeting_title": "Meeting name",
                 "meeting_date": None, "meeting_url": None, "meeting_summary": None,
             }
-            result = runner.invoke(ctx.app, ["setup", "--reconfigure-notion"])
+            result = runner.invoke(ctx.app, ["configure", "--notion"])
 
     mock_nd.fetch_db_properties.assert_called()
     mock_nd.match_properties.assert_called()
@@ -515,18 +513,18 @@ def test_doctor_all_checks_pass_with_valid_setup(tmp_path, monkeypatch):
     db_path = tmp_path / "wizard.db"
     db_path.touch()
     config = {
-        "notion": {"token": "tok", "tasks_db_id": "t", "meetings_db_id": "m"},
+        "notion": {"token": "tok", "tasks_ds_id": "t", "meetings_ds_id": "m"},
         "jira": {"token": "jtok", "base_url": "https://jira.example.com", "project_key": "ENG"},
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
     monkeypatch.setenv("WIZARD_DB", str(db_path))
-    with patch("wizard.cli.main._check_db_tables", return_value=(True, "ok")), \
-         patch("wizard.cli.main._check_migration_current", return_value=(True, "ok")), \
-         patch("wizard.cli.main._check_agent_registrations", return_value=(True, "ok")), \
-         patch("wizard.cli.main._check_allowlist_file", return_value=(True, "ok")), \
-         patch("wizard.cli.main._check_skills_installed", return_value=(True, "ok")), \
-         patch("wizard.cli.main._check_notion_schema", return_value=(True, "Notion schema matches live DB")):
+    with patch("wizard.cli.doctor._check_db_tables", return_value=(True, "ok")), \
+         patch("wizard.cli.doctor._check_migration_current", return_value=(True, "ok")), \
+         patch("wizard.cli.doctor._check_agent_registrations", return_value=(True, "ok")), \
+         patch("wizard.cli.doctor._check_allowlist_file", return_value=(True, "ok")), \
+         patch("wizard.cli.doctor._check_skills_installed", return_value=(True, "ok")), \
+         patch("wizard.cli.doctor._check_notion_schema", return_value=(True, "Notion schema matches live DB")):
         from typer.testing import CliRunner
         from wizard.cli.main import app
         runner_local = CliRunner()
@@ -553,8 +551,8 @@ def test_check_notion_schema_passes_when_live_db_matches(tmp_path, monkeypatch):
     config = {
         "notion": {
             "token": "tok",
-            "tasks_db_id": "tasks-db",
-            "meetings_db_id": "meetings-db",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
         }
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
@@ -576,7 +574,7 @@ def test_check_notion_schema_passes_when_live_db_matches(tmp_path, monkeypatch):
     }
     with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[tasks_props, meetings_props]), \
          patch("wizard.integrations.NotionSdkClient"):
-        from wizard.cli.main import _check_notion_schema
+        from wizard.cli.doctor import _check_notion_schema
         ok, msg = _check_notion_schema()
 
     assert ok is True
@@ -589,8 +587,8 @@ def test_check_notion_schema_fails_when_task_property_missing(tmp_path, monkeypa
     config = {
         "notion": {
             "token": "tok",
-            "tasks_db_id": "tasks-db",
-            "meetings_db_id": "meetings-db",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
         }
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
@@ -612,7 +610,7 @@ def test_check_notion_schema_fails_when_task_property_missing(tmp_path, monkeypa
     }
     with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[tasks_props, meetings_props]), \
          patch("wizard.integrations.NotionSdkClient"):
-        from wizard.cli.main import _check_notion_schema
+        from wizard.cli.doctor import _check_notion_schema
         ok, msg = _check_notion_schema()
 
     assert ok is False
@@ -626,8 +624,8 @@ def test_check_notion_schema_fails_when_property_has_wrong_type(tmp_path, monkey
     config = {
         "notion": {
             "token": "tok",
-            "tasks_db_id": "tasks-db",
-            "meetings_db_id": "meetings-db",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
         }
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
@@ -649,7 +647,7 @@ def test_check_notion_schema_fails_when_property_has_wrong_type(tmp_path, monkey
     }
     with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[tasks_props, meetings_props]), \
          patch("wizard.integrations.NotionSdkClient"):
-        from wizard.cli.main import _check_notion_schema
+        from wizard.cli.doctor import _check_notion_schema
         ok, msg = _check_notion_schema()
 
     assert ok is False
@@ -664,15 +662,15 @@ def test_check_notion_schema_fails_when_token_not_configured(tmp_path, monkeypat
     config = {
         "notion": {
             "token": "",
-            "tasks_db_id": "tasks-db",
-            "meetings_db_id": "meetings-db",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
         }
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
 
     with patch("wizard.integrations.NotionSdkClient") as mock_client:
-        from wizard.cli.main import _check_notion_schema
+        from wizard.cli.doctor import _check_notion_schema
         ok, msg = _check_notion_schema()
 
     mock_client.assert_not_called()
@@ -686,8 +684,8 @@ def test_check_notion_schema_fails_on_connectivity_error(tmp_path, monkeypatch):
     config = {
         "notion": {
             "token": "tok",
-            "tasks_db_id": "tasks-db",
-            "meetings_db_id": "meetings-db",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
         }
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
@@ -695,7 +693,7 @@ def test_check_notion_schema_fails_on_connectivity_error(tmp_path, monkeypatch):
 
     with patch("wizard.notion_discovery.fetch_db_properties", return_value={}), \
          patch("wizard.integrations.NotionSdkClient"):
-        from wizard.cli.main import _check_notion_schema
+        from wizard.cli.doctor import _check_notion_schema
         ok, msg = _check_notion_schema()
 
     assert ok is False
@@ -708,8 +706,8 @@ def test_check_notion_schema_fails_when_one_db_unreachable(tmp_path, monkeypatch
     config = {
         "notion": {
             "token": "tok",
-            "tasks_db_id": "tasks-db",
-            "meetings_db_id": "meetings-db",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
         }
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
@@ -724,7 +722,7 @@ def test_check_notion_schema_fails_when_one_db_unreachable(tmp_path, monkeypatch
     }
     with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[{}, meetings_props]), \
          patch("wizard.integrations.NotionSdkClient"):
-        from wizard.cli.main import _check_notion_schema
+        from wizard.cli.doctor import _check_notion_schema
         ok, msg = _check_notion_schema()
 
     assert ok is False
@@ -743,7 +741,7 @@ def test_check_db_tables_fails_when_task_state_missing(tmp_path, monkeypatch):
     conn.close()
 
     monkeypatch.setenv("WIZARD_DB", str(db_path))
-    from wizard.cli.main import _check_db_tables
+    from wizard.cli.doctor import _check_db_tables
     ok, msg = _check_db_tables()
     assert ok is False
     assert "task_state" in msg
@@ -756,8 +754,8 @@ def test_check_notion_schema_uses_schema_meeting_category_field(tmp_path, monkey
     config = {
         "notion": {
             "token": "tok",
-            "tasks_db_id": "tasks-db",
-            "meetings_db_id": "meetings-db",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
             "notion_schema": {"meeting_category": "Meeting Type"},
         }
     }
@@ -775,7 +773,7 @@ def test_check_notion_schema_uses_schema_meeting_category_field(tmp_path, monkey
     }
     with patch("wizard.notion_discovery.fetch_db_properties", side_effect=[tasks_props, meetings_props]), \
          patch("wizard.integrations.NotionSdkClient"):
-        from wizard.cli.main import _check_notion_schema
+        from wizard.cli.doctor import _check_notion_schema
         ok, msg = _check_notion_schema()
 
     assert ok is True, f"Expected pass but got: {msg}"

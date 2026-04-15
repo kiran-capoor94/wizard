@@ -51,8 +51,8 @@ def test_notion_has_db_ids(tmp_path, monkeypatch):
     config_file.write_text(json.dumps({
         "db": ":memory:",
         "notion": {
-            "tasks_db_id": "abc-123",
-            "meetings_db_id": "def-456",
+            "tasks_ds_id": "abc-123",
+            "meetings_ds_id": "def-456",
             "token": "tok",
         }
     }))
@@ -60,8 +60,8 @@ def test_notion_has_db_ids(tmp_path, monkeypatch):
     import sys
     monkeypatch.delitem(sys.modules, "wizard.config", raising=False)
     from wizard.config import settings
-    assert settings.notion.tasks_db_id == "abc-123"
-    assert settings.notion.meetings_db_id == "def-456"
+    assert settings.notion.tasks_ds_id == "abc-123"
+    assert settings.notion.meetings_ds_id == "def-456"
 
 
 def test_notion_has_sisu_work_page_id():
