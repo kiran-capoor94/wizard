@@ -70,7 +70,7 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
   },
   "notion": {
     "token": "",
-    "sisu_work_page_id": "",
+    "daily_page_parent_id": "",
     "tasks_ds_id": "",
     "meetings_ds_id": ""
   },

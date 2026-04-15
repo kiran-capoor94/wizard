@@ -137,7 +137,7 @@ After running `wizard setup`, edit `~/.wizard/config.json`:
   },
   "notion": {
     "token": "your-notion-integration-token",
-    "sisu_work_page_id": "notion-page-id",
+    "daily_page_parent_id": "notion-page-id",
     "tasks_ds_id": "notion-tasks-data-source-id",
     "meetings_ds_id": "notion-meetings-data-source-id"
   },

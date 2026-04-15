@@ -30,7 +30,7 @@ _DEFAULT_CONFIG = {
     "jira": {"base_url": "", "project_key": "", "token": "", "email": ""},
     "notion": {
         "token": "",
-        "sisu_work_page_id": "",
+        "daily_page_parent_id": "",
         "tasks_ds_id": "",
         "meetings_ds_id": "",
     },
