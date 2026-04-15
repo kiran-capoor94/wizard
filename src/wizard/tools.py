@@ -119,6 +119,8 @@ async def session_start(ctx: Context) -> SessionStartResponse:
         except Exception as e:
             logger.warning("ensure_daily_page failed: %s", e)
 
+        task_state_repo().refresh_stale_days(db)
+
         return SessionStartResponse(
             session_id=session.id,
             open_tasks=task_repo().get_open_task_contexts(db),
@@ -297,6 +299,8 @@ async def update_task(
 
             task_state_updated = False
             if "status" in updated_fields:
+                if task.id is None:
+                    raise ToolError("Internal error: task was not assigned an id after flush")
                 task_state_repo().on_status_changed(db, task.id)
                 task_state_updated = True
 
@@ -513,6 +517,7 @@ async def session_end(
     open_loops: list[str],
     next_actions: list[str],
     closure_status: Literal["clean", "interrupted", "blocked"],
+    tool_registry: str | None = None,
 ) -> SessionEndResponse:
     """Persists session summary + six-field SessionState to WizardSession. Writes Notion daily page."""
     logger.info("session_end session_id=%d", session_id)
@@ -531,6 +536,7 @@ async def session_end(
                 open_loops=open_loops,
                 next_actions=next_actions,
                 closure_status=closure_status,
+                tool_registry=tool_registry,
             )
             session_state_saved = False
             try:
