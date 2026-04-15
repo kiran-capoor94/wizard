@@ -221,3 +221,7 @@ config.json
 # Wizard database
 wizard.db
 memory/
+
+# Local-only planning docs (agent workspaces)
+docs/
+.opencode/
