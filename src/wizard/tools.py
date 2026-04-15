@@ -119,7 +119,10 @@ async def session_start(ctx: Context) -> SessionStartResponse:
         except Exception as e:
             logger.warning("ensure_daily_page failed: %s", e)
 
-        task_state_repo().refresh_stale_days(db)
+        try:
+            task_state_repo().refresh_stale_days(db)
+        except Exception as e:
+            logger.warning("refresh_stale_days failed: %s", e)
 
         return SessionStartResponse(
             session_id=session.id,

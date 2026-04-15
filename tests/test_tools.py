@@ -138,6 +138,38 @@ async def test_session_start_daily_page_failure_is_non_fatal(db_session):
     assert result.daily_page is None
 
 
+async def test_session_start_refreshes_stale_days(db_session):
+    from wizard.tools import session_start
+    from unittest.mock import MagicMock, patch
+
+    ctx = MockContext()
+    patches, sync_mock, wb_mock = _patch_tools(db_session)
+
+    task_state_mock = MagicMock()
+    patches["task_state_repo"] = lambda: task_state_mock
+
+    with patch.multiple("wizard.tools", **patches):
+        await session_start(ctx)
+
+    task_state_mock.refresh_stale_days.assert_called_once()
+
+
+async def test_session_start_refresh_stale_days_failure_is_non_fatal(db_session):
+    from wizard.tools import session_start
+
+    ctx = MockContext()
+    patches, _, _ = _patch_tools(db_session)
+
+    task_state_mock = MagicMock()
+    task_state_mock.refresh_stale_days.side_effect = Exception("db error")
+    patches["task_state_repo"] = lambda: task_state_mock
+
+    with patch.multiple("wizard.tools", **patches):
+        result = await session_start(ctx)
+
+    assert result.session_id is not None
+
+
 # ---------------------------------------------------------------------------
 # task_start
 # ---------------------------------------------------------------------------
