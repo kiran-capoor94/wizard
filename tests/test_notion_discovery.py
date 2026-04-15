@@ -3,14 +3,14 @@ def test_fetch_db_properties_returns_name_type_dict():
     from wizard.notion_discovery import fetch_db_properties
 
     mock_client = MagicMock()
-    mock_client.databases.retrieve.return_value = {
+    mock_client.data_sources.retrieve.return_value = {
         "properties": {
             "Task": {"type": "title"},
             "Status": {"type": "status"},
             "Due date": {"type": "date"},
         }
     }
-    result = fetch_db_properties(mock_client, "db-123")
+    result = fetch_db_properties(mock_client, "ds-123")
     assert result == {"Task": "title", "Status": "status", "Due date": "date"}
 
 
@@ -19,8 +19,8 @@ def test_fetch_db_properties_returns_empty_on_error():
     from wizard.notion_discovery import fetch_db_properties
 
     mock_client = MagicMock()
-    mock_client.databases.retrieve.side_effect = Exception("API error")
-    result = fetch_db_properties(mock_client, "db-123")
+    mock_client.data_sources.retrieve.side_effect = Exception("API error")
+    result = fetch_db_properties(mock_client, "ds-123")
     assert result == {}
 
 
