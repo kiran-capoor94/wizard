@@ -64,11 +64,11 @@ def test_notion_has_db_ids(tmp_path, monkeypatch):
     assert settings.notion.meetings_ds_id == "def-456"
 
 
-def test_notion_has_sisu_work_page_id():
+def test_notion_has_daily_page_parent_id():
     from wizard.config import NotionSettings
     s = NotionSettings()
-    assert hasattr(s, "sisu_work_page_id")
-    assert s.sisu_work_page_id == ""
+    assert hasattr(s, "daily_page_parent_id")
+    assert s.daily_page_parent_id == ""
 
 
 def test_krisp_settings_removed(tmp_path, monkeypatch):

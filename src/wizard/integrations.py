@@ -167,12 +167,12 @@ class NotionClient:
     def __init__(
         self,
         token: str,
-        sisu_work_page_id: str,
+        daily_page_parent_id: str,
         tasks_ds_id: str,
         meetings_ds_id: str,
         schema: NotionSchemaSettings | None = None,
     ):
-        self._sisu_work_page_id = sisu_work_page_id
+        self._daily_page_parent_id = daily_page_parent_id
         self._tasks_ds_id = tasks_ds_id
         self._meetings_ds_id = meetings_ds_id
         self._client = NotionSdkClient(auth=token) if token else None
@@ -188,12 +188,12 @@ class NotionClient:
         client = self._require_client()
         return client.data_sources.query(data_source_id=data_source_id, **kwargs)  # pyright: ignore[reportReturnType]
 
-    def _list_sisu_work_children(self) -> list[dict]:
-        """Return non-archived child_page blocks under the SISU Work page."""
+    def _list_daily_page_parent_children(self) -> list[dict]:
+        """Return non-archived child_page blocks under the daily page parent."""
         client = self._require_client()
         blocks = collect_paginated_api(
             client.blocks.children.list,
-            block_id=self._sisu_work_page_id,
+            block_id=self._daily_page_parent_id,
         )
         return [
             block
@@ -202,9 +202,9 @@ class NotionClient:
         ]
 
     def find_daily_page(self, title: str) -> str | None:
-        """Find a child page of SISU Work matching the given title."""
+        """Find a child page of the daily page parent matching the given title."""
         try:
-            for block in self._list_sisu_work_children():
+            for block in self._list_daily_page_parent_children():
                 if block.get("child_page", {}).get("title") == title:
                     return block["id"]
             return None
@@ -213,11 +213,11 @@ class NotionClient:
             return None
 
     def create_daily_page(self, title: str) -> str | None:
-        """Create a child page under SISU Work with title and empty Session Summary."""
+        """Create a child page under the daily page parent."""
         client = self._require_client()
         try:
             response = client.pages.create(
-                parent={"page_id": self._sisu_work_page_id},
+                parent={"page_id": self._daily_page_parent_id},
                 properties={
                     "title": [{"text": {"content": title}}],
                     "Session Summary": {"rich_text": [{"text": {"content": ""}}]},
@@ -242,7 +242,7 @@ class NotionClient:
         """Find or create today's daily page. Archive stale daily pages."""
 
         title = _today_title()
-        children = self._list_sisu_work_children()
+        children = self._list_daily_page_parent_children()
 
         page_id: str | None = None
         stale_ids: list[str] = []
@@ -259,7 +259,7 @@ class NotionClient:
             page_id = self.create_daily_page(title)
             if page_id is None:
                 raise ConfigurationError(
-                    f"Failed to create daily page '{title}' under SISU Work"
+                    f"Failed to create daily page '{title}' under daily page parent"
                 )
             created = True
 
