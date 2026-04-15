@@ -13,6 +13,7 @@ def _parse_resource(result):
 
 def test_open_tasks_resource(db_session):
     from wizard.models import Task, TaskStatus
+    from wizard.repositories import TaskRepository
     from wizard.resources import open_tasks
 
     task = Task(name="Fix auth", status=TaskStatus.IN_PROGRESS)
@@ -20,7 +21,7 @@ def test_open_tasks_resource(db_session):
     db_session.commit()
 
     with patch("wizard.resources.get_session", mock_session(db_session)):
-        result = open_tasks()
+        result = open_tasks(t_repo=TaskRepository())
 
     data = _parse_resource(result)
     assert len(data["tasks"]) == 1
@@ -28,10 +29,11 @@ def test_open_tasks_resource(db_session):
 
 
 def test_open_tasks_resource_empty(db_session):
+    from wizard.repositories import TaskRepository
     from wizard.resources import open_tasks
 
     with patch("wizard.resources.get_session", mock_session(db_session)):
-        result = open_tasks()
+        result = open_tasks(t_repo=TaskRepository())
 
     data = _parse_resource(result)
     assert len(data["tasks"]) == 0
@@ -39,6 +41,7 @@ def test_open_tasks_resource_empty(db_session):
 
 def test_blocked_tasks_resource(db_session):
     from wizard.models import Task, TaskStatus
+    from wizard.repositories import TaskRepository
     from wizard.resources import blocked_tasks
 
     task = Task(name="Blocked task", status=TaskStatus.BLOCKED)
@@ -46,7 +49,7 @@ def test_blocked_tasks_resource(db_session):
     db_session.commit()
 
     with patch("wizard.resources.get_session", mock_session(db_session)):
-        result = blocked_tasks()
+        result = blocked_tasks(t_repo=TaskRepository())
 
     data = _parse_resource(result)
     assert len(data["tasks"]) == 1
@@ -55,6 +58,7 @@ def test_blocked_tasks_resource(db_session):
 
 def test_current_session_resource_active(db_session):
     from wizard.models import WizardSession, Task, TaskStatus
+    from wizard.repositories import TaskRepository
     from wizard.resources import current_session
 
     session = WizardSession()
@@ -65,7 +69,7 @@ def test_current_session_resource_active(db_session):
     db_session.refresh(session)
 
     with patch("wizard.resources.get_session", mock_session(db_session)):
-        result = current_session()
+        result = current_session(t_repo=TaskRepository())
 
     data = _parse_resource(result)
     assert data["session_id"] == session.id
@@ -74,10 +78,11 @@ def test_current_session_resource_active(db_session):
 
 
 def test_current_session_resource_none(db_session):
+    from wizard.repositories import TaskRepository
     from wizard.resources import current_session
 
     with patch("wizard.resources.get_session", mock_session(db_session)):
-        result = current_session()
+        result = current_session(t_repo=TaskRepository())
 
     data = _parse_resource(result)
     assert data["session_id"] is None
@@ -85,6 +90,7 @@ def test_current_session_resource_none(db_session):
 
 def test_task_context_resource(db_session):
     from wizard.models import Task, TaskStatus, Note, NoteType
+    from wizard.repositories import TaskRepository, NoteRepository
     from wizard.resources import task_context
 
     task = Task(name="Fix auth", status=TaskStatus.IN_PROGRESS, source_id="ENG-1")
@@ -98,7 +104,7 @@ def test_task_context_resource(db_session):
     db_session.commit()
 
     with patch("wizard.resources.get_session", mock_session(db_session)):
-        result = task_context(task_id=task.id)
+        result = task_context(task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
     data = _parse_resource(result)
     assert data["task"]["name"] == "Fix auth"
