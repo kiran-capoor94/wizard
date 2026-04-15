@@ -150,6 +150,22 @@ def setup(
     else:
         typer.echo(f"Config already exists at {config_path}")
 
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    if not cfg.get("notion", {}).get("daily_page_parent_id"):
+        page_id = typer.prompt(
+            "Notion daily page parent ID (the page where daily session notes are created)",
+            default="",
+        )
+        if page_id:
+            cfg.setdefault("notion", {})["daily_page_parent_id"] = page_id
+            with open(config_path, "w") as f:
+                json.dump(cfg, f, indent=2)
+            typer.echo(f"  Set daily_page_parent_id: {page_id}")
+        else:
+            typer.echo("  Skipped — set notion.daily_page_parent_id in config.json later")
+
     _refresh_skills(WIZARD_HOME / "skills")
 
     if agent is None:
