@@ -4,6 +4,8 @@ description: Facilitate an architecture decision — surface prior context, expl
 
 # Architecture Debate
 
+> **Tool check** — Before any investigation, analysis, or knowledge lookup: consult your Tool Registry from this session. Wizard tools first, then other MCPs. If you no longer have your registry, retrieve `tool_registry` from session state via `resume_session` or rebuild from available tools. Internal knowledge is the last resort.
+
 Use when making a design or architecture decision for a task.
 
 ## Steps
