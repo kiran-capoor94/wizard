@@ -3,6 +3,27 @@ import time
 import pytest
 
 
+def test_timestamp_mixin_created_at_is_always_naive():
+    """TimestampMixin.created_at must never carry timezone info.
+
+    pydantic v2 with validate_default=True converts datetime.now() to
+    UTC-aware. SQLite strips timezone on round-trip. This mismatch causes
+    TypeError when repositories subtract UTC-aware from naive datetimes.
+    All timestamps must be consistently naive.
+    """
+    from wizard.models import Task
+    task = Task(name="tz check")
+    assert task.created_at.tzinfo is None, (
+        f"created_at should be naive but got tzinfo={task.created_at.tzinfo}"
+    )
+
+
+def test_timestamp_mixin_updated_at_is_always_naive():
+    from wizard.models import Task
+    task = Task(name="tz check")
+    assert task.updated_at.tzinfo is None
+
+
 def test_created_at_is_not_frozen_at_module_load(db_session):
     from wizard.models import Task
 
@@ -338,3 +359,10 @@ class TestTaskStateModel:
         assert state.decision_count == 1
         assert state.last_note_at == now
         assert state.stale_days == 2
+
+
+def test_toolcall_called_at_is_naive():
+    """ToolCall.called_at default must be timezone-naive (consistent with SQLite storage)."""
+    from wizard.models import ToolCall
+    tc = ToolCall(tool_name="test_tool")
+    assert tc.called_at.tzinfo is None

@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 from .integrations import JiraClient, NotionClient, _extract_krisp_id
 from .mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
 from .models import Meeting, MeetingCategory, Task, WizardSession
+from .repositories import TaskStateRepository
 from .schemas import SourceSyncStatus, WriteBackStatus
 from .security import SecurityService
 
@@ -16,11 +17,16 @@ logger = logging.getLogger(__name__)
 
 class SyncService:
     def __init__(
-        self, jira: JiraClient, notion: NotionClient, security: SecurityService
+        self,
+        jira: JiraClient,
+        notion: NotionClient,
+        security: SecurityService,
+        task_state_repo: TaskStateRepository | None = None,
     ):
         self._jira = jira
         self._notion = notion
         self._security = security
+        self._task_state_repo = task_state_repo or TaskStateRepository()
 
     def sync_all(self, db: Session) -> list[SourceSyncStatus]:
         results: list[SourceSyncStatus] = []
@@ -60,6 +66,9 @@ class SyncService:
                     status=StatusMapper.jira_to_local(raw.status),
                 )
                 db.add(task)
+                db.flush()
+                db.refresh(task)
+                self._task_state_repo.create_for_task(db, task)
         db.flush()
 
     def sync_notion_tasks(self, db: Session) -> None:
@@ -120,6 +129,9 @@ class SyncService:
                     status=StatusMapper.notion_to_local(raw_status),
                 )
                 db.add(task)
+                db.flush()
+                db.refresh(task)
+                self._task_state_repo.create_for_task(db, task)
         db.flush()
 
     def sync_notion_meetings(self, db: Session) -> None:
@@ -184,7 +196,9 @@ class WriteBackService:
         self._jira = jira
         self._notion = notion
 
-    def _call(self, fn: Callable[[], Any], error_label: str, **status_kwargs) -> WriteBackStatus:
+    def _call(
+        self, fn: Callable[[], Any], error_label: str, **status_kwargs
+    ) -> WriteBackStatus:
         try:
             result = fn()
             if result:
@@ -212,6 +226,28 @@ class WriteBackService:
         return self._call(
             lambda: self._notion.update_task_status(notion_id, notion_status),
             "WriteBack push_task_status (Notion)",
+        )
+
+    def push_task_due_date(self, task: Task) -> WriteBackStatus:
+        """Push due_date to Notion if task has notion_id."""
+        if not task.notion_id:
+            return WriteBackStatus(ok=False, error="Task has no notion_id")
+        if not task.due_date:
+            return WriteBackStatus(ok=False, error="Task has no due_date")
+        due_date_iso = task.due_date.isoformat()
+        return self._call(
+            lambda: self._notion.update_task_due_date(task.notion_id, due_date_iso),
+            "WriteBack push_task_due_date",
+        )
+
+    def push_task_priority(self, task: Task) -> WriteBackStatus:
+        """Push priority to Notion if task has notion_id."""
+        if not task.notion_id:
+            return WriteBackStatus(ok=False, error="Task has no notion_id")
+        priority_label = PriorityMapper.local_to_notion(task.priority)
+        return self._call(
+            lambda: self._notion.update_task_priority(task.notion_id, priority_label),
+            "WriteBack push_task_priority",
         )
 
     def append_task_outcome(self, task: Task, summary: str) -> WriteBackStatus:

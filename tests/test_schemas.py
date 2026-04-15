@@ -205,3 +205,52 @@ def test_resume_session_response_round_trip():
     )
     assert resp.session_id == 2
     assert resp.session_state is None
+
+
+# ---------------------------------------------------------------------------
+# UTCDateTime serializer correctness
+# ---------------------------------------------------------------------------
+
+
+def test_utc_datetime_appends_z_to_naive():
+    """Naive datetime (SQLite round-trip) serializes as UTC with Z suffix."""
+    import json
+    from pydantic import BaseModel
+    from wizard.schemas import UTCDateTime
+
+    class M(BaseModel):
+        ts: UTCDateTime
+
+    naive = datetime.datetime(2026, 4, 15, 12, 0, 0)
+    result = json.loads(M(ts=naive).model_dump_json())
+    assert result["ts"] == "2026-04-15T12:00:00Z"
+
+
+def test_utc_datetime_preserves_already_utc_z():
+    """UTC-aware datetime with Z still serializes correctly."""
+    import json
+    from pydantic import BaseModel
+    from wizard.schemas import UTCDateTime
+
+    class M(BaseModel):
+        ts: UTCDateTime
+
+    utc_aware = datetime.datetime(2026, 4, 15, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    result = json.loads(M(ts=utc_aware).model_dump_json())
+    assert result["ts"] == "2026-04-15T12:00:00Z"
+
+
+def test_utc_datetime_converts_offset_aware_to_utc():
+    """Offset-aware datetime (non-UTC) must be *converted* to UTC, not just stripped."""
+    import json
+    from pydantic import BaseModel
+    from wizard.schemas import UTCDateTime
+
+    class M(BaseModel):
+        ts: UTCDateTime
+
+    ist = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    ist_dt = datetime.datetime(2026, 4, 15, 17, 30, 0, tzinfo=ist)  # = 12:00 UTC
+    result = json.loads(M(ts=ist_dt).model_dump_json())
+    # Must be 12:00:00Z, not 17:30:00Z (which is what the old code produced)
+    assert result["ts"] == "2026-04-15T12:00:00Z"
