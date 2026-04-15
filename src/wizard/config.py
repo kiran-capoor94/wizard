@@ -54,7 +54,7 @@ class NotionSchemaSettings(BaseModel):
 
 
 class NotionSettings(BaseModel):
-    sisu_work_page_id: str = ""
+    daily_page_parent_id: str = ""
     tasks_ds_id: str = ""
     meetings_ds_id: str = ""
     token: str = ""
