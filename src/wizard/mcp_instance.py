@@ -4,6 +4,7 @@ from fastmcp import FastMCP
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
 from .config import settings
+from .middleware import ToolLoggingMiddleware
 
 mcp = FastMCP(
     name=settings.name,
@@ -26,3 +27,5 @@ _package_skills = Path(__file__).resolve().parent / "skills"
 _roots = [p for p in [_installed_skills, _package_skills] if p.exists()]
 if _roots:
     mcp.add_provider(SkillsDirectoryProvider(roots=_roots))
+
+mcp.add_middleware(ToolLoggingMiddleware())
