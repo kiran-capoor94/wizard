@@ -7,24 +7,22 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from notion_client import (
-    Client as NotionSdkClient,
-)  # for --reconfigure-notion; enables patching
+from notion_client import Client as NotionSdkClient
 
-from wizard import notion_discovery  # for --reconfigure-notion; enables patching
-from wizard import agent_registration
-from wizard.cli import analytics as analytics_module  # enables patching
-from wizard.database import get_session as get_db_session  # enables patching
+from wizard import agent_registration, notion_discovery
+from wizard.cli import analytics as analytics_module
+from wizard.cli.doctor import doctor
+from wizard.database import get_session as get_db_session
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(name="wizard", invoke_without_command=True)
+app = typer.Typer(
+    name="wizard",
+    invoke_without_command=True,
+    help="Wizard — local memory layer for AI agents.",
+)
 
-
-@app.callback()
-def _main_callback() -> None:
-    """Wizard — local memory layer for AI agents."""
-
+app.command()(doctor)
 
 WIZARD_HOME = Path.home() / ".wizard"
 
@@ -32,12 +30,14 @@ _DEFAULT_CONFIG = {
     "jira": {"base_url": "", "project_key": "", "token": "", "email": ""},
     "notion": {
         "token": "",
-        "sisu_work_page_id": "",
-        "tasks_db_id": "",
-        "meetings_db_id": "",
+        "daily_page_parent_id": "",
+        "tasks_ds_id": "",
+        "meetings_ds_id": "",
     },
     "scrubbing": {"enabled": True, "allowlist": []},
 }
+
+_AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "all"]
 
 
 def _package_skills_dir() -> Path:
@@ -45,7 +45,25 @@ def _package_skills_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "skills"
 
 
-_AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "all"]
+def _refresh_skills(dest: Path) -> None:
+    """Copy skills from the package into dest, replacing any existing copy."""
+    source = _package_skills_dir()
+    if source.exists():
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(source, dest)
+        typer.echo(f"Installed skills to {dest}")
+    else:
+        typer.echo("No skills found in package — skipping skill install")
+
+
+def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
+    """Run a subprocess step, printing label and ok/FAILED. Returns (success, output)."""
+    typer.echo(f"  {label}...", nl=False)
+    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    ok = result.returncode == 0
+    typer.echo(" ok" if ok else " FAILED")
+    return ok, (result.stdout + result.stderr).strip()
 
 
 def _run_notion_discovery(config_path: Path) -> None:
@@ -60,8 +78,8 @@ def _run_notion_discovery(config_path: Path) -> None:
 
     notion_cfg = cfg.get("notion", {})
     token = notion_cfg.get("token", "")
-    tasks_db_id = notion_cfg.get("tasks_db_id", "")
-    meetings_db_id = notion_cfg.get("meetings_db_id", "")
+    tasks_ds_id = notion_cfg.get("tasks_ds_id", "")
+    meetings_ds_id = notion_cfg.get("meetings_ds_id", "")
 
     if not token:
         typer.echo(
@@ -73,8 +91,8 @@ def _run_notion_discovery(config_path: Path) -> None:
     client = NotionSdkClient(auth=token)
     typer.echo("Fetching Notion database schemas...")
 
-    tasks_props = notion_discovery.fetch_db_properties(client, tasks_db_id)
-    meetings_props = notion_discovery.fetch_db_properties(client, meetings_db_id)
+    tasks_props = notion_discovery.fetch_db_properties(client, tasks_ds_id)
+    meetings_props = notion_discovery.fetch_db_properties(client, meetings_ds_id)
     all_props = {**tasks_props, **meetings_props}
 
     required_fields = ["task_name", "task_status", "meeting_title"]
@@ -114,27 +132,6 @@ def _run_notion_discovery(config_path: Path) -> None:
         typer.echo(f"  {k}: {v}")
 
 
-def _refresh_skills(dest: Path) -> None:
-    """Copy skills from the package into dest, replacing any existing copy."""
-    source = _package_skills_dir()
-    if source.exists():
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(source, dest)
-        typer.echo(f"Installed skills to {dest}")
-    else:
-        typer.echo("No skills found in package — skipping skill install")
-
-
-def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
-    """Run a subprocess step, printing label and ok/FAILED. Returns (success, output)."""
-    typer.echo(f"  {label}...", nl=False)
-    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
-    ok = result.returncode == 0
-    typer.echo(" ok" if ok else " FAILED")
-    return ok, (result.stdout + result.stderr).strip()
-
-
 @app.command()
 def setup(
     agent: Optional[str] = typer.Option(
@@ -142,17 +139,8 @@ def setup(
         "--agent",
         help="Agent to register: claude-code, claude-desktop, gemini, opencode, codex, all",
     ),
-    reconfigure_notion: bool = typer.Option(
-        False,
-        "--reconfigure-notion",
-        help="Re-run Notion schema discovery only",
-    ),
 ) -> None:
     """Create ~/.wizard, default config, install skills, and register MCP."""
-    if reconfigure_notion:
-        _run_notion_discovery(WIZARD_HOME / "config.json")
-        return
-
     WIZARD_HOME.mkdir(parents=True, exist_ok=True)
 
     config_path = WIZARD_HOME / "config.json"
@@ -162,10 +150,24 @@ def setup(
     else:
         typer.echo(f"Config already exists at {config_path}")
 
-    # Copy skills from package to ~/.wizard/skills/
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    if not cfg.get("notion", {}).get("daily_page_parent_id"):
+        page_id = typer.prompt(
+            "Notion daily page parent ID (the page where daily session notes are created)",
+            default="",
+        )
+        if page_id:
+            cfg.setdefault("notion", {})["daily_page_parent_id"] = page_id
+            with open(config_path, "w") as f:
+                json.dump(cfg, f, indent=2)
+            typer.echo(f"  Set daily_page_parent_id: {page_id}")
+        else:
+            typer.echo("  Skipped — set notion.daily_page_parent_id in config.json later")
+
     _refresh_skills(WIZARD_HOME / "skills")
 
-    # Determine which agent(s) to register
     if agent is None:
         typer.echo("Which agent would you like to register?")
         for i, choice in enumerate(_AGENT_CHOICES, 1):
@@ -194,8 +196,20 @@ def setup(
             typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
 
     agent_registration.write_registered_agents(agents_to_register)
-
     typer.echo("Setup complete.")
+
+
+@app.command()
+def configure(
+    notion: bool = typer.Option(
+        False, "--notion", help="Re-run Notion schema discovery"
+    ),
+) -> None:
+    """Configure Wizard integrations."""
+    if notion:
+        _run_notion_discovery(WIZARD_HOME / "config.json")
+        return
+    typer.echo("Available flags: --notion")
 
 
 @app.command()
@@ -215,258 +229,15 @@ def sync() -> None:
     typer.echo("Sync complete.")
 
 
-# --- doctor helpers ---
-
-
-def _check_db_file() -> tuple[bool, str]:
-    import os
-
-    from wizard.config import settings
-
-    db_path_str = os.environ.get("WIZARD_DB", settings.db)
-    db_path = Path(db_path_str)
-    if db_path.exists():
-        return True, f"Database found: {db_path}"
-    return False, f"Database not found: {db_path} — run 'wizard setup' first"
-
-
-def _check_db_tables() -> tuple[bool, str]:
-    import os
-    import sqlite3
-
-    from wizard.config import settings
-
-    db_path_str = os.environ.get("WIZARD_DB", settings.db)
-    db_path = Path(db_path_str)
-    if not db_path.exists():
-        return False, "Database file missing — cannot check tables"
-    try:
-        conn = sqlite3.connect(str(db_path))
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        conn.close()
-        required = {
-            "task",
-            "note",
-            "meeting",
-            "wizardsession",
-            "toolcall",
-            "task_state",
-        }
-        missing = required - tables
-        if missing:
-            return False, f"Missing tables: {missing}"
-        return True, "All required tables present"
-    except Exception as exc:
-        return False, f"Could not inspect tables: {exc}"
-
-
-def _check_config_file() -> tuple[bool, str]:
-    import os
-
-    config_path = Path(
-        os.environ.get(
-            "WIZARD_CONFIG_FILE", str(Path.home() / ".wizard" / "config.json")
-        )
-    )
-    if config_path.exists():
-        return True, f"Config file found: {config_path}"
-    return False, f"Config file not found: {config_path}"
-
-
-def _check_notion_token() -> tuple[bool, str]:
-    from wizard.config import Settings
-
-    s = Settings()
-    if s.notion.token:
-        return True, "Notion token configured"
-    return False, "Notion token not set (notion.token)"
-
-
-def _check_jira_token() -> tuple[bool, str]:
-    from wizard.config import Settings
-
-    s = Settings()
-    if s.jira.token:
-        return True, "Jira token configured"
-    return False, "Jira token not set (jira.token) — Jira sync disabled"
-
-
-def _check_allowlist_file() -> tuple[bool, str]:
-    allowlist = Path.home() / ".wizard" / "allowlist.txt"
-    if allowlist.exists():
-        return True, f"Allowlist found: {allowlist}"
-    return False, f"Allowlist not found: {allowlist}"
-
-
-def _check_agent_registrations() -> tuple[bool, str]:
-    registered = agent_registration.read_registered_agents()
-    if not registered:
-        registered = agent_registration.scan_all_registered()
-    if registered:
-        return True, f"Registered agents: {', '.join(registered)}"
-    return False, "No agents registered — run 'wizard setup --agent <agent>'"
-
-
-def _check_migration_current() -> tuple[bool, str]:
-    try:
-        import os
-
-        from sqlalchemy import create_engine
-
-        from alembic.runtime.migration import MigrationContext
-        from wizard.config import settings
-
-        db_path_str = os.environ.get("WIZARD_DB", settings.db)
-        engine = create_engine(f"sqlite:///{db_path_str}")
-        with engine.connect() as conn:
-            ctx = MigrationContext.configure(conn)
-            current = ctx.get_current_revision()
-        return True, f"Migration current: {current}"
-    except Exception as exc:
-        return False, f"Migration check failed: {exc}"
-
-
-def _check_skills_installed() -> tuple[bool, str]:
-    skills_dir = Path.home() / ".wizard" / "skills"
-    if skills_dir.exists() and any(skills_dir.iterdir()):
-        return True, f"Skills directory present: {skills_dir}"
-    return (
-        False,
-        f"Skills not installed at {skills_dir} — run 'wizard setup --agent claude-code'",
-    )
-
-
-def _validate_properties(
-    available: dict[str, str], expected: list[tuple[str, str]]
-) -> list[str]:
-    """Return error strings for each property that is missing or has the wrong type."""
-    errors = []
-    for name, expected_type in expected:
-        if name not in available:
-            errors.append(f"'{name}' not found (expected {expected_type})")
-        elif available[name] != expected_type:
-            errors.append(f"'{name}' is {available[name]}, expected {expected_type}")
-    return errors
-
-
-def _check_notion_schema() -> tuple[bool, str]:
-    from wizard import notion_discovery
-    from wizard.config import Settings
-    from wizard.integrations import NotionSdkClient
-
-    s = Settings()
-    notion = s.notion
-    schema = notion.notion_schema
-
-    if not notion.token or not notion.tasks_db_id or not notion.meetings_db_id:
-        return False, "Notion not configured — run 'wizard setup --reconfigure-notion'"
-
-    client = NotionSdkClient(auth=notion.token)
-    tasks_props = notion_discovery.fetch_db_properties(client, notion.tasks_db_id)
-    meetings_props = notion_discovery.fetch_db_properties(client, notion.meetings_db_id)
-
-    if not tasks_props and not meetings_props:
-        return False, "Could not reach Notion API — check token and network"
-
-    task_fields: list[tuple[str, str]] = [
-        (schema.task_name, "title"),
-        (schema.task_status, "status"),
-        (schema.task_priority, "select"),
-        (schema.task_due_date, "date"),
-        (schema.task_jira_key, "url"),
-    ]
-    meeting_fields: list[tuple[str, str]] = [
-        (schema.meeting_title, "title"),
-        (schema.meeting_date, "date"),
-        (schema.meeting_url, "url"),
-        (schema.meeting_summary, "rich_text"),
-        (schema.meeting_category, "multi_select"),
-    ]
-
-    task_errors = _validate_properties(tasks_props, task_fields)
-    meeting_errors = _validate_properties(meetings_props, meeting_fields)
-
-    parts = []
-    if task_errors:
-        parts.append(f"Tasks DB: {'; '.join(task_errors)}")
-    if meeting_errors:
-        parts.append(f"Meetings DB: {'; '.join(meeting_errors)}")
-
-    if parts:
-        return False, " | ".join(parts)
-    return True, "Notion schema matches live DB"
-
-
-_DOCTOR_CHECK_NAMES = [
-    ("DB file exists", "_check_db_file"),
-    ("Notion token", "_check_notion_token"),
-    ("Jira token", "_check_jira_token"),
-    ("Config file", "_check_config_file"),
-    ("DB tables", "_check_db_tables"),
-    ("Allowlist file", "_check_allowlist_file"),
-    ("Agent registered", "_check_agent_registrations"),
-    ("Notion schema", "_check_notion_schema"),
-    ("Migration current", "_check_migration_current"),
-    ("Skills installed", "_check_skills_installed"),
-]
-
-
-def _get_doctor_checks():
-    """Build doctor checks list at call time so individual checks can be patched in tests."""
-    import wizard.cli.main as _self
-
-    return [(name, getattr(_self, fn_name)) for name, fn_name in _DOCTOR_CHECK_NAMES]
-
-
-@app.command()
-def doctor(
-    all_checks: bool = typer.Option(
-        False, "--all", help="Report all failures instead of stopping at first"
-    ),
-) -> None:
-    """Run health checks on the wizard installation."""
-    failures = []
-    notion_token_ok = True
-
-    for i, (name, check_fn) in enumerate(_get_doctor_checks(), 1):
-        if i == 8 and not notion_token_ok:
-            typer.echo(f"  [{i:2d}] SKIP  {name} (Notion token not configured)")
-            continue
-
-        passed, message = check_fn()
-
-        if i == 2:
-            notion_token_ok = passed
-
-        status = "PASS" if passed else "FAIL"
-        typer.echo(f"  [{i:2d}] {status}  {name}: {message}")
-
-        if not passed:
-            failures.append((i, name, message))
-            if not all_checks:
-                raise typer.Exit(1)
-
-    if failures:
-        raise typer.Exit(1)
-    typer.echo("All checks passed.")
-
-
 @app.command()
 def uninstall(
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
 ) -> None:
     """Remove all Wizard runtime state and MCP registration."""
-    # Read which agents are registered
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
 
-    # Gather which wizard files exist
     wizard_files = {
         "wizard.db": "all notes, sessions, meetings",
         "config.json": None,
@@ -485,7 +256,6 @@ def uninstall(
         typer.echo("Nothing to uninstall.")
         return
 
-    # Confirmation
     if not yes:
         typer.echo("This will permanently delete:")
         for name, desc in existing_files:
@@ -496,12 +266,10 @@ def uninstall(
         for aid in registered:
             typer.echo(f"  wizard MCP entry for {aid}")
         typer.echo("")
-        confirm = typer.prompt("Are you sure? [y/N]", default="N", show_default=False)
-        if confirm.lower() != "y":
+        if not typer.confirm("Are you sure?"):
             typer.echo("Aborted.")
             return
 
-    # Deregister all agents
     for aid in registered:
         try:
             agent_registration.deregister(aid)
@@ -509,7 +277,6 @@ def uninstall(
         except Exception as exc:
             typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
 
-    # Remove wizard directory
     if has_wizard_dir:
         try:
             shutil.rmtree(WIZARD_HOME)
@@ -588,18 +355,22 @@ def analytics(
 @app.command()
 def update() -> None:
     """Pull latest code, sync deps, run migrations, and refresh skills."""
-    # main.py lives at src/wizard/cli/main.py — 3 levels up is the repo root
     repo_root = Path(__file__).resolve().parents[3]
     sync_args = (
         ["uv", "sync"]
         if shutil.which("uv")
         else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
     )
+    alembic_args = (
+        ["uv", "run", "alembic", "upgrade", "head"]
+        if shutil.which("uv")
+        else [sys.executable, "-m", "alembic", "upgrade", "head"]
+    )
 
     steps: list[tuple[str, list[str]]] = [
         ("git pull", ["git", "pull"]),
         ("sync deps", sync_args),
-        ("run migrations", ["alembic", "upgrade", "head"]),
+        ("run migrations", alembic_args),
     ]
 
     for label, args in steps:
@@ -609,4 +380,15 @@ def update() -> None:
             raise typer.Exit(1)
 
     _refresh_skills(WIZARD_HOME / "skills")
+
+    registered = agent_registration.read_registered_agents()
+    if not registered:
+        registered = agent_registration.scan_all_registered()
+    for aid in registered:
+        try:
+            agent_registration.register(aid)
+            typer.echo(f"  Re-registered {aid}")
+        except Exception as exc:
+            typer.echo(f"  Warning: could not re-register {aid}: {exc}", err=True)
+
     typer.echo("Wizard updated.")
