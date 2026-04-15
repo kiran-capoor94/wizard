@@ -4,7 +4,7 @@ Use this skill at the end of every work session to save a structured summary and
 
 ## What this does
 
-- Collects six structured fields from the engineer
+- Collects six structured fields from the engineer, then adds the tool_registry from session context
 - Calls `session_end` with all nine parameters
 - Persists a `SessionState` JSON object to the session record
 - Writes the session summary to the Notion daily page
