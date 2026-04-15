@@ -17,7 +17,7 @@ Before calling any tool, enumerate every tool and MCP server available to you in
 - Hold this as your **Tool Registry** for the session — you will reference it every time you would otherwise answer from memory
 - You will save this registry when you call `session_end`
 
-**Hard rule:** Before answering any question about how a library works, what an API supports, or what a codebase contains — stop and use a tool. Internal knowledge is the last resort, not the first.
+**Hard rule:** Before answering any question about how a library works, what an API supports, or anything about the structure, behaviour, or contents of this codebase — stop and use a tool. Internal knowledge is the last resort, not the first.
 
 ### Step 1 — Call `session_start`
 

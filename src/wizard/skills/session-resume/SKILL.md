@@ -32,7 +32,7 @@ Then show the `prior_notes` grouped by task.
 
 ## Step 2b — Restore Tool Registry
 
-After displaying `session_state`, restore your Tool Registry:
+After Step 2 (whether session_state was present or null), restore your Tool Registry:
 
 - If `session_state.tool_registry` is present and non-empty: restore it as your active Tool Registry for this session.
 - If absent or null: rebuild the registry now by enumerating all available tools (wizard tools first, then all other MCP servers grouped by provider).
