@@ -1,7 +1,7 @@
 import logging
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from mcp.types import CallToolResult
+from fastmcp.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ class ToolLoggingMiddleware(Middleware):
 
     async def on_call_tool(
         self, context: MiddlewareContext, call_next
-    ) -> CallToolResult:
-        tool_name = context.params.name
-        logger.info(f"{tool_name} ...")
+    ) -> ToolResult:
+        tool_name = context.message.name
+        logger.info("%s ...", tool_name)
         return await call_next(context)

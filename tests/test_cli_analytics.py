@@ -91,13 +91,6 @@ def test_query_compounding_no_calls(db_session):
     assert result == 0.0
 
 
-def test_query_compounding_empty_db_returns_zero(db_session):
-    from wizard.cli.analytics import query_compounding
-    import datetime
-    result = query_compounding(db_session, datetime.date(2026, 1, 1), datetime.date(2026, 1, 7))
-    assert result == 0.0
-
-
 def test_query_compounding_no_prior_notes_returns_zero(db_session):
     """task_start exists in window and notes exist, but all notes are from this window."""
     import datetime as dt
