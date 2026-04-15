@@ -40,7 +40,7 @@ UTCDateTime = Annotated[
 
 
 class SessionState(BaseModel):
-    """Six-field structured session state written by session_end (M2)
+    """Structured session state written by session_end (M2)
     and read by resume_session (M3). Stored as JSON in
     wizardsession.session_state. Defined here in M1 so M2 can lift it
     verbatim without a duplicate schema."""
