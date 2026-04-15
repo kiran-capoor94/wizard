@@ -211,6 +211,7 @@ class TestSessionState:
             "open_loops": ["ADR changes not committed"],
             "next_actions": ["Commit ADR 005 + 007"],
             "closure_status": "interrupted",
+            "tool_registry": None,
         }
         state = SessionState.model_validate(data)
         assert state.intent == data["intent"]
