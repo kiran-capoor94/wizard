@@ -1677,7 +1677,7 @@ async def test_session_end_tool_registry_defaults_to_none(db_session):
     ctx = MockContext()
     patches, _, _ = _patch_tools(db_session, wb=wb_mock)
     with patch.multiple("wizard.tools", **patches):
-        await session_end(
+        result = await session_end(
             ctx,
             session_id=session.id,
             summary="done",
@@ -1689,6 +1689,7 @@ async def test_session_end_tool_registry_defaults_to_none(db_session):
             closure_status="clean",
         )
 
+    assert result.session_state_saved is True
     db_session.refresh(session)
     state = SessionState.model_validate_json(session.session_state)
     assert state.tool_registry is None
