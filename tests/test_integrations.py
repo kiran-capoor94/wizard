@@ -76,6 +76,22 @@ class TestNotionStatus:
         assert NotionStatus.model_validate({"status": None}).name is None
 
 
+class TestIsDailyPageTitle:
+    def test_returns_true_for_valid_daily_title(self):
+        from wizard.integrations import _is_daily_page_title
+        assert _is_daily_page_title("Wednesday 9 April 2025") is True
+        assert _is_daily_page_title("Monday 1 January 2024") is True
+        assert _is_daily_page_title("Friday 15 April 2026") is True
+
+    def test_returns_false_for_non_daily_titles(self):
+        from wizard.integrations import _is_daily_page_title
+        assert _is_daily_page_title("SISU IQ Design") is False
+        assert _is_daily_page_title("") is False
+        assert _is_daily_page_title("2024-01-01") is False
+        assert _is_daily_page_title("Meeting Notes") is False
+        assert _is_daily_page_title("9 April 2025") is False  # missing weekday
+
+
 def make_jira_client(base_url="https://jira.example.com", token="tok", project_key="ENG"):
     from wizard.integrations import JiraClient
     return JiraClient(base_url=base_url, token=token, project_key=project_key)
@@ -927,6 +943,37 @@ def test_notion_ensure_daily_page_creates_and_archives():
     )
 
 
+def test_notion_ensure_daily_page_leaves_non_daily_pages_alone():
+    """Permanent (non-daily) pages under SISU Work must not be archived."""
+    with patch("wizard.integrations._today_title", return_value="Friday 11 April 2026"):
+        with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
+            mock_instance = MagicMock()
+            mock_notion_class.return_value = mock_instance
+            mock_instance.blocks.children.list.return_value = {
+                "results": [
+                    _make_child_page_block("stale-daily-id", "Thursday 10 April 2026"),
+                    _make_child_page_block("permanent-id", "SISU IQ Design"),
+                    _make_child_page_block("another-perm-id", "Architecture Notes"),
+                ]
+            }
+            mock_instance.pages.create.return_value = {"id": "new-daily-id"}
+            mock_instance.pages.update.return_value = {}
+
+            client = make_notion_client()
+            result = client.ensure_daily_page()
+
+    # Only the old daily page is archived — permanent pages left alone
+    assert result.archived_count == 1
+    archived_ids = [
+        call.kwargs["page_id"]
+        for call in mock_instance.pages.update.call_args_list
+        if call.kwargs.get("archived") is True
+    ]
+    assert "stale-daily-id" in archived_ids
+    assert "permanent-id" not in archived_ids
+    assert "another-perm-id" not in archived_ids
+
+
 # ============================================================================
 # NotionClient — schema wiring tests
 # ============================================================================
@@ -987,3 +1034,85 @@ def test_notion_client_uses_schema_for_meeting_url():
         meetings = client.fetch_meetings()
     assert len(meetings) == 1
     assert meetings[0].krisp_url == "https://fathom.video/123"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: meeting_category uses schema field
+# ---------------------------------------------------------------------------
+
+
+def test_notion_fetch_meetings_uses_schema_meeting_category():
+    """fetch_meetings reads category using the schema meeting_category field name."""
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings(meeting_category="Meeting Type")
+    mock_pages = [
+        {
+            "id": "m-1",
+            "properties": {
+                "Meeting name": {"title": [{"plain_text": "Sprint Retro"}]},
+                "Meeting Type": {"multi_select": [{"name": "Retro"}]},
+                "Summary": {"rich_text": []},
+                "Krisp URL": {"url": None},
+                "Date": {"date": None},
+            },
+        }
+    ]
+    with patch("wizard.integrations.collect_paginated_api", return_value=mock_pages):
+        client = make_notion_client(schema=schema)
+        meetings = client.fetch_meetings()
+
+    assert len(meetings) == 1
+    assert meetings[0].categories == ["Retro"]
+
+
+def test_notion_create_meeting_page_uses_schema_meeting_category():
+    """create_meeting_page uses schema.meeting_category as the property key."""
+    from wizard.config import NotionSchemaSettings
+    schema = NotionSchemaSettings(meeting_category="Meeting Type")
+
+    with patch("wizard.integrations.NotionSdkClient") as mock_cls:
+        mock_instance = MagicMock()
+        mock_cls.return_value = mock_instance
+        mock_instance.pages.create.return_value = {"id": "new-page"}
+
+        client = make_notion_client(schema=schema)
+        page_id = client.create_meeting_page(title="Standup", category="Standup")
+
+    assert page_id == "new-page"
+    call_props = mock_instance.pages.create.call_args.kwargs["properties"]
+    assert "Meeting Type" in call_props
+    assert "Category" not in call_props
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: Jira URL uses browse URL format
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_jira_fetch_open_tasks_uses_browse_url():
+    """fetch_open_tasks should return the browse URL, not the REST API self URL."""
+    respx.post("https://jira.example.com/rest/api/3/search/jql").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "issues": [
+                    {
+                        "key": "ENG-42",
+                        "fields": {
+                            "summary": "Some task",
+                            "status": {"name": "To Do"},
+                            "priority": {"name": "Medium"},
+                            "issuetype": {"name": "Story"},
+                            "self": "https://jira.example.com/rest/api/3/issue/12345",
+                        },
+                    }
+                ]
+            },
+        )
+    )
+    client = make_jira_client()
+    tasks = client.fetch_open_tasks()
+
+    assert len(tasks) == 1
+    assert tasks[0].url == "https://jira.example.com/browse/ENG-42"
