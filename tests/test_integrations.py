@@ -213,17 +213,17 @@ def test_jira_update_task_status_returns_false_on_http_error():
 
 def make_notion_client(
     token="tok",
-    sisu_work_page_id="parent-abc",
-    tasks_db_id="db-tasks",
-    meetings_db_id="db-meetings",
+    daily_page_parent_id="parent-abc",
+    tasks_ds_id="db-tasks",
+    meetings_ds_id="db-meetings",
     schema=None,
 ):
     from wizard.integrations import NotionClient
     return NotionClient(
         token=token,
-        sisu_work_page_id=sisu_work_page_id,
-        tasks_db_id=tasks_db_id,
-        meetings_db_id=meetings_db_id,
+        daily_page_parent_id=daily_page_parent_id,
+        tasks_ds_id=tasks_ds_id,
+        meetings_ds_id=meetings_ds_id,
         schema=schema
     )
 
@@ -293,7 +293,7 @@ def test_notion_fetch_tasks_handles_missing_properties():
 def test_notion_fetch_tasks_raises_error_without_token():
     """fetch_tasks should raise ConfigurationError if no token"""
     from wizard.integrations import ConfigurationError, NotionClient
-    client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
+    client = NotionClient(token="", daily_page_parent_id="parent-abc", tasks_ds_id="db1", meetings_ds_id="db2")
     with pytest.raises(ConfigurationError):
         client.fetch_tasks()
 
@@ -374,7 +374,7 @@ def test_notion_fetch_meetings_handles_missing_properties():
 def test_notion_fetch_meetings_raises_error_without_token():
     """fetch_meetings should raise ConfigurationError if no token"""
     from wizard.integrations import ConfigurationError, NotionClient
-    client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
+    client = NotionClient(token="", daily_page_parent_id="parent-abc", tasks_ds_id="db1", meetings_ds_id="db2")
     with pytest.raises(ConfigurationError):
         client.fetch_meetings()
 
@@ -455,7 +455,7 @@ def test_notion_create_task_page_propagates_api_error_from_pages_create():
 def test_notion_create_task_page_raises_error_without_token():
     """create_task_page should raise ConfigurationError if no token"""
     from wizard.integrations import ConfigurationError, NotionClient
-    client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
+    client = NotionClient(token="", daily_page_parent_id="parent-abc", tasks_ds_id="db1", meetings_ds_id="db2")
     with pytest.raises(ConfigurationError):
         client.create_task_page(name="Task", status="Backlog")
 
@@ -591,7 +591,7 @@ def test_notion_create_meeting_page_propagates_api_error_from_pages_create():
 def test_notion_create_meeting_page_raises_error_without_token():
     """create_meeting_page should raise ConfigurationError if no token"""
     from wizard.integrations import ConfigurationError, NotionClient
-    client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
+    client = NotionClient(token="", daily_page_parent_id="parent-abc", tasks_ds_id="db1", meetings_ds_id="db2")
     with pytest.raises(ConfigurationError):
         client.create_meeting_page(title="Meeting", category="Planning")
 
@@ -628,7 +628,7 @@ def test_notion_update_task_status_returns_false_on_api_error():
 def test_notion_update_task_status_raises_error_without_token():
     """update_task_status should raise ConfigurationError if no token"""
     from wizard.integrations import ConfigurationError, NotionClient
-    client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
+    client = NotionClient(token="", daily_page_parent_id="parent-abc", tasks_ds_id="db1", meetings_ds_id="db2")
     with pytest.raises(ConfigurationError):
         client.update_task_status("task-id", "Done")
 
@@ -684,7 +684,7 @@ def test_notion_update_meeting_summary_returns_false_on_api_error():
 def test_notion_update_meeting_summary_raises_error_without_token():
     """update_meeting_summary should raise ConfigurationError if no token"""
     from wizard.integrations import ConfigurationError, NotionClient
-    client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
+    client = NotionClient(token="", daily_page_parent_id="parent-abc", tasks_ds_id="db1", meetings_ds_id="db2")
     with pytest.raises(ConfigurationError):
         client.update_meeting_summary("meeting-id", "Summary")
 
@@ -738,7 +738,7 @@ def test_notion_update_daily_page_returns_false_on_api_error():
 def test_notion_update_daily_page_raises_error_without_token():
     """update_daily_page should raise ConfigurationError if no token"""
     from wizard.integrations import ConfigurationError, NotionClient
-    client = NotionClient(token="", sisu_work_page_id="parent-abc", tasks_db_id="db1", meetings_db_id="db2")
+    client = NotionClient(token="", daily_page_parent_id="parent-abc", tasks_ds_id="db1", meetings_ds_id="db2")
     with pytest.raises(ConfigurationError):
         client.update_daily_page("page-123", "summary")
 
@@ -751,8 +751,8 @@ def test_notion_update_daily_page_with_explicit_page_id():
         MockClient.return_value = mock_instance
         from wizard.integrations import NotionClient
         client = NotionClient(
-            token="tok", sisu_work_page_id="parent-abc",
-            tasks_db_id="db1", meetings_db_id="db2",
+            token="tok", daily_page_parent_id="parent-abc",
+            tasks_ds_id="db1", meetings_ds_id="db2",
         )
         result = client.update_daily_page("page-123", "Session went well")
     assert result is True
@@ -944,7 +944,7 @@ def test_notion_ensure_daily_page_creates_and_archives():
 
 
 def test_notion_ensure_daily_page_leaves_non_daily_pages_alone():
-    """Permanent (non-daily) pages under SISU Work must not be archived."""
+    """Permanent (non-daily) pages under daily page parent must not be archived."""
     with patch("wizard.integrations._today_title", return_value="Friday 11 April 2026"):
         with patch("wizard.integrations.NotionSdkClient") as mock_notion_class:
             mock_instance = MagicMock()
@@ -986,9 +986,9 @@ def test_notion_client_uses_schema_for_task_name():
     schema = NotionSchemaSettings(task_name="My Task")
     client = NotionClient(
         token="tok",
-        sisu_work_page_id="p",
-        tasks_db_id="t",
-        meetings_db_id="m",
+        daily_page_parent_id="p",
+        tasks_ds_id="t",
+        meetings_ds_id="m",
         schema=schema,
     )
     page = {
@@ -1015,9 +1015,9 @@ def test_notion_client_uses_schema_for_meeting_url():
     schema = NotionSchemaSettings(meeting_url="Fathom URL")
     client = NotionClient(
         token="tok",
-        sisu_work_page_id="p",
-        tasks_db_id="t",
-        meetings_db_id="m",
+        daily_page_parent_id="p",
+        tasks_ds_id="t",
+        meetings_ds_id="m",
         schema=schema,
     )
     page = {

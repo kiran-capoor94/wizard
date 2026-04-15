@@ -31,9 +31,9 @@ _SYNONYMS: dict[str, list[str]] = {
 
 
 def fetch_db_properties(notion_client, db_id: str) -> dict[str, str]:
-    """Return {property_name: property_type} for the given DB."""
+    """Return {property_name: property_type} for the given data source ID."""
     try:
-        response = notion_client.databases.retrieve(database_id=db_id)
+        response = notion_client.data_sources.retrieve(data_source_id=db_id)
         return {
             name: prop["type"]
             for name, prop in response.get("properties", {}).items()
