@@ -1,11 +1,13 @@
+from fastmcp.dependencies import Depends
 from fastmcp.resources import ResourceContent, ResourceResult
 from sqlmodel import col, select
 
 from .config import settings
 from .database import get_session
-from .deps import note_repo, task_repo
+from .deps import get_note_repo, get_task_repo
 from .mcp_instance import mcp
 from .models import WizardSession
+from .repositories import NoteRepository, TaskRepository
 from .schemas import (
     BlockedTasksResource,
     ConfigResource,
@@ -16,7 +18,7 @@ from .schemas import (
 )
 
 
-def current_session():
+def current_session(t_repo: TaskRepository = Depends(get_task_repo)):
     """Active session with open/blocked task counts."""
     with get_session() as db:
         stmt = (
@@ -42,9 +44,9 @@ def current_session():
                 ResourceContent(
                     content=SessionResource(
                         session_id=session.id,
-                        open_task_count=len(task_repo().get_open_task_contexts(db)),
+                        open_task_count=len(t_repo.get_open_task_contexts(db)),
                         blocked_task_count=len(
-                            task_repo().get_blocked_task_contexts(db)
+                            t_repo.get_blocked_task_contexts(db)
                         ),
                     ).model_dump_json(),
                     mime_type="application/json",
@@ -53,14 +55,14 @@ def current_session():
         )
 
 
-def open_tasks():
+def open_tasks(t_repo: TaskRepository = Depends(get_task_repo)):
     """All open tasks with status and priority."""
     with get_session() as db:
         return ResourceResult(
             contents=[
                 ResourceContent(
                     content=OpenTasksResource(
-                        tasks=task_repo().get_open_task_contexts(db)
+                        tasks=t_repo.get_open_task_contexts(db)
                     ).model_dump_json(),
                     mime_type="application/json",
                 )
@@ -68,14 +70,14 @@ def open_tasks():
         )
 
 
-def blocked_tasks():
+def blocked_tasks(t_repo: TaskRepository = Depends(get_task_repo)):
     """All blocked tasks."""
     with get_session() as db:
         return ResourceResult(
             contents=[
                 ResourceContent(
                     content=BlockedTasksResource(
-                        tasks=task_repo().get_blocked_task_contexts(db)
+                        tasks=t_repo.get_blocked_task_contexts(db)
                     ).model_dump_json(),
                     mime_type="application/json",
                 )
@@ -83,12 +85,16 @@ def blocked_tasks():
         )
 
 
-def task_context(task_id: int):
+def task_context(
+    task_id: int,
+    t_repo: TaskRepository = Depends(get_task_repo),
+    n_repo: NoteRepository = Depends(get_note_repo),
+):
     """Full task detail — metadata, notes, history."""
     with get_session() as db:
-        task = task_repo().get_by_id(db, task_id)
-        task_ctx = task_repo().build_task_context(db, task)
-        notes = note_repo().get_for_task(db, task_id=task.id, source_id=task.source_id)
+        task = t_repo.get_by_id(db, task_id)
+        task_ctx = t_repo.build_task_context(db, task)
+        notes = n_repo.get_for_task(db, task_id=task.id, source_id=task.source_id)
         note_details = [NoteDetail.from_model(n) for n in notes if n.id is not None]
         return ResourceResult(
             contents=[
