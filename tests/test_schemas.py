@@ -240,6 +240,59 @@ def test_utc_datetime_preserves_already_utc_z():
     assert result["ts"] == "2026-04-15T12:00:00Z"
 
 
+# ---------------------------------------------------------------------------
+# SessionState.tool_registry
+# ---------------------------------------------------------------------------
+
+
+def test_session_state_tool_registry_defaults_to_none():
+    from wizard.schemas import SessionState
+
+    state = SessionState(
+        intent="test",
+        working_set=[],
+        state_delta="none",
+        open_loops=[],
+        next_actions=[],
+        closure_status="clean",
+    )
+    assert state.tool_registry is None
+
+
+def test_session_state_tool_registry_round_trips():
+    from wizard.schemas import SessionState
+
+    state = SessionState(
+        intent="test",
+        working_set=[1],
+        state_delta="did stuff",
+        open_loops=[],
+        next_actions=[],
+        closure_status="clean",
+        tool_registry="context7: library docs\nserena: code analysis",
+    )
+    json_str = state.model_dump_json()
+    restored = SessionState.model_validate_json(json_str)
+    assert restored.tool_registry == "context7: library docs\nserena: code analysis"
+
+
+def test_session_state_missing_tool_registry_field_deserialises_to_none():
+    """Old session_state JSON without tool_registry must deserialise cleanly."""
+    import json
+    from wizard.schemas import SessionState
+
+    old_json = json.dumps({
+        "intent": "old session",
+        "working_set": [],
+        "state_delta": "none",
+        "open_loops": [],
+        "next_actions": [],
+        "closure_status": "clean",
+    })
+    state = SessionState.model_validate_json(old_json)
+    assert state.tool_registry is None
+
+
 def test_utc_datetime_converts_offset_aware_to_utc():
     """Offset-aware datetime (non-UTC) must be *converted* to UTC, not just stripped."""
     import json
