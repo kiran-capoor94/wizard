@@ -197,13 +197,11 @@ def test_meeting_category_has_general(db_session):
 
 # --- Task 1: SessionState schema ---
 
-from pydantic import ValidationError
-
-from wizard.schemas import SessionState
-
 
 class TestSessionState:
     def test_round_trip_with_all_six_fields(self):
+        from wizard.schemas import SessionState
+
         data = {
             "intent": "Progress ADRs to decision",
             "working_set": [40, 39],
@@ -220,6 +218,8 @@ class TestSessionState:
         assert state.model_dump() == data
 
     def test_default_lists_are_empty(self):
+        from wizard.schemas import SessionState
+
         state = SessionState.model_validate(
             {"intent": "x", "state_delta": "y", "closure_status": "clean"}
         )
@@ -228,12 +228,20 @@ class TestSessionState:
         assert state.next_actions == []
 
     def test_closure_status_rejects_unknown_value(self):
+        from pydantic import ValidationError
+
+        from wizard.schemas import SessionState
+
         with pytest.raises(ValidationError):
             SessionState.model_validate(
                 {"intent": "x", "state_delta": "y", "closure_status": "paused"}
             )
 
     def test_intent_required(self):
+        from pydantic import ValidationError
+
+        from wizard.schemas import SessionState
+
         with pytest.raises(ValidationError):
             SessionState.model_validate(
                 {"state_delta": "y", "closure_status": "clean"}
