@@ -168,13 +168,13 @@ class NotionClient:
         self,
         token: str,
         sisu_work_page_id: str,
-        tasks_db_id: str,
-        meetings_db_id: str,
+        tasks_ds_id: str,
+        meetings_ds_id: str,
         schema: NotionSchemaSettings | None = None,
     ):
         self._sisu_work_page_id = sisu_work_page_id
-        self._tasks_db_id = tasks_db_id
-        self._meetings_db_id = meetings_db_id
+        self._tasks_ds_id = tasks_ds_id
+        self._meetings_ds_id = meetings_ds_id
         self._client = NotionSdkClient(auth=token) if token else None
         self._schema = schema if schema is not None else NotionSchemaSettings()
 
@@ -183,10 +183,10 @@ class NotionClient:
             raise ConfigurationError("Notion token not configured")
         return self._client
 
-    def _query_database(self, database_id: str, **kwargs) -> dict:
-        """Query a database by ID using data_sources API (v3.0)."""
+    def _query_database(self, data_source_id: str, **kwargs) -> dict:
+        """Query a data source using data_sources API (v3.0)."""
         client = self._require_client()
-        return client.data_sources.query(data_source_id=database_id, **kwargs)  # pyright: ignore[reportReturnType]
+        return client.data_sources.query(data_source_id=data_source_id, **kwargs)  # pyright: ignore[reportReturnType]
 
     def _list_sisu_work_children(self) -> list[dict]:
         """Return non-archived child_page blocks under the SISU Work page."""
@@ -278,7 +278,7 @@ class NotionClient:
 
         try:
             pages = collect_paginated_api(
-                self._query_database, database_id=self._tasks_db_id
+                self._query_database, data_source_id=self._tasks_ds_id
             )
             tasks = []
             for page in pages:
@@ -317,7 +317,7 @@ class NotionClient:
 
         try:
             pages = collect_paginated_api(
-                self._query_database, database_id=self._meetings_db_id
+                self._query_database, data_source_id=self._meetings_ds_id
             )
             meetings = []
             for page in pages:
@@ -372,7 +372,7 @@ class NotionClient:
             properties[self._schema.task_due_date] = {"date": {"start": due_date}}
 
         response = client.pages.create(
-            parent={"database_id": self._tasks_db_id},
+            parent={"data_source_id": self._tasks_ds_id},
             properties=properties,
         )
         return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
@@ -400,7 +400,7 @@ class NotionClient:
             }
 
         response = client.pages.create(
-            parent={"database_id": self._meetings_db_id},
+            parent={"data_source_id": self._meetings_ds_id},
             properties=properties,
         )
         return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
