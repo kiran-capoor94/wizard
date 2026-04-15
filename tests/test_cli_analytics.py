@@ -91,6 +91,109 @@ def test_query_compounding_no_calls(db_session):
     assert result == 0.0
 
 
+def test_query_compounding_empty_db_returns_zero(db_session):
+    from wizard.cli.analytics import query_compounding
+    import datetime
+    result = query_compounding(db_session, datetime.date(2026, 1, 1), datetime.date(2026, 1, 7))
+    assert result == 0.0
+
+
+def test_query_compounding_no_prior_notes_returns_zero(db_session):
+    """task_start exists in window and notes exist, but all notes are from this window."""
+    import datetime as dt
+    from wizard.cli.analytics import query_compounding
+    from wizard.models import Note, NoteType, Task, TaskStatus, TaskCategory, TaskPriority, ToolCall
+
+    task = Task(name="T", status=TaskStatus.TODO, priority=TaskPriority.MEDIUM, category=TaskCategory.ISSUE)
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    session_start_time = dt.datetime(2026, 1, 3, 9, 0, 0)
+    # Note created AFTER session_start but BEFORE task_start — same session, not prior context
+    # Old code: note.created_at (9:30) < task_start.called_at (10:00) → True → wrongly compounding
+    db_session.add(Note(
+        task_id=task.id, note_type=NoteType.INVESTIGATION,
+        content="first note", created_at=dt.datetime(2026, 1, 3, 9, 30, 0),
+    ))
+    db_session.add(ToolCall(tool_name="session_start", called_at=session_start_time, session_id=1))
+    db_session.add(ToolCall(tool_name="task_start", called_at=dt.datetime(2026, 1, 3, 10, 0, 0), session_id=1))
+    db_session.commit()
+
+    result = query_compounding(db_session, dt.date(2026, 1, 1), dt.date(2026, 1, 7))
+    assert result == 0.0
+
+
+def test_query_compounding_prior_session_notes_returns_nonzero(db_session):
+    """Notes from before the window's first session indicate prior-session context."""
+    import datetime as dt
+    from wizard.cli.analytics import query_compounding
+    from wizard.models import Note, NoteType, Task, TaskStatus, TaskCategory, TaskPriority, ToolCall
+
+    task = Task(name="T", status=TaskStatus.TODO, priority=TaskPriority.MEDIUM, category=TaskCategory.ISSUE)
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    # Note from a prior session (before the window's first session_start)
+    db_session.add(Note(
+        task_id=task.id, note_type=NoteType.INVESTIGATION,
+        content="prior session note", created_at=dt.datetime(2025, 12, 20, 10, 0, 0),
+    ))
+    session_start_time = dt.datetime(2026, 1, 3, 9, 0, 0)
+    db_session.add(ToolCall(tool_name="session_start", called_at=session_start_time, session_id=1))
+    db_session.add(ToolCall(tool_name="task_start", called_at=dt.datetime(2026, 1, 3, 9, 5, 0), session_id=1))
+    db_session.commit()
+
+    result = query_compounding(db_session, dt.date(2026, 1, 1), dt.date(2026, 1, 7))
+    assert result == 1.0
+
+
+def test_query_tasks_ignores_session_summary_notes(db_session):
+    """Notes with task_id=None must not inflate 'tasks worked'."""
+    import datetime as dt
+    from wizard.cli.analytics import query_tasks
+    from wizard.models import Note, NoteType
+
+    db_session.add(Note(
+        task_id=None,
+        note_type=NoteType.SESSION_SUMMARY,
+        content="session wrap-up",
+        created_at=dt.datetime(2026, 1, 3),
+    ))
+    db_session.commit()
+
+    result = query_tasks(db_session, dt.date(2026, 1, 1), dt.date(2026, 1, 7))
+    assert result["worked"] == 0
+    assert result["avg_notes_per_task"] == 0.0
+
+
+def test_query_tasks_counts_only_task_notes(db_session):
+    """task notes and non-task notes coexist — only task notes are counted."""
+    import datetime as dt
+    from wizard.cli.analytics import query_tasks
+    from wizard.models import Note, NoteType, Task, TaskStatus, TaskCategory, TaskPriority
+
+    task = Task(name="T", status=TaskStatus.TODO, priority=TaskPriority.MEDIUM, category=TaskCategory.ISSUE)
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    db_session.add(Note(
+        task_id=task.id, note_type=NoteType.INVESTIGATION,
+        content="task note", created_at=dt.datetime(2026, 1, 3),
+    ))
+    db_session.add(Note(
+        task_id=None, note_type=NoteType.SESSION_SUMMARY,
+        content="session note", created_at=dt.datetime(2026, 1, 3),
+    ))
+    db_session.commit()
+
+    result = query_tasks(db_session, dt.date(2026, 1, 1), dt.date(2026, 1, 7))
+    assert result["worked"] == 1
+    assert result["avg_notes_per_task"] == 1.0
+
+
 def test_format_table_renders_sections(db_session):
     import datetime
     from wizard.cli.analytics import format_table
