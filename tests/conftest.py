@@ -15,7 +15,6 @@ def db_session(monkeypatch, tmp_path):
     for mod in [
         "wizard.config",
         "wizard.database",
-        "wizard.deps",
         "wizard.integrations",
         "wizard.agent_registration",
         "wizard.models",

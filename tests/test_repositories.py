@@ -133,9 +133,11 @@ def test_get_for_task_source_type_guard_includes_jira(db_session):
 
 async def test_save_note_propagates_source_type_from_task(db_session):
     """save_note copies source_type from the task onto the note."""
-    from unittest.mock import patch
+    from unittest.mock import patch, MagicMock
     from wizard.tools import save_note
     from wizard.models import Task, Note, NoteType
+    from wizard.repositories import TaskRepository, NoteRepository, TaskStateRepository
+    from wizard.security import SecurityService
     from tests.helpers import MockContext, mock_session
 
     task = Task(name="auth fix", source_id="PD-10", source_type="JIRA")
@@ -143,6 +145,10 @@ async def test_save_note_propagates_source_type_from_task(db_session):
     db_session.flush()
     db_session.refresh(task)
     assert task.id is not None
+
+    content = "found the bug"
+    sec_mock = MagicMock(spec=SecurityService)
+    sec_mock.scrub.return_value.clean = content
 
     ctx = MockContext()
     patches = {
@@ -153,7 +159,11 @@ async def test_save_note_propagates_source_type_from_task(db_session):
             ctx,
             task_id=task.id,
             note_type=NoteType.INVESTIGATION,
-            content="found the bug",
+            content=content,
+            t_repo=TaskRepository(),
+            sec=sec_mock,
+            n_repo=NoteRepository(),
+            t_state_repo=TaskStateRepository(),
         )
 
     note = db_session.get(Note, result.note_id)
@@ -453,16 +463,6 @@ class TestTaskStateRepository:
         result = repo.on_status_changed(db_session, task.id)
         assert result.task_id == task.id
         assert result.last_status_change_at is not None
-
-
-def test_task_state_repo_singleton_is_cached():
-    from wizard.deps import task_state_repo
-    from wizard.repositories import TaskStateRepository
-    task_state_repo.cache_clear()
-    a = task_state_repo()
-    b = task_state_repo()
-    assert a is b
-    assert isinstance(a, TaskStateRepository)
 
 
 # ---------------------------------------------------------------------------

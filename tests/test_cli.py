@@ -114,7 +114,7 @@ def test_sync_calls_sync_all(db_session):
     sync_mock.sync_all.return_value = []
 
     with (
-        patch("wizard.deps.sync_service", return_value=sync_mock),
+        patch("wizard.deps.get_sync_service", return_value=sync_mock),
         patch("wizard.database.get_session", mock_session(db_session)),
     ):
         from wizard.cli.main import app
@@ -136,7 +136,7 @@ def test_sync_reports_results(db_session):
     ]
 
     with (
-        patch("wizard.deps.sync_service", return_value=sync_mock),
+        patch("wizard.deps.get_sync_service", return_value=sync_mock),
         patch("wizard.database.get_session", mock_session(db_session)),
     ):
         from wizard.cli.main import app
