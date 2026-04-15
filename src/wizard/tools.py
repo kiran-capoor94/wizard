@@ -519,7 +519,7 @@ async def session_end(
     closure_status: Literal["clean", "interrupted", "blocked"],
     tool_registry: str | None = None,
 ) -> SessionEndResponse:
-    """Persists session summary + six-field SessionState to WizardSession. Writes Notion daily page."""
+    """Persists session summary + SessionState to WizardSession. Writes Notion daily page."""
     logger.info("session_end session_id=%d", session_id)
     try:
         with get_session() as db:
