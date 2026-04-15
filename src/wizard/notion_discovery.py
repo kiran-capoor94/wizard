@@ -10,6 +10,7 @@ _EXACT_NAMES: dict[str, str] = {
     "due date": "task_due_date",
     "jira": "task_jira_key",
     "meeting name": "meeting_title",
+    "category": "meeting_category",
     "date": "meeting_date",
     "krisp url": "meeting_url",
     "summary": "meeting_summary",
@@ -26,6 +27,7 @@ _TYPE_HINTS: dict[str, str] = {
 # Pass 3: synonyms
 _SYNONYMS: dict[str, list[str]] = {
     "task_status": ["state", "workflow", "stage"],
+    "meeting_category": ["type", "meeting type", "kind"],
     "meeting_url": ["recording", "transcript", "krisp", "fathom", "video", "transcript url", "fathom url", "krisp url"],
 }
 

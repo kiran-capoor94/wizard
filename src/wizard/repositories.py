@@ -184,7 +184,8 @@ class MeetingRepository:
         stmt = select(Meeting).where(Meeting.summary == None)  # noqa: E711
         results: list[MeetingContext] = []
         for m in db.exec(stmt).all():
-            assert m.id is not None
+            if m.id is None:
+                raise ValueError(f"Meeting row returned without an id: {m}")
             results.append(
                 MeetingContext(
                     id=m.id,
@@ -311,12 +312,24 @@ class TaskStateRepository:
         db.refresh(state)
         return state
 
+    def refresh_stale_days(self, db: Session) -> None:
+        """Recompute stale_days for all tasks based on current wall-clock time.
+
+        Called at session_start so that what_am_i_missing sees up-to-date
+        staleness rather than the value frozen at last note-save."""
+        now = _dt.datetime.now()
+        for state in db.exec(select(TaskState)).all():
+            state.stale_days = (now - state.last_touched_at).days
+            db.add(state)
+        db.flush()
+
     def _get_or_create(self, db: Session, task: Task) -> TaskState:
         """Defensive helper: returns the TaskState for `task`, creating one
         with zero counts if missing. Used internally by on_note_saved and
         on_status_changed to handle the gap window between deploy and
         backfill, or any task created before the migration ran."""
-        assert task.id is not None
+        if task.id is None:
+            raise ValueError("Task must be flushed before TaskState can be retrieved")
         state = db.get(TaskState, task.id)
         if state is not None:
             return state

@@ -55,6 +55,9 @@ NOTION_MEETING_CATEGORY_MAP: dict[str, MeetingCategory] = {
     "retro": MeetingCategory.RETRO,
     "presentation": MeetingCategory.GENERAL,
     "customer call": MeetingCategory.GENERAL,
+    "1:1": MeetingCategory.ONE_ON_ONE,
+    "one on one": MeetingCategory.ONE_ON_ONE,
+    "one-on-one": MeetingCategory.ONE_ON_ONE,
 }
 
 LOCAL_TO_NOTION_MEETING_CATEGORY: dict[str, str | None] = {
