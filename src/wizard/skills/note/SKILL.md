@@ -4,6 +4,8 @@ description: Save a reasoning artifact — investigation findings, decisions, do
 
 # Save Note
 
+> **Tool check** — Before any investigation, analysis, or knowledge lookup: consult your Tool Registry from this session. Wizard tools first, then other MCPs. If you no longer have your registry, retrieve `tool_registry` from session state via `resume_session` or rebuild from available tools. Internal knowledge is the last resort.
+
 Use after any investigation, decision, or learning worth preserving across sessions.
 
 ## When to save
