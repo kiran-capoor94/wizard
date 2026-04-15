@@ -88,7 +88,8 @@ def query_tasks(db, start: datetime.date, end: datetime.date) -> dict:
 
     task_note_counts: dict[int, int] = {}
     for note in notes:
-        task_note_counts[note.task_id] = task_note_counts.get(note.task_id, 0) + 1
+        if note.task_id is not None:
+            task_note_counts[note.task_id] = task_note_counts.get(note.task_id, 0) + 1
 
     worked = len(task_note_counts)
     total_notes = sum(task_note_counts.values())
@@ -124,16 +125,30 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
     if not task_starts:
         return 0.0
 
-    compounding_count = 0
-    for tc in task_starts:
-        if tc.session_id is None:
-            continue
-        prior_note = db.exec(
-            select(Note).where(Note.created_at < tc.called_at)
-        ).first()
-        if prior_note:
-            compounding_count += 1
+    # Find the earliest session_start in the window to use as the prior-context boundary.
+    # Any note before this timestamp came from a previous session.
+    session_starts = db.exec(
+        select(ToolCall).where(
+            ToolCall.tool_name == "session_start",
+            ToolCall.called_at >= start_dt,
+            ToolCall.called_at <= end_dt,
+        )
+    ).all()
 
+    if not session_starts:
+        return 0.0
+
+    earliest_session_start = min(tc.called_at for tc in session_starts)
+
+    prior_context_exists = (
+        db.exec(select(Note).where(Note.created_at < earliest_session_start)).first()
+        is not None
+    )
+
+    if not prior_context_exists:
+        return 0.0
+
+    compounding_count = sum(1 for tc in task_starts if tc.session_id is not None)
     return round(compounding_count / len(task_starts), 2)
 
 

@@ -47,6 +47,7 @@ class NotionSchemaSettings(BaseModel):
     task_due_date: str = "Due date"
     task_jira_key: str = "Jira"
     meeting_title: str = "Meeting name"
+    meeting_category: str = "Category"
     meeting_date: str = "Date"
     meeting_url: str = "Krisp URL"
     meeting_summary: str = "Summary"
