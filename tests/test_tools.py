@@ -1627,6 +1627,73 @@ async def test_session_end_rejects_invalid_closure_status(db_session):
             )
 
 
+async def test_session_end_persists_tool_registry(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import WriteBackStatus, SessionState
+
+    wb_mock = MagicMock()
+    wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.flush()
+    assert session.id is not None
+
+    ctx = MockContext()
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        result = await session_end(
+            ctx,
+            session_id=session.id,
+            summary="done",
+            intent="test registry persistence",
+            working_set=[],
+            state_delta="none",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+            tool_registry="context7: library docs\nserena: code symbols",
+        )
+
+    assert result.session_state_saved is True
+    db_session.refresh(session)
+    state = SessionState.model_validate_json(session.session_state)
+    assert state.tool_registry == "context7: library docs\nserena: code symbols"
+
+
+async def test_session_end_tool_registry_defaults_to_none(db_session):
+    from wizard.tools import session_end
+    from wizard.models import WizardSession
+    from wizard.schemas import WriteBackStatus, SessionState
+
+    wb_mock = MagicMock()
+    wb_mock.push_session_summary.return_value = WriteBackStatus(ok=True)
+
+    session = WizardSession()
+    db_session.add(session)
+    db_session.flush()
+
+    ctx = MockContext()
+    patches, _, _ = _patch_tools(db_session, wb=wb_mock)
+    with patch.multiple("wizard.tools", **patches):
+        await session_end(
+            ctx,
+            session_id=session.id,
+            summary="done",
+            intent="test",
+            working_set=[],
+            state_delta="none",
+            open_loops=[],
+            next_actions=[],
+            closure_status="clean",
+        )
+
+    db_session.refresh(session)
+    state = SessionState.model_validate_json(session.session_state)
+    assert state.tool_registry is None
+
+
 # ---------------------------------------------------------------------------
 # ToolCall session_id linkage for create_task and ingest_meeting
 # ---------------------------------------------------------------------------
