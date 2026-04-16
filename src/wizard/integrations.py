@@ -220,7 +220,7 @@ class NotionClient:
                 parent={"page_id": self._daily_page_parent_id},
                 properties={
                     "title": [{"text": {"content": title}}],
-                    "Session Summary": {"rich_text": [{"text": {"content": ""}}]},
+                    self._schema.daily_page_session_summary: {"rich_text": [{"text": {"content": ""}}]},
                 },
             )
             return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
@@ -491,7 +491,7 @@ class NotionClient:
             client.pages.update(
                 page_id=page_id,
                 properties={
-                    "Session Summary": {"rich_text": [{"text": {"content": summary}}]}
+                    self._schema.daily_page_session_summary: {"rich_text": [{"text": {"content": summary}}]}
                 },
             )
             return True

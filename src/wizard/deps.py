@@ -1,24 +1,28 @@
-"""Cached dependency singletons — one instance per process.
+"""Provider functions for FastMCP Depends() injection.
 
-Tests call <func>.cache_clear() to reset.
-Config changes require restart.
+Each function constructs and returns a fresh instance.
+FastMCP caches results per-request when used via Depends().
+CLI commands call these directly as plain callables.
 """
 
 import logging
-from functools import lru_cache
 
 from .config import settings
 from .integrations import JiraClient, NotionClient
-from .repositories import MeetingRepository, NoteRepository, TaskRepository, TaskStateRepository
+from .repositories import (
+    MeetingRepository,
+    NoteRepository,
+    TaskRepository,
+    TaskStateRepository,
+)
 from .security import SecurityService
 from .services import SyncService, WriteBackService
 
 logger = logging.getLogger(__name__)
 
 
-@lru_cache
-def jira_client() -> JiraClient:
-    logger.debug("Creating JiraClient singleton")
+def get_jira_client() -> JiraClient:
+    logger.debug("Creating JiraClient")
     return JiraClient(
         base_url=settings.jira.base_url,
         token=settings.jira.token,
@@ -27,9 +31,8 @@ def jira_client() -> JiraClient:
     )
 
 
-@lru_cache
-def notion_client() -> NotionClient:
-    logger.debug("Creating NotionClient singleton")
+def get_notion_client() -> NotionClient:
+    logger.debug("Creating NotionClient")
     return NotionClient(
         token=settings.notion.token,
         daily_page_parent_id=settings.notion.daily_page_parent_id,
@@ -39,46 +42,42 @@ def notion_client() -> NotionClient:
     )
 
 
-@lru_cache
-def security() -> SecurityService:
-    logger.debug("Creating SecurityService singleton")
+def get_security() -> SecurityService:
+    logger.debug("Creating SecurityService")
     return SecurityService(
         allowlist=settings.scrubbing.allowlist,
         enabled=settings.scrubbing.enabled,
     )
 
 
-@lru_cache
-def sync_service() -> SyncService:
-    logger.debug("Creating SyncService singleton")
-    return SyncService(jira=jira_client(), notion=notion_client(), security=security())
+def get_sync_service() -> SyncService:
+    logger.debug("Creating SyncService")
+    return SyncService(
+        jira=get_jira_client(),
+        notion=get_notion_client(),
+        security=get_security(),
+    )
 
 
-@lru_cache
-def writeback() -> WriteBackService:
-    logger.debug("Creating WriteBackService singleton")
-    return WriteBackService(jira=jira_client(), notion=notion_client())
+def get_writeback() -> WriteBackService:
+    logger.debug("Creating WriteBackService")
+    return WriteBackService(
+        jira=get_jira_client(),
+        notion=get_notion_client(),
+    )
 
 
-@lru_cache
-def task_repo() -> TaskRepository:
-    logger.debug("Creating TaskRepository singleton")
+def get_task_repo() -> TaskRepository:
     return TaskRepository()
 
 
-@lru_cache
-def meeting_repo() -> MeetingRepository:
-    logger.debug("Creating MeetingRepository singleton")
+def get_meeting_repo() -> MeetingRepository:
     return MeetingRepository()
 
 
-@lru_cache
-def note_repo() -> NoteRepository:
-    logger.debug("Creating NoteRepository singleton")
+def get_note_repo() -> NoteRepository:
     return NoteRepository()
 
 
-@lru_cache
-def task_state_repo() -> TaskStateRepository:
-    logger.debug("Creating TaskStateRepository singleton")
+def get_task_state_repo() -> TaskStateRepository:
     return TaskStateRepository()
