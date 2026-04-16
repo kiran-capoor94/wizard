@@ -51,6 +51,7 @@ class NotionSchemaSettings(BaseModel):
     meeting_date: str = "Date"
     meeting_url: str = "Krisp URL"
     meeting_summary: str = "Summary"
+    daily_page_session_summary: str = "Session Summary"
 
 
 class NotionSettings(BaseModel):

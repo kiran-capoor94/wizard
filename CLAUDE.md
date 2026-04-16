@@ -46,7 +46,7 @@ src/wizard/
   config.py                  # Pydantic Settings + JsonConfigSettingsSource
   mappers.py                 # Jira/Notion → TaskStatus/TaskPriority/MeetingCategory
   database.py                # SQLite session factory (SQLModel engine)
-  deps.py                    # @lru_cache dependency singletons
+  deps.py                    # FastMCP Depends() provider functions
   agent_registration.py      # Write MCP config into agent JSON/TOML files
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
 alembic/                     # DB migration scripts
@@ -149,22 +149,46 @@ New tables use snake_case (e.g. `task_state`, `meeting_tasks`).
 
 ## Dependency Injection
 
-`deps.py` uses `@lru_cache` singletons — one instance per process:
+`deps.py` provides plain provider functions wired into tools and resources
+via FastMCP's `Depends()` system (identical in spirit to FastAPI's):
 
 ```python
-jira_client()       → JiraClient
-notion_client()     → NotionClient
-security()          → SecurityService
-sync_service()      → SyncService
-writeback()         → WriteBackService
-task_repo()         → TaskRepository
-meeting_repo()      → MeetingRepository
-note_repo()         → NoteRepository
-task_state_repo()   → TaskStateRepository
+get_jira_client()       → JiraClient
+get_notion_client()     → NotionClient
+get_security()          → SecurityService
+get_sync_service()      → SyncService
+get_writeback()         → WriteBackService
+get_task_repo()         → TaskRepository
+get_meeting_repo()      → MeetingRepository
+get_note_repo()         → NoteRepository
+get_task_state_repo()   → TaskStateRepository
 ```
 
-In tests: call `<func>.cache_clear()` to reset between test cases.
-Config changes require a process restart (cache is process-scoped).
+Tools and resources declare deps as typed default params:
+
+```python
+from fastmcp.dependencies import Depends
+from .deps import get_task_repo
+from .repositories import TaskRepository
+
+async def my_tool(
+    task_id: int,
+    t_repo: TaskRepository = Depends(get_task_repo),
+) -> ...:
+    ...
+```
+
+FastMCP resolves and caches providers per-request; injected params are
+hidden from the LLM-visible tool schema. Provider functions are plain
+callables — no `Depends()` in their own signatures — so CLI code can call
+them directly without FastMCP.
+
+In tests: call tool/resource functions with deps as explicit kwargs
+(FastMCP is not involved when calling directly):
+
+```python
+result = await my_tool(task_id=1, t_repo=TaskRepository())
+```
 
 ## Test Patterns
 

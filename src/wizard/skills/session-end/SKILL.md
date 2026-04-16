@@ -4,8 +4,8 @@ Use this skill at the end of every work session to save a structured summary and
 
 ## What this does
 
-- Collects six structured fields from the engineer
-- Calls `session_end` with all eight parameters
+- Collects six structured fields from the engineer, then adds the tool_registry from session context
+- Calls `session_end` with all nine parameters
 - Persists a `SessionState` JSON object to the session record
 - Writes the session summary to the Notion daily page
 - Clears the session context so the next session starts clean
@@ -25,7 +25,7 @@ Ask each in turn (you may batch them if the engineer is terse):
 - **next_actions**: What are the concrete next steps? (List of strings, or empty list.)
 - **closure_status**: How did the session end? One of: `clean` (finished what was planned), `interrupted` (cut short), `blocked` (stuck on something).
 
-**3. Call session_end with all eight parameters:**
+**3. Call session_end with all nine parameters:**
 
 ```python
 session_end(
@@ -37,8 +37,11 @@ session_end(
     open_loops=["<loop>", ...],
     next_actions=["<action>", ...],
     closure_status="<clean|interrupted|blocked>",
+    tool_registry="<your Tool Registry from Step 0 of session-start>",
 )
 ```
+
+Pass the full Tool Registry text you built at session start. If you updated it during the session, pass the current version. If you no longer have it, pass `None`.
 
 **4. Surface the confirmation.** The response includes echo fields — show the engineer:
 

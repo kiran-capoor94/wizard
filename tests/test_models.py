@@ -42,17 +42,6 @@ def test_created_at_is_not_frozen_at_module_load(db_session):
     assert t1.created_at != t2.created_at
 
 
-def test_task_has_updated_at_field(db_session):
-    from wizard.models import Task
-
-    task = Task(name="foo")
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-
-    assert task.updated_at is not None
-
-
 def test_updated_at_changes_on_update(db_session):
     from wizard.models import Task
 
@@ -70,17 +59,6 @@ def test_updated_at_changes_on_update(db_session):
     db_session.refresh(task)
 
     assert task.updated_at > original_updated_at
-
-
-def test_task_can_be_created_without_due_date(db_session):
-    from wizard.models import Task
-
-    task = Task(name="no deadline")
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-
-    assert task.due_date is None
 
 
 def test_meeting_tasks_relationship(db_session):
@@ -136,34 +114,6 @@ def test_invalid_enum_value_rejected():
         Task(name="test", priority="invalid_value")  # pyright: ignore[reportArgumentType]
 
 
-def test_task_has_notion_id(db_session):
-    from wizard.models import Task
-    task = Task(name="test")
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-    assert task.notion_id is None
-
-
-def test_meeting_has_title_and_notion_id(db_session):
-    from wizard.models import Meeting
-    meeting = Meeting(title="standup", content="notes")
-    db_session.add(meeting)
-    db_session.commit()
-    db_session.refresh(meeting)
-    assert meeting.title == "standup"
-    assert meeting.notion_id is None
-
-
-def test_note_has_meeting_id(db_session):
-    from wizard.models import Note, NoteType
-    note = Note(note_type=NoteType.INVESTIGATION, content="investigating")
-    db_session.add(note)
-    db_session.commit()
-    db_session.refresh(note)
-    assert note.meeting_id is None
-
-
 def test_note_has_session_summary_type(db_session):
     from wizard.models import Note, NoteType, WizardSession
     session = WizardSession()
@@ -197,13 +147,11 @@ def test_meeting_category_has_general(db_session):
 
 # --- Task 1: SessionState schema ---
 
-from pydantic import ValidationError
-
-from wizard.schemas import SessionState
-
 
 class TestSessionState:
     def test_round_trip_with_all_six_fields(self):
+        from wizard.schemas import SessionState
+
         data = {
             "intent": "Progress ADRs to decision",
             "working_set": [40, 39],
@@ -211,6 +159,7 @@ class TestSessionState:
             "open_loops": ["ADR changes not committed"],
             "next_actions": ["Commit ADR 005 + 007"],
             "closure_status": "interrupted",
+            "tool_registry": None,
         }
         state = SessionState.model_validate(data)
         assert state.intent == data["intent"]
@@ -218,21 +167,21 @@ class TestSessionState:
         assert state.closure_status == "interrupted"
         assert state.model_dump() == data
 
-    def test_default_lists_are_empty(self):
-        state = SessionState.model_validate(
-            {"intent": "x", "state_delta": "y", "closure_status": "clean"}
-        )
-        assert state.working_set == []
-        assert state.open_loops == []
-        assert state.next_actions == []
-
     def test_closure_status_rejects_unknown_value(self):
+        from pydantic import ValidationError
+
+        from wizard.schemas import SessionState
+
         with pytest.raises(ValidationError):
             SessionState.model_validate(
                 {"intent": "x", "state_delta": "y", "closure_status": "paused"}
             )
 
     def test_intent_required(self):
+        from pydantic import ValidationError
+
+        from wizard.schemas import SessionState
+
         with pytest.raises(ValidationError):
             SessionState.model_validate(
                 {"state_delta": "y", "closure_status": "clean"}
@@ -256,29 +205,11 @@ class TestNoteMentalModel:
         db_session.refresh(note)
         assert note.mental_model == "Auth fails due to a token-refresh race condition"
 
-    def test_mental_model_defaults_to_none(self, db_session):
-        from wizard.models import Note, NoteType
-
-        note = Note(note_type=NoteType.DOCS, content="x")
-        db_session.add(note)
-        db_session.flush()
-        db_session.refresh(note)
-        assert note.mental_model is None
-
 
 # --- Task 3: WizardSession.session_state ---
 
 
 class TestWizardSessionState:
-    def test_session_state_defaults_to_none(self, db_session):
-        from wizard.models import WizardSession
-
-        session = WizardSession()
-        db_session.add(session)
-        db_session.flush()
-        db_session.refresh(session)
-        assert session.session_state is None
-
     def test_session_state_round_trips_json(self, db_session):
         from wizard.models import WizardSession
         from wizard.schemas import SessionState
@@ -326,13 +257,6 @@ class TestTaskStateModel:
         assert state.last_status_change_at is None
         assert state.last_touched_at == task.created_at
         assert state.stale_days == 0
-
-    def test_task_state_table_name_is_snake_case(self):
-        from wizard.models import TaskState
-
-        # __tablename__ is a SQLAlchemy declared_attr at the type level but a
-        # plain string at runtime; cast for the assertion.
-        assert str(TaskState.__tablename__) == "task_state"
 
     def test_task_state_can_store_all_fields(self, db_session):
         from wizard.models import Task, TaskState

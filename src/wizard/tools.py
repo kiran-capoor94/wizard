@@ -3,23 +3,33 @@ import logging
 from typing import Literal
 
 from fastmcp import Context
+from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
 from sqlmodel import Session, col, select
 
 from .database import get_session
 from .deps import (
-    meeting_repo,
-    note_repo,
-    notion_client,
-    security,
-    sync_service,
-    task_repo,
-    task_state_repo,
-    writeback,
+    get_meeting_repo,
+    get_note_repo,
+    get_notion_client,
+    get_security,
+    get_sync_service,
+    get_task_repo,
+    get_task_state_repo,
+    get_writeback,
 )
+from .integrations import NotionClient
 from .mcp_instance import mcp
-from .repositories import find_latest_session_with_notes
+from .repositories import (
+    find_latest_session_with_notes,
+    MeetingRepository,
+    NoteRepository,
+    TaskRepository,
+    TaskStateRepository,
+)
+from .security import SecurityService
+from .services import SyncService, WriteBackService
 from .models import (
     Meeting,
     MeetingCategory,
@@ -76,7 +86,14 @@ async def _log_tool_call(
 # ---------------------------------------------------------------------------
 
 
-async def session_start(ctx: Context) -> SessionStartResponse:
+async def session_start(
+    ctx: Context,
+    sync_svc: SyncService = Depends(get_sync_service),
+    notion: NotionClient = Depends(get_notion_client),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
+    t_repo: TaskRepository = Depends(get_task_repo),
+    m_repo: MeetingRepository = Depends(get_meeting_repo),
+) -> SessionStartResponse:
     """Creates a session, syncs Jira and Notion, returns open and blocked tasks + unsummarised meetings."""
     logger.info("session_start")
     with get_session() as db:
@@ -88,12 +105,11 @@ async def session_start(ctx: Context) -> SessionStartResponse:
             raise ToolError("Internal error: session was not assigned an id after flush")
         await _log_tool_call(db, "session_start", session_id=session.id)
 
-        svc = sync_service()
         sync_results: list[SourceSyncStatus] = []
         sync_steps = [
-            ("jira", svc.sync_jira, "Syncing Jira..."),
-            ("notion_tasks", svc.sync_notion_tasks, "Syncing Notion tasks..."),
-            ("notion_meetings", svc.sync_notion_meetings, "Syncing Notion meetings..."),
+            ("jira", sync_svc.sync_jira, "Syncing Jira..."),
+            ("notion_tasks", sync_svc.sync_notion_tasks, "Syncing Notion tasks..."),
+            ("notion_meetings", sync_svc.sync_notion_meetings, "Syncing Notion meetings..."),
         ]
         for i, (source, fn, label) in enumerate(sync_steps):
             await ctx.report_progress(i, 3, label)
@@ -112,24 +128,34 @@ async def session_start(ctx: Context) -> SessionStartResponse:
 
         daily_page = None
         try:
-            daily_page = notion_client().ensure_daily_page()
+            daily_page = notion.ensure_daily_page()
             session.daily_page_id = daily_page.page_id
             db.add(session)
             db.flush()
         except Exception as e:
             logger.warning("ensure_daily_page failed: %s", e)
 
+        try:
+            t_state_repo.refresh_stale_days(db)
+        except Exception as e:
+            logger.warning("refresh_stale_days failed: %s", e)
+
         return SessionStartResponse(
             session_id=session.id,
-            open_tasks=task_repo().get_open_task_contexts(db),
-            blocked_tasks=task_repo().get_blocked_task_contexts(db),
-            unsummarised_meetings=meeting_repo().get_unsummarised_contexts(db),
+            open_tasks=t_repo.get_open_task_contexts(db),
+            blocked_tasks=t_repo.get_blocked_task_contexts(db),
+            unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             sync_results=sync_results,
             daily_page=daily_page,
         )
 
 
-async def task_start(ctx: Context, task_id: int) -> TaskStartResponse:
+async def task_start(
+    ctx: Context,
+    task_id: int,
+    t_repo: TaskRepository = Depends(get_task_repo),
+    n_repo: NoteRepository = Depends(get_note_repo),
+) -> TaskStartResponse:
     """Returns full task context + all prior notes for compounding context.
 
     task_id: integer task ID from the open_tasks or blocked_tasks list
@@ -140,10 +166,10 @@ async def task_start(ctx: Context, task_id: int) -> TaskStartResponse:
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "task_start", session_id=session_id)
-            task = task_repo().get_by_id(db, task_id)
-            task_ctx = task_repo().build_task_context(db, task)
+            task = t_repo.get_by_id(db, task_id)
+            task_ctx = t_repo.build_task_context(db, task)
 
-            notes = note_repo().get_for_task(
+            notes = n_repo.get_for_task(
                 db, task_id=task.id, source_id=task.source_id
             )
             notes_by_type: dict[str, int] = {}
@@ -176,6 +202,10 @@ async def save_note(
     note_type: NoteType,
     content: str,
     mental_model: str | None = None,
+    t_repo: TaskRepository = Depends(get_task_repo),
+    sec: SecurityService = Depends(get_security),
+    n_repo: NoteRepository = Depends(get_note_repo),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
 ) -> SaveNoteResponse:
     """Scrubs and persists a note. note_type: investigation|decision|docs|learnings|session_summary."""
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
@@ -183,7 +213,7 @@ async def save_note(
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "save_note", session_id=session_id)
-            task = task_repo().get_by_id(db, task_id)
+            task = t_repo.get_by_id(db, task_id)
             if (
                 note_type in (NoteType.INVESTIGATION, NoteType.DECISION)
                 and mental_model is None
@@ -195,12 +225,12 @@ async def save_note(
                         response_type=str,
                     )
                     if isinstance(result, AcceptedElicitation) and result.data:
-                        mental_model = security().scrub(result.data).clean
+                        mental_model = sec.scrub(result.data).clean
                 except Exception as e:
                     logger.debug("ctx.elicit unavailable for mental_model: %s", e)
-            clean = security().scrub(content).clean
+            clean = sec.scrub(content).clean
             if mental_model is not None:
-                mental_model = security().scrub(mental_model).clean
+                mental_model = sec.scrub(mental_model).clean
             note = Note(
                 note_type=note_type,
                 content=clean,
@@ -210,10 +240,10 @@ async def save_note(
                 source_type=task.source_type,
                 session_id=session_id,
             )
-            saved = note_repo().save(db, note)
+            saved = n_repo.save(db, note)
             if saved.id is None:
                 raise ToolError("Internal error: note was not assigned an id after flush")
-            task_state_repo().on_note_saved(db, task_id)
+            t_state_repo.on_note_saved(db, task_id)
             return SaveNoteResponse(
                 note_id=saved.id,
                 mental_model_saved=saved.mental_model is not None,
@@ -232,6 +262,10 @@ async def update_task(
     notion_id: str | None = None,
     name: str | None = None,
     source_url: str | None = None,
+    t_repo: TaskRepository = Depends(get_task_repo),
+    sec: SecurityService = Depends(get_security),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
+    wb: WriteBackService = Depends(get_writeback),
 ) -> UpdateTaskResponse:
     """Atomically update task fields. Only provided (non-None) fields are updated.
 
@@ -256,7 +290,7 @@ async def update_task(
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "update_task", session_id=session_id)
 
-            task = task_repo().get_by_id(db, task_id)
+            task = t_repo.get_by_id(db, task_id)
 
             updated_fields: list[str] = []
 
@@ -285,7 +319,7 @@ async def update_task(
                 updated_fields.append("notion_id")
 
             if name is not None:
-                task.name = security().scrub(name).clean
+                task.name = sec.scrub(name).clean
                 updated_fields.append("name")
 
             if source_url is not None:
@@ -297,7 +331,9 @@ async def update_task(
 
             task_state_updated = False
             if "status" in updated_fields:
-                task_state_repo().on_status_changed(db, task.id)
+                if task.id is None:
+                    raise ToolError("Internal error: task was not assigned an id after flush")
+                t_state_repo.on_status_changed(db, task.id)
                 task_state_updated = True
 
             if status == TaskStatus.DONE and task.notion_id:
@@ -307,8 +343,8 @@ async def update_task(
                         response_type=str,
                     )
                     if isinstance(result, AcceptedElicitation) and result.data:
-                        scrubbed_outcome = security().scrub(result.data).clean
-                        writeback().append_task_outcome(task, scrubbed_outcome)
+                        scrubbed_outcome = sec.scrub(result.data).clean
+                        wb.append_task_outcome(task, scrubbed_outcome)
                 except Exception as e:
                     logger.debug("ctx.elicit unavailable for task outcome: %s", e)
 
@@ -317,8 +353,8 @@ async def update_task(
             priority_writeback = None
 
             if "status" in updated_fields:
-                jira_wb = writeback().push_task_status(task)
-                notion_wb = writeback().push_task_status_to_notion(task)
+                jira_wb = wb.push_task_status(task)
+                notion_wb = wb.push_task_status_to_notion(task)
                 status_writeback = WriteBackStatus(
                     ok=jira_wb.ok and notion_wb.ok,
                     error=", ".join(filter(None, [jira_wb.error, notion_wb.error])),
@@ -326,10 +362,10 @@ async def update_task(
                 )
 
             if "due_date" in updated_fields:
-                due_date_writeback = writeback().push_task_due_date(task)
+                due_date_writeback = wb.push_task_due_date(task)
 
             if "priority" in updated_fields:
-                priority_writeback = writeback().push_task_priority(task)
+                priority_writeback = wb.push_task_priority(task)
 
             return UpdateTaskResponse(
                 task_id=task.id,
@@ -345,7 +381,13 @@ async def update_task(
 
 
 async def update_task_status(
-    ctx: Context, task_id: int, new_status: TaskStatus
+    ctx: Context,
+    task_id: int,
+    new_status: TaskStatus,
+    t_repo: TaskRepository = Depends(get_task_repo),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
+    sec: SecurityService = Depends(get_security),
+    wb: WriteBackService = Depends(get_writeback),
 ) -> UpdateTaskStatusResponse:
     """Updates task status locally and attempts Jira and Notion write-back.
 
@@ -364,7 +406,7 @@ async def update_task_status(
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "update_task_status", session_id=session_id)
-            task = task_repo().get_by_id(db, task_id)
+            task = t_repo.get_by_id(db, task_id)
             task.status = new_status
             db.add(task)
             db.flush()
@@ -372,7 +414,7 @@ async def update_task_status(
             if task.id is None:
                 raise ToolError("Internal error: task was not assigned an id after flush")
 
-            task_state_repo().on_status_changed(db, task.id)
+            t_state_repo.on_status_changed(db, task.id)
 
             if new_status == TaskStatus.DONE:
                 try:
@@ -384,9 +426,9 @@ async def update_task_status(
                         isinstance(elicit_result, AcceptedElicitation)
                         and elicit_result.data
                     ):
-                        scrubbed_outcome = security().scrub(elicit_result.data).clean
+                        scrubbed_outcome = sec.scrub(elicit_result.data).clean
                         if task.notion_id:
-                            writeback().append_task_outcome(task, scrubbed_outcome)
+                            wb.append_task_outcome(task, scrubbed_outcome)
                         else:
                             logger.info(
                                 "Task %d done with outcome but no notion_id; skipping notion append",
@@ -395,8 +437,8 @@ async def update_task_status(
                 except Exception as e:
                     logger.debug("ctx.elicit unavailable for task outcome: %s", e)
 
-            jira_wb = writeback().push_task_status(task)
-            notion_wb = writeback().push_task_status_to_notion(task)
+            jira_wb = wb.push_task_status(task)
+            notion_wb = wb.push_task_status_to_notion(task)
 
             return UpdateTaskStatusResponse(
                 task_id=task.id,
@@ -411,7 +453,12 @@ async def update_task_status(
         raise ToolError(str(e)) from e
 
 
-async def get_meeting(ctx: Context, meeting_id: int) -> GetMeetingResponse:
+async def get_meeting(
+    ctx: Context,
+    meeting_id: int,
+    m_repo: MeetingRepository = Depends(get_meeting_repo),
+    t_repo: TaskRepository = Depends(get_task_repo),
+) -> GetMeetingResponse:
     """Returns meeting transcript and linked open tasks.
 
     meeting_id: integer meeting ID from the unsummarised_meetings list
@@ -422,12 +469,12 @@ async def get_meeting(ctx: Context, meeting_id: int) -> GetMeetingResponse:
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "get_meeting", session_id=session_id)
-            meeting = meeting_repo().get_by_id(db, meeting_id)
+            meeting = m_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
                 raise ToolError("Internal error: meeting was not assigned an id after flush")
 
             linked_tasks = [
-                task_repo().build_task_context(db, t)
+                t_repo.build_task_context(db, t)
                 for t in meeting.tasks
                 if t.status
                 in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
@@ -452,6 +499,10 @@ async def save_meeting_summary(
     meeting_id: int,
     summary: str,
     task_ids: list[int] | None = None,
+    m_repo: MeetingRepository = Depends(get_meeting_repo),
+    sec: SecurityService = Depends(get_security),
+    n_repo: NoteRepository = Depends(get_note_repo),
+    wb: WriteBackService = Depends(get_writeback),
 ) -> SaveMeetingSummaryResponse:
     """Scrubs and persists the LLM-generated meeting summary. Attempts Notion write-back."""
     logger.info("save_meeting_summary meeting_id=%d", meeting_id)
@@ -459,11 +510,11 @@ async def save_meeting_summary(
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             await _log_tool_call(db, "save_meeting_summary", session_id=session_id)
-            meeting = meeting_repo().get_by_id(db, meeting_id)
+            meeting = m_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
                 raise ToolError("Internal error: meeting was not assigned an id after flush")
 
-            clean_summary = security().scrub(summary).clean
+            clean_summary = sec.scrub(summary).clean
             meeting.summary = clean_summary
             db.add(meeting)
 
@@ -473,7 +524,7 @@ async def save_meeting_summary(
                 meeting_id=meeting.id,
                 session_id=session_id,
             )
-            saved = note_repo().save(db, note)
+            saved = n_repo.save(db, note)
             if saved.id is None:
                 raise ToolError("Internal error: note was not assigned an id after flush")
 
@@ -489,7 +540,7 @@ async def save_meeting_summary(
                         db.add(MeetingTasks(meeting_id=meeting.id, task_id=tid))
 
             db.flush()
-            wb_result = writeback().push_meeting_summary(meeting)
+            wb_result = wb.push_meeting_summary(meeting)
 
             linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
@@ -513,8 +564,12 @@ async def session_end(
     open_loops: list[str],
     next_actions: list[str],
     closure_status: Literal["clean", "interrupted", "blocked"],
+    tool_registry: str | None = None,
+    sec: SecurityService = Depends(get_security),
+    n_repo: NoteRepository = Depends(get_note_repo),
+    wb: WriteBackService = Depends(get_writeback),
 ) -> SessionEndResponse:
-    """Persists session summary + six-field SessionState to WizardSession. Writes Notion daily page."""
+    """Persists session summary + SessionState to WizardSession. Writes Notion daily page."""
     logger.info("session_end session_id=%d", session_id)
     try:
         with get_session() as db:
@@ -531,6 +586,7 @@ async def session_end(
                 open_loops=open_loops,
                 next_actions=next_actions,
                 closure_status=closure_status,
+                tool_registry=tool_registry,
             )
             session_state_saved = False
             try:
@@ -539,7 +595,7 @@ async def session_end(
             except Exception as e:
                 logger.warning("session_end: failed to serialise session_state: %s", e)
 
-            clean_summary = security().scrub(summary).clean
+            clean_summary = sec.scrub(summary).clean
             session.summary = clean_summary
             db.add(session)
             db.flush()
@@ -552,11 +608,11 @@ async def session_end(
                 content=clean_summary,
                 session_id=session.id,
             )
-            saved = note_repo().save(db, note)
+            saved = n_repo.save(db, note)
             if saved.id is None:
                 raise ToolError("Internal error: note was not assigned an id after flush")
 
-            wb_result = writeback().push_session_summary(session)
+            wb_result = wb.push_session_summary(session)
 
             await ctx.delete_state("current_session_id")
             await ctx.info(
@@ -585,14 +641,16 @@ async def ingest_meeting(
     source_id: str | None = None,
     source_url: str | None = None,
     category: MeetingCategory = MeetingCategory.GENERAL,
+    sec: SecurityService = Depends(get_security),
+    wb: WriteBackService = Depends(get_writeback),
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
     logger.info("ingest_meeting source_id=%s", source_id)
     with get_session() as db:
         session_id: int | None = await ctx.get_state("current_session_id")
         await _log_tool_call(db, "ingest_meeting", session_id=session_id)
-        clean_title = security().scrub(title).clean
-        clean_content = security().scrub(content).clean
+        clean_title = sec.scrub(title).clean
+        clean_content = sec.scrub(content).clean
 
         meeting: Meeting | None = None
         already_existed = False
@@ -621,7 +679,7 @@ async def ingest_meeting(
         if meeting.id is None:
             raise ToolError("Internal error: meeting was not assigned an id after flush")
 
-        wb_result = writeback().push_meeting_to_notion(meeting)
+        wb_result = wb.push_meeting_to_notion(meeting)
         if wb_result.page_id:
             meeting.notion_id = wb_result.page_id
             db.flush()
@@ -641,13 +699,16 @@ async def create_task(
     source_id: str | None = None,
     source_url: str | None = None,
     meeting_id: int | None = None,
+    sec: SecurityService = Depends(get_security),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
+    wb: WriteBackService = Depends(get_writeback),
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
     with get_session() as db:
         session_id: int | None = await ctx.get_state("current_session_id")
         await _log_tool_call(db, "create_task", session_id=session_id)
-        clean_name = security().scrub(name).clean
+        clean_name = sec.scrub(name).clean
         task = Task(
             name=clean_name,
             priority=priority,
@@ -662,12 +723,12 @@ async def create_task(
         if task.id is None:
             raise ToolError("Internal error: task was not assigned an id after flush")
 
-        task_state_repo().create_for_task(db, task)
+        t_state_repo.create_for_task(db, task)
 
         if meeting_id:
             db.add(MeetingTasks(meeting_id=meeting_id, task_id=task.id))
 
-        wb_result = writeback().push_task_to_notion(task)
+        wb_result = wb.push_task_to_notion(task)
         if wb_result.page_id:
             task.notion_id = wb_result.page_id
             db.flush()
@@ -678,7 +739,11 @@ async def create_task(
         )
 
 
-async def rewind_task(ctx: Context, task_id: int) -> RewindResponse:
+async def rewind_task(
+    ctx: Context,
+    task_id: int,
+    n_repo: NoteRepository = Depends(get_note_repo),
+) -> RewindResponse:
     """Reconstruct the full note timeline for a task, oldest first."""
     logger.info("rewind_task task_id=%d", task_id)
     with get_session() as db:
@@ -693,7 +758,7 @@ async def rewind_task(ctx: Context, task_id: int) -> RewindResponse:
         if task_state is None:
             raise ToolError(f"TaskState missing for task {task_id}")
 
-        notes_desc = note_repo().get_for_task(
+        notes_desc = n_repo.get_for_task(
             db, task_id=task.id, source_id=task.source_id
         )
         # Filter persisted notes only (id is None only for unpersisted models; DB rows always have id)
@@ -828,7 +893,11 @@ async def what_am_i_missing(ctx: Context, task_id: int) -> MissingResponse:
 
 
 async def resume_session(
-    ctx: Context, session_id: int | None = None
+    ctx: Context,
+    session_id: int | None = None,
+    sync_svc: SyncService = Depends(get_sync_service),
+    notion: NotionClient = Depends(get_notion_client),
+    m_repo: MeetingRepository = Depends(get_meeting_repo),
 ) -> ResumeSessionResponse:
     """Resume a prior session in a new thread. Creates a new session and syncs."""
     logger.info("resume_session session_id=%s", session_id)
@@ -856,12 +925,12 @@ async def resume_session(
         await _log_tool_call(db, "resume_session", session_id=new_session.id)
 
         # Sync
-        sync_results = sync_service().sync_all(db)
+        sync_results = sync_svc.sync_all(db)
 
         # Daily page
         daily_page = None
         try:
-            daily_page = notion_client().ensure_daily_page()
+            daily_page = notion.ensure_daily_page()
             new_session.daily_page_id = daily_page.page_id
             db.add(new_session)
             db.flush()
@@ -928,7 +997,7 @@ async def resume_session(
             session_state=session_state,
             working_set_tasks=working_set_tasks,
             prior_notes=prior_notes,
-            unsummarised_meetings=meeting_repo().get_unsummarised_contexts(db),
+            unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             sync_results=sync_results,
             daily_page=daily_page,
         )

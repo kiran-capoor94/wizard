@@ -103,6 +103,7 @@ def _run_notion_discovery(config_path: Path) -> None:
         "task_due_date",
         "task_jira_key",
         "meeting_title",
+        "meeting_category",
         "meeting_date",
         "meeting_url",
         "meeting_summary",
@@ -216,9 +217,9 @@ def configure(
 def sync() -> None:
     """Run Jira and Notion sync manually (outside a session)."""
     from wizard.database import get_session
-    from wizard.deps import sync_service
+    from wizard.deps import get_sync_service
 
-    svc = sync_service()
+    svc = get_sync_service()
     with get_session() as session:
         results = svc.sync_all(session)
 
