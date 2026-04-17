@@ -3,7 +3,7 @@
 import pytest
 
 from wizard.models import Note, NoteType
-from wizard.tools.task_tools import task_start, save_note
+from wizard.tools.task_tools import save_note, task_start
 
 
 @pytest.mark.asyncio
