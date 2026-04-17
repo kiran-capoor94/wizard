@@ -1,6 +1,7 @@
 import logging
 import re
 
+import phonenumbers
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,6 @@ class SecurityService:
         ("NHS_ID", r"\b\d{3}\s\d{3}\s\d{4}\b", "NHS_ID"),
         ("NI_NUMBER", r"\b[A-Z]{2}\d{6}[A-D]\b", "NI_NUMBER"),
         ("EMAIL", r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b", "EMAIL"),
-        ("PHONE", r"\b(\+44|0)[\d\s\-]{9,13}\b", "PHONE"),
         (
             "POSTCODE",
             r"\b([Gg][Ii][Rr]\s?0[Aa]{2}|[A-Za-z]{1,2}\d{1,2}[A-Za-z]?\s?\d[A-Za-z]{2})\b",
@@ -31,12 +31,40 @@ class SecurityService:
         self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
         self._enabled = enabled
 
+    def _scrub_phones(
+        self,
+        text: str,
+        original_to_stub: dict[str, str],
+        counters: dict[str, int],
+    ) -> str:
+        replacements: list[tuple[str, str]] = []
+        for match in phonenumbers.PhoneNumberMatcher(text, "GB"):
+            raw = match.raw_string
+            if any(p.search(raw) for p in self._allowlist_patterns):
+                continue
+            if raw in original_to_stub:
+                continue
+            counters["PHONE"] = counters.get("PHONE", 0) + 1
+            stub = f"[PHONE_{counters['PHONE']}]"
+            original_to_stub[raw] = stub
+            replacements.append((raw, stub))
+        # Replace longest matches first to avoid partial substitutions
+        for original, stub in sorted(
+            replacements, key=lambda x: len(x[0]), reverse=True
+        ):
+            text = text.replace(original, stub)
+        return text
+
     def scrub(self, content: str) -> ScrubResult:
         if not self._enabled:
             return ScrubResult(clean=content, original_to_stub={}, was_modified=False)
         clean = content
         original_to_stub: dict[str, str] = {}
         counters: dict[str, int] = {}
+
+        # Phone scrubbing runs first so full numbers are captured before
+        # digit-based patterns (e.g. NHS_ID) can consume substrings.
+        clean = self._scrub_phones(clean, original_to_stub, counters)
 
         for _name, pattern, prefix in self.PATTERNS:
 
