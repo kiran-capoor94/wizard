@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,36 @@ _DEFAULT_CONFIG = {
 }
 
 _AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "all"]
+
+
+def _ensure_editable_pth() -> None:
+    """Clear the UF_HIDDEN macOS flag from the hatchling editable .pth file.
+
+    uv sets UF_HIDDEN on all .pth files it creates inside .venv. Python 3.14+
+    respects UF_HIDDEN and silently skips those files, so the editable install
+    silently breaks. os.chflags clears the bit; uv sync does not re-set it on
+    files it doesn't need to recreate, so this is persistent across syncs.
+
+    Only needs to be re-run after a full venv rebuild (uv venv / uv pip install -e .).
+    """
+    import stat
+
+    repo_root = Path(__file__).resolve().parents[3]
+    py_ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    site_packages = repo_root / ".venv" / "lib" / py_ver / "site-packages"
+    if not site_packages.exists():
+        return
+
+    pth_file = site_packages / "_editable_impl_wizard.pth"
+    if not pth_file.exists():
+        return
+
+    if not hasattr(os, "chflags"):
+        return  # non-macOS — no-op
+
+    st = os.lstat(pth_file)
+    if getattr(st, "st_flags", 0) & stat.UF_HIDDEN:
+        os.chflags(pth_file, st.st_flags & ~stat.UF_HIDDEN)
 
 
 def _package_skills_dir() -> Path:
@@ -167,6 +198,7 @@ def setup(
         else:
             typer.echo("  Skipped — set notion.daily_page_parent_id in config.json later")
 
+    _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")
 
     if agent is None:
@@ -380,6 +412,7 @@ def update() -> None:
             typer.echo(output, err=True)
             raise typer.Exit(1)
 
+    _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")
 
     registered = agent_registration.read_registered_agents()
