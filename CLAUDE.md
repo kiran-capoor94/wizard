@@ -314,7 +314,7 @@ External sources (Jira/Notion) win on metadata; local wins on status:
 
 ## Coding Principles
 
-Five rules that keep the codebase maintainable for a solo engineer:
+Ten rules that keep the codebase maintainable for a solo engineer:
 
 1. **SLAP (Single Layer of Abstraction)** — each function operates at one
    level. Tool functions orchestrate; they don't build SQL or format API
@@ -329,6 +329,27 @@ Five rules that keep the codebase maintainable for a solo engineer:
    and scrubbing happen in services or repositories.
 5. **DRY at the third occurrence** — don't abstract after two uses. Wait
    for three to confirm it's a real pattern.
+6. **Idiomatic `_` prefix** — only use `_` for names that are genuinely
+   private to the module or class. If a function is imported by another
+   module, it is part of that module's public API and must not have a `_`
+   prefix. The `_helpers.py` filename pattern is also discouraged; use
+   `helpers.py`.
+7. **Classes over function bags** — when multiple functions share state,
+   context, or a common pattern (e.g. get session → log → do work),
+   group them into a class. Stateless utility functions are fine as
+   module-level functions; related stateful behaviour belongs on classes.
+8. **No N+1 or N^2** — never call `db.get()` inside a loop. Batch-load
+   with `.in_()` queries and build a dict for O(1) lookup. Watch for
+   repeated iteration over the same collection — prefer single-pass
+   aggregation.
+9. **One implementation, many interfaces** — CLI and MCP are interfaces
+   to the same domain logic. Both must call the same service methods.
+   Never reimplement sync/writeback/query logic in a tool or CLI command
+   when a service method already exists.
+10. **No ceremony without value** — avoid wrappers that just forward to
+    one other function, response types that wrap a single value, or DI
+    machinery that adds indirection without enabling testability that
+    plain constructor injection couldn't achieve.
 
 ## File Size & Structural Thresholds
 
