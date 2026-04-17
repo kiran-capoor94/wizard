@@ -341,17 +341,28 @@ def setup(
     typer.echo(f"  Agent   {agent_label}")
 
 
+def _run_jira_configure(config_path: Path) -> None:
+    if not config_path.exists():
+        typer.echo("Config not found. Run 'wizard setup' first.", err=True)
+        raise typer.Exit(1)
+    with open(config_path) as f:
+        cfg = json.load(f)
+    _configure_jira(cfg, config_path)
+
+
 @app.command()
 def configure(
-    notion: bool = typer.Option(
-        False, "--notion", help="Re-run Notion schema discovery"
-    ),
+    notion: bool = typer.Option(False, "--notion", help="Re-run Notion schema discovery"),
+    jira: bool = typer.Option(False, "--jira", help="Re-configure Jira credentials"),
 ) -> None:
     """Configure Wizard integrations."""
     if notion:
         _run_notion_discovery(WIZARD_HOME / "config.json")
         return
-    typer.echo("Available flags: --notion")
+    if jira:
+        _run_jira_configure(WIZARD_HOME / "config.json")
+        return
+    typer.echo("Available flags: --notion, --jira")
 
 
 @app.command()
