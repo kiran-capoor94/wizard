@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 REQUIRED_TABLES = {"task", "note", "meeting", "wizardsession", "toolcall", "task_state"}
 
 
-def _db_is_healthy(db_path: Path) -> bool:
+def db_is_healthy(db_path: Path) -> bool:
     """Return True if db_path exists and contains all required tables."""
     if not db_path.exists():
         return False
@@ -23,7 +23,7 @@ def _db_is_healthy(db_path: Path) -> bool:
             }
         return REQUIRED_TABLES.issubset(tables)
     except Exception as e:
-        logger.debug("_db_is_healthy failed: %s", e)
+        logger.debug("db_is_healthy failed: %s", e)
         return False
 
 

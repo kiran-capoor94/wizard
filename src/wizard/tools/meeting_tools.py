@@ -5,6 +5,7 @@ from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from sqlmodel import select
 
+from ..database import get_session
 from ..deps import (
     get_meeting_repo,
     get_note_repo,
@@ -33,7 +34,6 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import WriteBackService
-from . import _helpers
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ async def get_meeting(
     """
     logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
-        with _helpers.get_session() as db:
+        with get_session() as db:
             meeting = m_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
                 raise ToolError("Internal error: meeting was not assigned an id after flush")
@@ -90,7 +90,7 @@ async def save_meeting_summary(
     """Scrubs and persists the LLM-generated meeting summary. Attempts Notion write-back."""
     logger.info("save_meeting_summary meeting_id=%d", meeting_id)
     try:
-        with _helpers.get_session() as db:
+        with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             meeting = m_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
@@ -148,7 +148,7 @@ async def ingest_meeting(
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
     logger.info("ingest_meeting source_id=%s", source_id)
-    with _helpers.get_session() as db:
+    with get_session() as db:
         clean_title = sec.scrub(title).clean
         clean_content = sec.scrub(content).clean
 

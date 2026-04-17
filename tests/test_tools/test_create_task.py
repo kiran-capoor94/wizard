@@ -33,7 +33,7 @@ async def test_create_task_creates_and_links(db_session):
     meeting_id = meeting.id
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskStateRepository
         from wizard.security import SecurityService
         result = await create_task(
@@ -70,7 +70,7 @@ async def test_create_task_creates_paired_task_state(db_session):
     wb_mock.push_task_to_notion.return_value = WriteBackStatus(ok=True)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskStateRepository
         from wizard.security import SecurityService
         response = await create_task(
@@ -105,7 +105,7 @@ async def test_create_task_with_active_session(db_session):
     wb_mock.push_task_to_notion.return_value = WriteBackStatus(
         ok=False, error="no notion"
     )
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskStateRepository
         from wizard.security import SecurityService
         result = await create_task(

@@ -10,6 +10,7 @@ from notion_client.errors import APIResponseError
 from pydantic import ValidationError
 from sqlmodel import Session, col, select
 
+from ..database import get_session
 from ..deps import (
     get_meeting_repo,
     get_note_repo,
@@ -47,7 +48,6 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import SyncService, WriteBackService
-from . import _helpers
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ async def session_start(
 ) -> SessionStartResponse:
     """Create a session, sync Jira/Notion, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start")
-    with _helpers.get_session() as db:
+    with get_session() as db:
         session, daily_page = _init_session(db, notion)
 
         sync_results = sync_svc.sync_all(db)
@@ -125,7 +125,7 @@ async def session_end(
     """Persists session summary + SessionState to WizardSession. Writes Notion daily page."""
     logger.info("session_end session_id=%d", session_id)
     try:
-        with _helpers.get_session() as db:
+        with get_session() as db:
             session = db.get(WizardSession, session_id)
             if session is None:
                 await ctx.error(f"Session {session_id} not found")
@@ -270,7 +270,7 @@ async def resume_session(
 ) -> ResumeSessionResponse:
     """Resume a prior session in a new thread. Creates a new session and syncs."""
     logger.info("resume_session session_id=%s", session_id)
-    with _helpers.get_session() as db:
+    with get_session() as db:
         # Find prior session
         if session_id is not None:
             prior = db.get(WizardSession, session_id)

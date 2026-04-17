@@ -33,7 +33,7 @@ async def test_get_meeting_returns_content_and_open_tasks(db_session):
     db_session.commit()
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.meeting_tools", **_patch_tools(db_session)):
         result = await get_meeting(ctx, meeting_id=meeting.id, m_repo=MeetingRepository(), t_repo=TaskRepository())
 
     assert result.meeting_id == meeting.id
@@ -69,7 +69,7 @@ async def test_save_meeting_summary_scrubs_and_persists(db_session):
     impl = _MockContextImpl()
     impl._state["current_session_id"] = session.id
     ctx = mock_ctx(impl)
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.meeting_tools", **_patch_tools(db_session)):
         result = await save_meeting_summary(
             ctx,
             meeting_id=meeting.id,
@@ -116,7 +116,7 @@ async def test_save_meeting_summary_tasks_linked_count(db_session):
     impl = _MockContextImpl()
     impl._state["current_session_id"] = session.id
     ctx = mock_ctx(impl)
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.meeting_tools", **_patch_tools(db_session)):
         from wizard.repositories import MeetingRepository, NoteRepository
         from wizard.security import SecurityService
         result = await save_meeting_summary(
@@ -153,7 +153,7 @@ async def test_save_meeting_summary_reads_session_id_from_ctx_state(db_session):
 
     wb_mock = MagicMock()
     wb_mock.push_meeting_summary.return_value = WriteBackStatus(ok=True)
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.meeting_tools", **_patch_tools(db_session)):
         from wizard.repositories import MeetingRepository, NoteRepository
         from wizard.security import SecurityService
         result = await save_meeting_summary(
@@ -188,7 +188,7 @@ async def test_ingest_meeting_creates_meeting(db_session):
     )
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.meeting_tools", **_patch_tools(db_session)):
         result = await ingest_meeting(
             ctx,
             title="Sprint Planning",
@@ -225,7 +225,7 @@ async def test_ingest_meeting_dedup_by_source_id(db_session):
     db_session.refresh(existing)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.meeting_tools", **_patch_tools(db_session)):
         result = await ingest_meeting(
             ctx,
             title="New",
@@ -257,7 +257,7 @@ async def test_ingest_meeting_with_active_session(db_session):
     wb_mock.push_meeting_to_notion.return_value = WriteBackStatus(
         ok=False, error="no notion"
     )
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.meeting_tools", **_patch_tools(db_session)):
         from wizard.security import SecurityService
         result = await ingest_meeting(
             ctx,

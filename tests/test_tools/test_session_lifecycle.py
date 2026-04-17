@@ -43,7 +43,7 @@ async def test_session_end_saves_summary_note(db_session):
     session_id = session.id
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         result = await session_end(
             ctx,
             session_id=session_id,
@@ -88,7 +88,7 @@ async def test_session_end_session_state_saved_true_on_happy_path(db_session):
     assert session.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         result = await session_end(
             ctx,
             session_id=session.id,
@@ -126,7 +126,7 @@ async def test_session_end_session_state_saved_false_when_write_fails(db_session
     assert session.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         with _patch(
             "wizard.schemas.SessionState.model_dump_json",
             side_effect=ValueError("serialization failed"),
@@ -168,7 +168,7 @@ async def test_session_end_clears_current_session_id_from_ctx_state(db_session):
     wb_mock = MagicMock()
     wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         await session_end(
             ctx,
             session_id=session.id,
@@ -208,7 +208,7 @@ async def test_session_end_persists_session_state(db_session):
     wb_mock = MagicMock()
     wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         result = await session_end(
             ctx,
             session_id=session.id,
@@ -257,7 +257,7 @@ async def test_session_end_emits_confirmation_via_ctx_info(db_session):
     wb_mock = MagicMock()
     wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         await session_end(
             ctx,
             session_id=session.id,
@@ -294,7 +294,7 @@ async def test_session_end_rejects_invalid_closure_status(db_session):
     wb_mock = MagicMock()
     wb_mock.push_session_summary = MagicMock()
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         with pytest.raises(ToolError):
             await session_end(
                 ctx,
@@ -326,7 +326,7 @@ async def test_session_end_persists_tool_registry(db_session):
     assert session.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository
         from wizard.security import SecurityService
         result = await session_end(
@@ -364,7 +364,7 @@ async def test_session_end_tool_registry_defaults_to_none(db_session):
     db_session.flush()
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository
         from wizard.security import SecurityService
         result = await session_end(
@@ -409,7 +409,7 @@ async def test_resume_session_creates_new_session(db_session):
     sync_mock = MagicMock()
     sync_mock.sync_all = MagicMock(return_value=[])
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         from wizard.repositories import MeetingRepository
         result = await resume_session(
             ctx,

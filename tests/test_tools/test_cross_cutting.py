@@ -60,7 +60,8 @@ async def test_compounding_loop_across_two_sessions(db_session):
     sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)), \
+         patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import (
             MeetingRepository,
             NoteRepository,

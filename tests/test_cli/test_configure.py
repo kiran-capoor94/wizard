@@ -169,44 +169,44 @@ def test_configure_no_flags_shows_available_options(tmp_path):
 
 
 def test_resolve_notion_page_id_extracts_from_workspace_url():
-    from wizard.cli.configure import _resolve_notion_page_id
+    from wizard.cli.configure import resolve_notion_page_id
     url = "https://www.notion.so/workspace/My-Tasks-abc123def456789012345678901234ab"
-    assert _resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
+    assert resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
 
 
 def test_resolve_notion_page_id_extracts_from_short_url():
-    from wizard.cli.configure import _resolve_notion_page_id
+    from wizard.cli.configure import resolve_notion_page_id
     url = "https://www.notion.so/abc123def456789012345678901234ab"
-    assert _resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
+    assert resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
 
 
 def test_resolve_notion_page_id_strips_query_params():
-    from wizard.cli.configure import _resolve_notion_page_id
+    from wizard.cli.configure import resolve_notion_page_id
     url = "https://www.notion.so/My-Tasks-abc123def456789012345678901234ab?v=xyz&p=foo"
-    assert _resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
+    assert resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
 
 
 def test_resolve_notion_page_id_raises_on_invalid_url():
-    from wizard.cli.configure import _resolve_notion_page_id
+    from wizard.cli.configure import resolve_notion_page_id
     with pytest.raises(ValueError, match="Could not extract"):
-        _resolve_notion_page_id("https://notion.so/workspace/no-id-here")
+        resolve_notion_page_id("https://notion.so/workspace/no-id-here")
 
 
 # --- _resolve_ds_id tests ---
 
 
 def test_resolve_ds_id_returns_page_id_on_success():
-    from wizard.cli.configure import _resolve_ds_id
+    from wizard.cli.configure import resolve_ds_id
     client = MagicMock()
     page_id = "abc123de-f456-7890-1234-5678901234ab"
-    result = _resolve_ds_id(client, page_id)
+    result = resolve_ds_id(client, page_id)
     assert result == page_id
     client.data_sources.retrieve.assert_called_once_with(data_source_id=page_id)
 
 
 def test_resolve_ds_id_raises_on_api_error():
-    from wizard.cli.configure import _resolve_ds_id
+    from wizard.cli.configure import resolve_ds_id
     client = MagicMock()
     client.data_sources.retrieve.side_effect = Exception("API error: 404 not found")
     with pytest.raises(Exception, match="404"):
-        _resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")
+        resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")
