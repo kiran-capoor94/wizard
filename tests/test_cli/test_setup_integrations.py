@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -245,7 +246,7 @@ def test_setup_notion_retries_on_api_error(tmp_path):
              patch("wizard.cli.configure._run_notion_discovery"), \
              patch("wizard.cli.configure.NotionSdkClient"), \
              patch("wizard.cli.configure._resolve_ds_id", side_effect=[
-                 Exception("APIResponseError: 404"),  # first tasks attempt fails
+                 httpx.HTTPError("404 Not Found"),  # first tasks attempt fails
                  "tasks-ds-id",                        # second tasks attempt succeeds
                  "meetings-ds-id",
              ]):

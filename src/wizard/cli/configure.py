@@ -2,8 +2,10 @@ import json
 import re
 from pathlib import Path
 
+import httpx
 import typer
 from notion_client import Client as NotionSdkClient
+from notion_client.errors import APIResponseError
 
 from wizard import notion_discovery
 from wizard.integrations import ConfigurationError
@@ -144,7 +146,7 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
             cfg["notion"]["tasks_ds_id"] = tasks_ds_id
             typer.echo("  tasks database: set")
             break
-        except Exception as exc:
+        except (APIResponseError, httpx.HTTPError) as exc:
             typer.echo(f"\n  failed: {exc}")
 
     while True:
@@ -161,7 +163,7 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
             cfg["notion"]["meetings_ds_id"] = meetings_ds_id
             typer.echo("  meetings database: set")
             break
-        except Exception as exc:
+        except (APIResponseError, httpx.HTTPError) as exc:
             typer.echo(f"\n  failed: {exc}")
 
     with open(config_path, "w") as f:
