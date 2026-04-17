@@ -410,11 +410,13 @@ async def test_resume_session_creates_new_session(db_session):
     sync_mock.sync_all = MagicMock(return_value=[])
 
     with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
-        from wizard.repositories import MeetingRepository
+        from wizard.repositories import MeetingRepository, NoteRepository, TaskRepository
         result = await resume_session(
             ctx,
             sync_svc=sync_mock,
             notion=_make_notion_mock(),
+            t_repo=TaskRepository(),
+            n_repo=NoteRepository(),
             m_repo=MeetingRepository(),
         )
 
