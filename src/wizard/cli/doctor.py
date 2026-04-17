@@ -1,7 +1,15 @@
 import logging
+import os
+import sqlite3
 from pathlib import Path
 
 import typer
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine
+
+from wizard import agent_registration, notion_discovery
+from wizard.config import Settings, settings
+from wizard.integrations import NotionSdkClient
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +21,6 @@ def db_is_healthy(db_path: Path) -> bool:
     if not db_path.exists():
         return False
     try:
-        import sqlite3
         with sqlite3.connect(str(db_path)) as conn:
             tables = {
                 row[0]
@@ -28,10 +35,6 @@ def db_is_healthy(db_path: Path) -> bool:
 
 
 def _check_db_file() -> tuple[bool, str]:
-    import os
-
-    from wizard.config import settings
-
     db_path_str = os.environ.get("WIZARD_DB", settings.db)
     db_path = Path(db_path_str)
     if db_path.exists():
@@ -40,11 +43,6 @@ def _check_db_file() -> tuple[bool, str]:
 
 
 def _check_db_tables() -> tuple[bool, str]:
-    import os
-    import sqlite3
-
-    from wizard.config import settings
-
     db_path_str = os.environ.get("WIZARD_DB", settings.db)
     db_path = Path(db_path_str)
     if not db_path.exists():
@@ -70,8 +68,6 @@ def _check_db_tables() -> tuple[bool, str]:
 
 
 def _check_config_file() -> tuple[bool, str]:
-    import os
-
     config_path = Path(
         os.environ.get(
             "WIZARD_CONFIG_FILE", str(Path.home() / ".wizard" / "config.json")
@@ -83,8 +79,6 @@ def _check_config_file() -> tuple[bool, str]:
 
 
 def _check_notion_token() -> tuple[bool, str]:
-    from wizard.config import Settings
-
     s = Settings()
     if s.notion.token.get_secret_value():
         return True, "Notion token configured"
@@ -92,8 +86,6 @@ def _check_notion_token() -> tuple[bool, str]:
 
 
 def _check_jira_token() -> tuple[bool, str]:
-    from wizard.config import Settings
-
     s = Settings()
     if s.jira.token.get_secret_value():
         return True, "Jira token configured"
@@ -108,8 +100,6 @@ def _check_allowlist_file() -> tuple[bool, str]:
 
 
 def _check_agent_registrations() -> tuple[bool, str]:
-    from wizard import agent_registration
-
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
@@ -120,13 +110,6 @@ def _check_agent_registrations() -> tuple[bool, str]:
 
 def _check_migration_current() -> tuple[bool, str]:
     try:
-        import os
-
-        from alembic.runtime.migration import MigrationContext
-        from sqlalchemy import create_engine
-
-        from wizard.config import settings
-
         db_path_str = os.environ.get("WIZARD_DB", settings.db)
         engine = create_engine(f"sqlite:///{db_path_str}")
         with engine.connect() as conn:
@@ -161,10 +144,6 @@ def _validate_properties(
 
 
 def _check_notion_schema() -> tuple[bool, str]:
-    from wizard import notion_discovery
-    from wizard.config import Settings
-    from wizard.integrations import NotionSdkClient
-
     s = Settings()
     notion = s.notion
     schema = notion.notion_schema

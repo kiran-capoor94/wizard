@@ -1,14 +1,14 @@
 import datetime
 import logging
 
+from sqlmodel import select
+
+from wizard.models import Note, TaskState, ToolCall
+
 logger = logging.getLogger(__name__)
 
 
 def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
-    from sqlmodel import select
-
-    from wizard.models import ToolCall
-
     start_dt = datetime.datetime.combine(start, datetime.time.min)
     end_dt = datetime.datetime.combine(end, datetime.time.max)
 
@@ -47,10 +47,6 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
 
 
 def query_notes(db, start: datetime.date, end: datetime.date) -> dict:
-    from sqlmodel import select
-
-    from wizard.models import Note
-
     start_dt = datetime.datetime.combine(start, datetime.time.min)
     end_dt = datetime.datetime.combine(end, datetime.time.max)
 
@@ -83,10 +79,6 @@ def query_notes(db, start: datetime.date, end: datetime.date) -> dict:
 
 
 def query_tasks(db, start: datetime.date, end: datetime.date) -> dict:
-    from sqlmodel import select
-
-    from wizard.models import Note, TaskState
-
     start_dt = datetime.datetime.combine(start, datetime.time.min)
     end_dt = datetime.datetime.combine(end, datetime.time.max)
 
@@ -119,10 +111,6 @@ def query_tasks(db, start: datetime.date, end: datetime.date) -> dict:
 
 
 def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
-    from sqlmodel import select
-
-    from wizard.models import Note, ToolCall
-
     start_dt = datetime.datetime.combine(start, datetime.time.min)
     end_dt = datetime.datetime.combine(end, datetime.time.max)
 
