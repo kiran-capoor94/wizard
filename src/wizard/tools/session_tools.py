@@ -46,6 +46,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import SyncService, WriteBackService
+from ..skills import load_skill
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ async def session_start(
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             sync_results=sync_results,
             daily_page=daily_page,
+            skill_instructions=load_skill("session-start"),
         )
 
 
@@ -178,6 +180,7 @@ async def session_end(
                 open_loops_count=len(open_loops),
                 next_actions_count=len(next_actions),
                 intent=intent,
+                skill_instructions=load_skill("session-end"),
             )
     except ValueError as e:
         logger.warning("session_end failed: %s", e)
@@ -284,6 +287,7 @@ async def resume_session(
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             sync_results=sync_results,
             daily_page=daily_page,
+            skill_instructions=load_skill("session-resume"),
         )
 
 
