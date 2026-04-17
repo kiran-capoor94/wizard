@@ -46,6 +46,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import WriteBackService
+from ..skills import load_skill
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -90,6 +91,7 @@ async def task_start(
                 notes_by_type=notes_by_type,
                 prior_notes=prior_notes,
                 latest_mental_model=latest_mental_model,
+                skill_instructions=load_skill("task-start"),
             )
     except ValueError as e:
         logger.warning("task_start failed: %s", e)
