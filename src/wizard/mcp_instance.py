@@ -11,7 +11,13 @@ mcp = FastMCP(
     instructions=(
         "Wizard is Kiran's local memory layer. It syncs Jira and Notion, scrubs PII, "
         "and surfaces structured context across sessions. Meetings can be ingested "
-        "via ingest_meeting. Start every session with session_start. End with session_end."
+        "via ingest_meeting. Start every session with session_start. End with session_end.\n\n"
+        "NOTE-TAKING: Save notes throughout the session using save_note — not just at the end. "
+        "Types: investigation (findings), decision (choices made), docs (how things work), "
+        "learnings (surprises). Every note needs a task_id and concrete details (file paths, "
+        "function names, error messages). After 2+ notes on a task, include a mental_model — "
+        "a 2-3 sentence snapshot of your current understanding. "
+        "Use the note_guidance prompt for full templates and decision tree."
     ),
     version=settings.version,
     mask_error_details=True,

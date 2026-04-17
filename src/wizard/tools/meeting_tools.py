@@ -34,6 +34,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import WriteBackService
+from ..skills import SKILL_MEETING, load_skill
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ async def get_meeting(
                 already_summarised=meeting.summary is not None,
                 existing_summary=meeting.summary,
                 open_tasks=linked_tasks,
+                skill_instructions=load_skill(SKILL_MEETING),
             )
     except ValueError as e:
         logger.warning("get_meeting failed: %s", e)
@@ -159,9 +161,7 @@ async def ingest_meeting(
         meeting: Meeting | None = None
         already_existed = False
         if source_id:
-            meeting = db.exec(
-                select(Meeting).where(Meeting.source_id == source_id)
-            ).first()
+            meeting = db.exec(select(Meeting).where(Meeting.source_id == source_id)).first()
         if meeting:
             already_existed = True
             meeting.title = clean_title

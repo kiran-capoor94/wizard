@@ -59,6 +59,10 @@ class JiraClient:
         if self._client is not None:
             self._client.close()
 
+    @property
+    def is_configured(self) -> bool:
+        return self._client is not None
+
     def _require_client(self) -> httpx.Client:
         if self._client is None:
             raise ConfigurationError("Jira token not configured")
@@ -104,9 +108,7 @@ class JiraClient:
         client = self._require_client()
         transition_id = self._get_transition_id(source_id, status)
         if transition_id is None:
-            logger.warning(
-                "No Jira transition found for status %r on %s", status, source_id
-            )
+            logger.warning("No Jira transition found for status %r on %s", status, source_id)
             return False
         try:
             response = client.post(
@@ -179,6 +181,10 @@ class NotionClient:
         self._meetings_ds_id = meetings_ds_id
         self._client = NotionSdkClient(auth=token) if token else None
         self._schema = schema if schema is not None else NotionSchemaSettings()
+
+    @property
+    def is_configured(self) -> bool:
+        return self._client is not None
 
     def _require_client(self) -> NotionSdkClient:
         if self._client is None:
@@ -270,30 +276,22 @@ class NotionClient:
             if self.archive_page(stale_id):
                 archived_count += 1
 
-        return DailyPageResult(
-            page_id=page_id, created=created, archived_count=archived_count
-        )
+        return DailyPageResult(page_id=page_id, created=created, archived_count=archived_count)
 
     def fetch_tasks(self) -> list[NotionTaskData]:
         """Query Tasks DB, return normalised NotionTaskData models."""
         self._require_client()
         try:
-            pages = collect_paginated_api(
-                self._query_database, data_source_id=self._tasks_ds_id
-            )
+            pages = collect_paginated_api(self._query_database, data_source_id=self._tasks_ds_id)
             tasks = []
             for page in pages:
                 page_id = page.get("id")
                 props = page.get("properties", {})
 
-                jira_url = NotionUrl.model_validate(
-                    props.get(self._schema.task_jira_key, {})
-                ).url
+                jira_url = NotionUrl.model_validate(props.get(self._schema.task_jira_key, {})).url
                 task = NotionTaskData(
                     notion_id=page_id,
-                    name=NotionTitle.model_validate(
-                        props.get(self._schema.task_name, {})
-                    ).text,
+                    name=NotionTitle.model_validate(props.get(self._schema.task_name, {})).text,
                     status=NotionStatus.model_validate(
                         props.get(self._schema.task_status, {})
                     ).name,
@@ -316,9 +314,7 @@ class NotionClient:
         """Query Meeting Notes DB, return normalised NotionMeetingData models."""
         self._require_client()
         try:
-            pages = collect_paginated_api(
-                self._query_database, data_source_id=self._meetings_ds_id
-            )
+            pages = collect_paginated_api(self._query_database, data_source_id=self._meetings_ds_id)
             meetings = []
             for page in pages:
                 page_id = page.get("id")
@@ -335,12 +331,8 @@ class NotionClient:
                     summary=NotionRichText.model_validate(
                         props.get(self._schema.meeting_summary, {})
                     ).text,
-                    krisp_url=NotionUrl.model_validate(
-                        props.get(self._schema.meeting_url, {})
-                    ).url,
-                    date=NotionDate.model_validate(
-                        props.get(self._schema.meeting_date, {})
-                    ).start,
+                    krisp_url=NotionUrl.model_validate(props.get(self._schema.meeting_url, {})).url,
+                    date=NotionDate.model_validate(props.get(self._schema.meeting_date, {})).start,
                 )
                 meetings.append(meeting)
             return meetings
@@ -403,61 +395,33 @@ class NotionClient:
         )
         return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
 
-    def update_task_status(self, page_id: str, status: str) -> bool:
-        """Update Status property on task page."""
+    def _update_page_property(self, page_id: str, properties: dict, label: str) -> bool:
+        """Update one or more properties on a Notion page."""
         client = self._require_client()
         try:
-            client.pages.update(
-                page_id=page_id,
-                properties={self._schema.task_status: {"status": {"name": status}}},
-            )
+            client.pages.update(page_id=page_id, properties=properties)
             return True
         except APIResponseError as e:
-            logger.warning("Notion update_task_status failed: %s", e)
+            logger.warning("Notion %s failed: %s", label, e)
             return False
+
+    def update_task_status(self, page_id: str, status: str) -> bool:
+        return self._update_page_property(
+            page_id, {self._schema.task_status: {"status": {"name": status}}}, "update_task_status"
+        )
 
     def update_task_due_date(self, page_id: str, due_date: str) -> bool:
-        """Update due_date property on task page. due_date in ISO format."""
-        client = self._require_client()
-        try:
-            client.pages.update(
-                page_id=page_id,
-                properties={self._schema.task_due_date: {"date": {"start": due_date}}},
-            )
-            return True
-        except APIResponseError as e:
-            logger.warning("Notion update_task_due_date failed: %s", e)
-            return False
+        props = {self._schema.task_due_date: {"date": {"start": due_date}}}
+        return self._update_page_property(page_id, props, "update_task_due_date")
 
     def update_task_priority(self, page_id: str, priority: str) -> bool:
-        """Update priority select property on task page."""
-        client = self._require_client()
-        try:
-            client.pages.update(
-                page_id=page_id,
-                properties={self._schema.task_priority: {"select": {"name": priority}}},
-            )
-            return True
-        except APIResponseError as e:
-            logger.warning("Notion update_task_priority failed: %s", e)
-            return False
+        props = {self._schema.task_priority: {"select": {"name": priority}}}
+        return self._update_page_property(page_id, props, "update_task_priority")
 
     def update_meeting_summary(self, page_id: str, summary: str) -> bool:
         """Update Summary property on meeting page."""
-        client = self._require_client()
-        try:
-            client.pages.update(
-                page_id=page_id,
-                properties={
-                    self._schema.meeting_summary: {
-                        "rich_text": [{"text": {"content": summary}}]
-                    }
-                },
-            )
-            return True
-        except APIResponseError as e:
-            logger.warning("Notion update_meeting_summary failed: %s", e)
-            return False
+        props = {self._schema.meeting_summary: {"rich_text": [{"text": {"content": summary}}]}}
+        return self._update_page_property(page_id, props, "update_meeting_summary")
 
     def append_paragraph_to_page(self, page_id: str, text: str) -> bool:
         """Append a paragraph block to an existing Notion page."""
@@ -469,9 +433,7 @@ class NotionClient:
                     {
                         "object": "block",
                         "type": "paragraph",
-                        "paragraph": {
-                            "rich_text": [{"type": "text", "text": {"content": text}}]
-                        },
+                        "paragraph": {"rich_text": [{"type": "text", "text": {"content": text}}]},
                     }
                 ],
             )
