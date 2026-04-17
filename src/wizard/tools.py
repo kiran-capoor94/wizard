@@ -85,6 +85,27 @@ async def _log_tool_call(
 # ---------------------------------------------------------------------------
 
 
+def _init_session(
+    db: Session, notion: NotionClient
+) -> "tuple[WizardSession, object]":
+    """Create a new WizardSession and attach the daily page if available."""
+    session = WizardSession()
+    db.add(session)
+    db.flush()
+    db.refresh(session)
+    if session.id is None:
+        raise ToolError("Internal error: session was not assigned an id after flush")
+    daily_page = None
+    try:
+        daily_page = notion.ensure_daily_page()
+        session.daily_page_id = daily_page.page_id
+        db.add(session)
+        db.flush()
+    except Exception as e:
+        logger.warning("ensure_daily_page failed: %s", e)
+    return session, daily_page
+
+
 async def session_start(
     ctx: Context,
     sync_svc: SyncService = Depends(get_sync_service),
@@ -96,12 +117,7 @@ async def session_start(
     """Creates a session, syncs Jira and Notion, returns open and blocked tasks + unsummarised meetings."""
     logger.info("session_start")
     with get_session() as db:
-        session = WizardSession()
-        db.add(session)
-        db.flush()
-        db.refresh(session)
-        if session.id is None:
-            raise ToolError("Internal error: session was not assigned an id after flush")
+        session, daily_page = _init_session(db, notion)
         await _log_tool_call(db, "session_start", session_id=session.id)
 
         sync_results: list[SourceSyncStatus] = []
@@ -124,15 +140,6 @@ async def session_start(
 
         await ctx.set_state("current_session_id", session.id)
         await ctx.info(f"Session {session.id} started.")
-
-        daily_page = None
-        try:
-            daily_page = notion.ensure_daily_page()
-            session.daily_page_id = daily_page.page_id
-            db.add(session)
-            db.flush()
-        except Exception as e:
-            logger.warning("ensure_daily_page failed: %s", e)
 
         try:
             t_state_repo.refresh_stale_days(db)
@@ -842,26 +849,11 @@ async def resume_session(
             raise ToolError("Internal error: session was not assigned an id after flush")
 
         # Create new session
-        new_session = WizardSession()
-        db.add(new_session)
-        db.flush()
-        db.refresh(new_session)
-        if new_session.id is None:
-            raise ToolError("Internal error: session was not assigned an id after flush")
+        new_session, daily_page = _init_session(db, notion)
         await _log_tool_call(db, "resume_session", session_id=new_session.id)
 
         # Sync
         sync_results = sync_svc.sync_all(db)
-
-        # Daily page
-        daily_page = None
-        try:
-            daily_page = notion.ensure_daily_page()
-            new_session.daily_page_id = daily_page.page_id
-            db.add(new_session)
-            db.flush()
-        except Exception as e:
-            logger.warning("ensure_daily_page failed: %s", e)
 
         # Deserialise prior session_state
         session_state: SessionState | None = None
