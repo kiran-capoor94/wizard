@@ -272,10 +272,17 @@ def setup(
             typer.echo("\nNotion already configured — run 'wizard configure --notion' to update")
             notion_status = "already configured"
         else:
-            _configure_notion(cfg, config_path)
-            notion_status = "configured"
+            try:
+                _configure_notion(cfg, config_path)
+                notion_status = "configured"
+            except Exception as exc:
+                typer.echo(f"\nNotion configuration failed: {exc}", err=True)
+                raise typer.Exit(1)
 
     if configure_jira:
+        # Re-read to get the authoritative on-disk state after the Notion step
+        with open(config_path) as f:
+            cfg = json.load(f)
         if _jira_is_configured(cfg):
             typer.echo("\nJira already configured — run 'wizard configure --jira' to update")
             jira_status = "already configured"

@@ -1085,6 +1085,22 @@ def test_configure_no_flags_shows_available_options(tmp_path):
     assert "--jira" in result.output
 
 
+def test_setup_notion_configuration_error_exits_cleanly(tmp_path):
+    """If Notion schema discovery raises ConfigurationError, setup exits with code 1 and a clean message."""
+    from wizard.integrations import ConfigurationError
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery", side_effect=ConfigurationError("task_name required")):
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input="1\nmy-token\n\ntasks-id\nmeetings-id\n",
+            )
+    assert result.exit_code != 0
+    assert "notion configuration failed" in result.output.lower() or "notion configuration failed" in (result.stderr or "").lower()
+
+
 def test_configure_notion_prints_arrow_format(tmp_path):
     """_run_notion_discovery prints matched fields as 'field → Property'."""
     wizard_dir = tmp_path / ".wizard"
