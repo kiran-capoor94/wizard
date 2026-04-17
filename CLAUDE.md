@@ -222,7 +222,7 @@ file. Supported agents and their config locations:
 
 | Agent | Config file | Format |
 |-------|------------|--------|
-| `claude-code` | `~/.claude/settings.json` | JSON (`mcpServers`) |
+| `claude-code` | `~/.claude.json` | JSON (`mcpServers`) |
 | `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON (`mcpServers`) |
 | `gemini` | `~/.gemini/settings.json` | JSON (`mcpServers`) |
 | `opencode` | `~/.config/opencode/opencode.json` | JSON (`mcp`) |

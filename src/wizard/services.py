@@ -33,11 +33,23 @@ class SyncService:
 
     def sync_all(self, db: Session) -> list[SourceSyncStatus]:
         results: list[SourceSyncStatus] = []
+        source_client = {
+            "jira": self._jira,
+            "notion_tasks": self._notion,
+            "notion_meetings": self._notion,
+        }
         for source, fn in [
             ("jira", self.sync_jira),
             ("notion_tasks", self.sync_notion_tasks),
             ("notion_meetings", self.sync_notion_meetings),
         ]:
+            if not source_client[source].is_configured:
+                results.append(
+                    SourceSyncStatus(
+                        source=source, ok=False, skipped=True, error="not configured",
+                    )
+                )
+                continue
             try:
                 fn(db)
                 results.append(SourceSyncStatus(source=source, ok=True))

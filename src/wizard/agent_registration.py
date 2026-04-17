@@ -49,7 +49,7 @@ def _claude_desktop_config_path() -> Path:
 _AGENTS: dict[str, AgentConfig] = {
     "claude-code": AgentConfig(
         agent_id="claude-code",
-        config_path=Path.home() / ".claude" / "settings.json",
+        config_path=Path.home() / ".claude.json",
         format="json",
         mcp_key="mcpServers",
     ),

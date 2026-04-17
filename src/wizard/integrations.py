@@ -59,6 +59,10 @@ class JiraClient:
         if self._client is not None:
             self._client.close()
 
+    @property
+    def is_configured(self) -> bool:
+        return self._client is not None
+
     def _require_client(self) -> httpx.Client:
         if self._client is None:
             raise ConfigurationError("Jira token not configured")
@@ -179,6 +183,10 @@ class NotionClient:
         self._meetings_ds_id = meetings_ds_id
         self._client = NotionSdkClient(auth=token) if token else None
         self._schema = schema if schema is not None else NotionSchemaSettings()
+
+    @property
+    def is_configured(self) -> bool:
+        return self._client is not None
 
     def _require_client(self) -> NotionSdkClient:
         if self._client is None:
@@ -403,44 +411,28 @@ class NotionClient:
         )
         return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
 
-    def update_task_status(self, page_id: str, status: str) -> bool:
-        """Update Status property on task page."""
+    def _update_page_property(self, page_id: str, properties: dict, label: str) -> bool:
+        """Update one or more properties on a Notion page."""
         client = self._require_client()
         try:
-            client.pages.update(
-                page_id=page_id,
-                properties={self._schema.task_status: {"status": {"name": status}}},
-            )
+            client.pages.update(page_id=page_id, properties=properties)
             return True
         except APIResponseError as e:
-            logger.warning("Notion update_task_status failed: %s", e)
+            logger.warning("Notion %s failed: %s", label, e)
             return False
+
+    def update_task_status(self, page_id: str, status: str) -> bool:
+        return self._update_page_property(
+            page_id, {self._schema.task_status: {"status": {"name": status}}}, "update_task_status"
+        )
 
     def update_task_due_date(self, page_id: str, due_date: str) -> bool:
-        """Update due_date property on task page. due_date in ISO format."""
-        client = self._require_client()
-        try:
-            client.pages.update(
-                page_id=page_id,
-                properties={self._schema.task_due_date: {"date": {"start": due_date}}},
-            )
-            return True
-        except APIResponseError as e:
-            logger.warning("Notion update_task_due_date failed: %s", e)
-            return False
+        props = {self._schema.task_due_date: {"date": {"start": due_date}}}
+        return self._update_page_property(page_id, props, "update_task_due_date")
 
     def update_task_priority(self, page_id: str, priority: str) -> bool:
-        """Update priority select property on task page."""
-        client = self._require_client()
-        try:
-            client.pages.update(
-                page_id=page_id,
-                properties={self._schema.task_priority: {"select": {"name": priority}}},
-            )
-            return True
-        except APIResponseError as e:
-            logger.warning("Notion update_task_priority failed: %s", e)
-            return False
+        props = {self._schema.task_priority: {"select": {"name": priority}}}
+        return self._update_page_property(page_id, props, "update_task_priority")
 
     def update_meeting_summary(self, page_id: str, summary: str) -> bool:
         """Update Summary property on meeting page."""
