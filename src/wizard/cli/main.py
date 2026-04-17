@@ -224,7 +224,7 @@ def setup(
         try:
             idx = int(selection) - 1
             agent = _AGENT_CHOICES[idx]
-        except ValueError, IndexError:
+        except (ValueError, IndexError):
             typer.echo("Invalid selection.", err=True)
             raise typer.Exit(1)
 
