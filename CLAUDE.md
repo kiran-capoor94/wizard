@@ -274,6 +274,7 @@ file. Supported agents and their config locations:
 | `get_meeting` | meeting_id | title, content, open_tasks, already_summarised |
 | `save_meeting_summary` | meeting_id, summary, task_ids? | note_id, tasks_linked, notion_write_back |
 | `ingest_meeting` | title, content, source_url?, category? | meeting_id, already_existed, notion_write_back |
+
 ## PII Scrubbing
 
 `SecurityService` scrubs content before it touches SQLite. Six patterns:
@@ -358,3 +359,16 @@ Structural split triggers:
 3. **Ruff** — runs `ruff check` on staged files.
 
 Install: `ln -sf ../../scripts/pre-commit .git/hooks/pre-commit`
+
+## Known Complexity Debt
+
+These functions exceed the C901 complexity threshold of 10 and are
+suppressed with `# noqa: C901`. When modifying them, look for extraction
+opportunities:
+
+| Function | File | Complexity | Extraction candidates |
+|----------|------|-----------|----------------------|
+| `update_task` | `tools/task_tools.py` | 18 | writeback dispatch, field-update loop |
+| `setup` | `cli/main.py` | 18 | agent registration, config validation |
+| `uninstall` | `cli/main.py` | 14 | file cleanup, agent deregistration |
+| `resume_session` | `tools/session_tools.py` | 13 | state deserialization, note grouping |
