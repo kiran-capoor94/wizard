@@ -164,6 +164,31 @@ def _run_notion_discovery(config_path: Path) -> None:
         typer.echo(f"  {k}: {v}")
 
 
+def _configure_notion(cfg: dict, config_path: Path) -> None:
+    """Prompt for all Notion credentials, save to config, run schema discovery."""
+    typer.echo("\nNotion integration")
+    token = typer.prompt("  Notion integration token (notion.so/profile/integrations)")
+    cfg.setdefault("notion", {})["token"] = token
+    typer.echo("  token: set")
+
+    page_id = typer.prompt("  Daily page parent ID (Enter to skip)", default="")
+    cfg["notion"]["daily_page_parent_id"] = page_id
+    typer.echo(f"  daily page ID: {'set' if page_id else 'skipped'}")
+
+    tasks_id = typer.prompt("  Tasks database ID")
+    cfg["notion"]["tasks_ds_id"] = tasks_id
+    typer.echo("  tasks database: set")
+
+    meetings_id = typer.prompt("  Meetings database ID")
+    cfg["notion"]["meetings_ds_id"] = meetings_id
+    typer.echo("  meetings database: set")
+
+    with open(config_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+    _run_notion_discovery(config_path)
+
+
 @app.command()
 def setup(
     agent: Optional[str] = typer.Option(
@@ -201,6 +226,9 @@ def setup(
 
     configure_notion = int_idx in (1, 3)
     configure_jira = int_idx in (2, 3)
+
+    if configure_notion:
+        _configure_notion(cfg, config_path)
 
     _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")
