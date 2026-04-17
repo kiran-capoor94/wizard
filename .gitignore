@@ -225,3 +225,4 @@ memory/
 # Local-only planning docs (agent workspaces)
 docs/
 .opencode/
+.worktrees/
