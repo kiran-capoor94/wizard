@@ -4,6 +4,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+import httpx
+from notion_client.errors import APIResponseError
 from sqlmodel import Session, select
 
 from .integrations import JiraClient, NotionClient, _extract_krisp_id
@@ -39,7 +41,7 @@ class SyncService:
             try:
                 fn(db)
                 results.append(SourceSyncStatus(source=source, ok=True))
-            except Exception as e:
+            except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
                 err_msg = self._security.scrub(str(e)).clean
                 logger.warning("Sync failed for %s: %s", source, err_msg)
                 results.append(SourceSyncStatus(source=source, ok=False, error=err_msg))
@@ -289,7 +291,7 @@ class WriteBackService:
             return WriteBackStatus(
                 ok=False, error="Notion create_task_page returned no page ID"
             )
-        except Exception as e:
+        except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
             logger.warning("WriteBack push_task_to_notion failed: %s", e)
             return WriteBackStatus(ok=False, error=str(e))
 
@@ -323,7 +325,7 @@ class WriteBackService:
             return WriteBackStatus(
                 ok=False, error="Notion create_meeting_page returned no page ID"
             )
-        except Exception as e:
+        except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
             logger.warning("WriteBack push_meeting_to_notion (create) failed: %s", e)
             return WriteBackStatus(ok=False, error=str(e))
 

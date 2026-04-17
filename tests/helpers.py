@@ -65,7 +65,7 @@ class _MockContextImpl:
         from mcp.server.elicitation import DeclinedElicitation
 
         if not self._supports_elicit:
-            raise RuntimeError("Client does not support elicitation")
+            raise NotImplementedError("Client does not support elicitation")
         if self._elicit_response is None:
             return DeclinedElicitation()
         return AcceptedElicitation(data=self._elicit_response)

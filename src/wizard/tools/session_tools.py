@@ -1,9 +1,13 @@
 import logging
 from typing import Literal
 
+import httpx
+import sqlalchemy.exc
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
+from notion_client.errors import APIResponseError
+from pydantic import ValidationError
 from sqlmodel import Session, col, select
 
 from ..deps import (
@@ -66,7 +70,7 @@ def _init_session(
         session.daily_page_id = daily_page.page_id
         db.add(session)
         db.flush()
-    except Exception as e:
+    except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
         logger.warning("ensure_daily_page failed: %s", e)
     return session, daily_page
 
@@ -96,7 +100,7 @@ async def session_start(
             try:
                 fn(db)
                 sync_results.append(SourceSyncStatus(source=source, ok=True))
-            except Exception as e:
+            except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
                 logger.warning("Sync failed for %s: %s", source, e)
                 sync_results.append(
                     SourceSyncStatus(source=source, ok=False, error=str(e))
@@ -108,7 +112,7 @@ async def session_start(
 
         try:
             t_state_repo.refresh_stale_days(db)
-        except Exception as e:
+        except sqlalchemy.exc.SQLAlchemyError as e:
             logger.warning("refresh_stale_days failed: %s", e)
 
         return SessionStartResponse(
@@ -159,7 +163,7 @@ async def session_end(
             try:
                 session.session_state = state.model_dump_json()
                 session_state_saved = True
-            except Exception as e:
+            except (ValueError, TypeError) as e:
                 logger.warning("session_end: failed to serialise session_state: %s", e)
 
             clean_summary = sec.scrub(summary).clean
@@ -242,7 +246,7 @@ async def resume_session(  # noqa: C901
                     ts = db.get(TaskState, tid)
                     if t is not None:
                         working_set_tasks.append(TaskContext.from_model(t, ts))
-            except Exception as e:
+            except (ValueError, ValidationError) as e:
                 logger.warning("Failed to deserialise session_state: %s", e)
                 session_state = None
         else:

@@ -5,10 +5,11 @@ from tests.helpers import MockContext, _MockContextImpl, mock_ctx, mock_session
 
 def _make_notion_mock(notion=None):
     """Build a notion_client mock. Default: ensure_daily_page raises (non-fatal path)."""
+    import httpx
     if notion is not None:
         return notion
     mock = MagicMock()
-    mock.ensure_daily_page.side_effect = Exception("notion not configured in tests")
+    mock.ensure_daily_page.side_effect = httpx.HTTPError("notion not configured in tests")
     return mock
 
 
@@ -23,12 +24,14 @@ def _patch_tools(db_session):
 
 
 async def test_session_start_surfaces_sync_errors(db_session):
+    import httpx
+
     from wizard.repositories import MeetingRepository, TaskRepository, TaskStateRepository
     from wizard.tools import session_start
 
     ctx = MockContext()
     sync_mock = MagicMock()
-    sync_mock.sync_jira = MagicMock(side_effect=Exception("Jira token not configured"))
+    sync_mock.sync_jira = MagicMock(side_effect=httpx.HTTPError("Jira token not configured"))
     sync_mock.sync_notion_tasks = MagicMock(return_value=None)
     sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
@@ -87,12 +90,14 @@ async def test_session_start_resolves_daily_page(db_session):
 
 
 async def test_session_start_daily_page_failure_is_non_fatal(db_session):
+    import httpx
+
     from wizard.repositories import MeetingRepository, TaskRepository, TaskStateRepository
     from wizard.tools import session_start
 
     ctx = MockContext()
     notion_mock = MagicMock()
-    notion_mock.ensure_daily_page.side_effect = Exception("notion API down")
+    notion_mock.ensure_daily_page.side_effect = httpx.HTTPError("notion API down")
     sync_mock = MagicMock()
     sync_mock.sync_jira = MagicMock(return_value=None)
     sync_mock.sync_notion_tasks = MagicMock(return_value=None)
@@ -137,6 +142,8 @@ async def test_session_start_refreshes_stale_days(db_session):
 
 
 async def test_session_start_refresh_stale_days_failure_is_non_fatal(db_session):
+    import sqlalchemy.exc
+
     from wizard.repositories import MeetingRepository, TaskRepository
     from wizard.tools import session_start
 
@@ -146,7 +153,7 @@ async def test_session_start_refresh_stale_days_failure_is_non_fatal(db_session)
     sync_mock.sync_notion_tasks = MagicMock(return_value=None)
     sync_mock.sync_notion_meetings = MagicMock(return_value=None)
     task_state_mock = MagicMock()
-    task_state_mock.refresh_stale_days.side_effect = Exception("db error")
+    task_state_mock.refresh_stale_days.side_effect = sqlalchemy.exc.OperationalError("db error", None, None)
 
     with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
         result = await session_start(
