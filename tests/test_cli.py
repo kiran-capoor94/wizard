@@ -876,22 +876,24 @@ def test_setup_exits_nonzero_when_migrations_fail(tmp_path):
 
 
 def test_setup_notion_collects_token_and_ids(tmp_path):
-    """Selecting Notion (1) prompts for token, daily page ID, tasks ID, meetings ID."""
+    """Selecting Notion (1) prompts for token, daily page ID, tasks URL, meetings URL; resolves ds IDs."""
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._run_notion_discovery"):
+             patch("wizard.cli.main._run_notion_discovery"), \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
-                input="1\nmy-token\nmy-page-id\nmy-tasks-id\nmy-meetings-id\n",
+                input="1\nmy-token\nmy-page-id\nhttps://notion.so/workspace/Tasks-abc123def456789012345678901234ab\nhttps://notion.so/workspace/Meetings-def456789012345678901234abcdef01\n",
             )
     assert result.exit_code == 0
     cfg = json.loads((wizard_dir / "config.json").read_text())
     assert cfg["notion"]["token"] == "my-token"
     assert cfg["notion"]["daily_page_parent_id"] == "my-page-id"
-    assert cfg["notion"]["tasks_ds_id"] == "my-tasks-id"
-    assert cfg["notion"]["meetings_ds_id"] == "my-meetings-id"
+    assert cfg["notion"]["tasks_ds_id"] == "tasks-ds-id"
+    assert cfg["notion"]["meetings_ds_id"] == "meetings-ds-id"
 
 
 def test_setup_notion_runs_discovery(tmp_path):
@@ -899,11 +901,13 @@ def test_setup_notion_runs_discovery(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._run_notion_discovery") as mock_disc:
+             patch("wizard.cli.main._run_notion_discovery") as mock_disc, \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
-                input="1\nmy-token\n\nmy-tasks-id\nmy-meetings-id\n",
+                input="1\nmy-token\n\nhttps://notion.so/workspace/Tasks-abc123def456789012345678901234ab\nhttps://notion.so/workspace/Meetings-def456789012345678901234abcdef01\n",
             )
     mock_disc.assert_called_once()
 
@@ -913,11 +917,13 @@ def test_setup_notion_optional_daily_page_id_can_be_skipped(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._run_notion_discovery"):
+             patch("wizard.cli.main._run_notion_discovery"), \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
-                input="1\nmy-token\n\nmy-tasks-id\nmy-meetings-id\n",
+                input="1\nmy-token\n\nhttps://notion.so/workspace/Tasks-abc123def456789012345678901234ab\nhttps://notion.so/workspace/Meetings-def456789012345678901234abcdef01\n",
             )
     cfg = json.loads((wizard_dir / "config.json").read_text())
     assert cfg["notion"]["daily_page_parent_id"] == ""
@@ -946,11 +952,13 @@ def test_setup_both_configures_notion_and_jira(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._run_notion_discovery"):
+             patch("wizard.cli.main._run_notion_discovery"), \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
-                input="3\nmy-token\n\ntasks-id\nmeetings-id\nhttps://acme.atlassian.net\nENG\ndev@acme.com\njira-token\n",
+                input="3\nmy-token\n\nhttps://notion.so/workspace/Tasks-abc123def456789012345678901234ab\nhttps://notion.so/workspace/Meetings-def456789012345678901234abcdef01\nhttps://acme.atlassian.net\nENG\ndev@acme.com\njira-token\n",
             )
     assert result.exit_code == 0
     cfg = json.loads((wizard_dir / "config.json").read_text())
@@ -1018,11 +1026,13 @@ def test_setup_final_summary_shows_configured_integrations(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._run_notion_discovery"):
+             patch("wizard.cli.main._run_notion_discovery"), \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
-                input="1\nmy-token\n\ntasks-id\nmeetings-id\n",
+                input="1\nmy-token\n\nhttps://notion.so/workspace/Tasks-abc123def456789012345678901234ab\nhttps://notion.so/workspace/Meetings-def456789012345678901234abcdef01\n",
             )
     assert result.exit_code == 0
     assert "notion" in result.output.lower()
@@ -1036,7 +1046,6 @@ def test_setup_both_does_not_clobber_notion_schema(tmp_path):
     wizard_dir = tmp_path / ".wizard"
 
     def fake_discovery(config_path):
-        """Simulate _run_notion_discovery writing notion_schema to disk."""
         with open(config_path) as f:
             cfg = json.load(f)
         cfg.setdefault("notion", {})["notion_schema"] = {"task_name": "Task"}
@@ -1045,11 +1054,13 @@ def test_setup_both_does_not_clobber_notion_schema(tmp_path):
 
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._run_notion_discovery", side_effect=fake_discovery):
+             patch("wizard.cli.main._run_notion_discovery", side_effect=fake_discovery), \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
-                input="3\nmy-token\n\ntasks-id\nmeetings-id\nhttps://acme.atlassian.net\nENG\ndev@acme.com\njira-token\n",
+                input="3\nmy-token\n\nhttps://notion.so/workspace/Tasks-abc123def456789012345678901234ab\nhttps://notion.so/workspace/Meetings-def456789012345678901234abcdef01\nhttps://acme.atlassian.net\nENG\ndev@acme.com\njira-token\n",
             )
 
     cfg = json.loads((wizard_dir / "config.json").read_text())
@@ -1092,11 +1103,13 @@ def test_setup_notion_configuration_error_exits_cleanly(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._run_notion_discovery", side_effect=ConfigurationError("task_name required")):
+             patch("wizard.cli.main._run_notion_discovery", side_effect=ConfigurationError("task_name required")), \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
-                input="1\nmy-token\n\ntasks-id\nmeetings-id\n",
+                input="1\nmy-token\n\nhttps://notion.so/workspace/Tasks-abc123def456789012345678901234ab\nhttps://notion.so/workspace/Meetings-def456789012345678901234abcdef01\n",
             )
     assert result.exit_code != 0
     assert "notion configuration failed" in result.output.lower() or "notion configuration failed" in (result.stderr or "").lower()
@@ -1193,3 +1206,31 @@ def test_resolve_ds_id_raises_when_key_missing():
     client.databases.retrieve.return_value = {}
     with pytest.raises(ValueError, match="No data sources"):
         _resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")
+
+
+def test_setup_notion_retries_on_invalid_url(tmp_path):
+    """If the first URL fails resolution, setup re-prompts until a valid URL is given."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery"), \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=[
+                 ValueError("No data sources found"),  # first tasks attempt fails
+                 "tasks-ds-id",                         # second tasks attempt succeeds
+                 "meetings-ds-id",
+             ]):
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input=(
+                    "1\nmy-token\n\n"
+                    "https://notion.so/workspace/Bad-abc123def456789012345678901234ab\n"
+                    "https://notion.so/workspace/Tasks-abc123def456789012345678901234ab\n"
+                    "https://notion.so/workspace/Meetings-def456789012345678901234abcdef01\n"
+                ),
+            )
+    assert result.exit_code == 0
+    cfg = json.loads((wizard_dir / "config.json").read_text())
+    assert cfg["notion"]["tasks_ds_id"] == "tasks-ds-id"
+    assert "failed" in result.output.lower()
