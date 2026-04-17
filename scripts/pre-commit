@@ -59,7 +59,9 @@ fi
 
 # --- Ruff check ---
 if command -v uv &>/dev/null; then
-    uv run ruff check src/wizard/ tests/ || {
+    RUFF_PATHS="src/wizard/"
+    [ -d tests ] && RUFF_PATHS="$RUFF_PATHS tests/"
+    uv run ruff check $RUFF_PATHS || {
         echo ""
         echo "Ruff lint check failed. Run 'uv run ruff check --fix' to auto-fix."
         exit 1
