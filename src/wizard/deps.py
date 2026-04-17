@@ -64,6 +64,7 @@ def get_writeback() -> WriteBackService:
     return WriteBackService(
         jira=get_jira_client(),
         notion=get_notion_client(),
+        security=get_security(),
     )
 
 

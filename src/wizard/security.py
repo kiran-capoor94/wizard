@@ -38,16 +38,23 @@ class SecurityService:
         counters: dict[str, int],
     ) -> str:
         replacements: list[tuple[str, str]] = []
-        for match in phonenumbers.PhoneNumberMatcher(text, "GB"):
-            raw = match.raw_string
-            if any(p.search(raw) for p in self._allowlist_patterns):
+        # Match international numbers (with +) and common local regions
+        regions = [None, "GB", "US", "AU", "DE", "FR"]
+        for region in regions:
+            try:
+                for match in phonenumbers.PhoneNumberMatcher(text, region):
+                    raw = match.raw_string
+                    if any(p.search(raw) for p in self._allowlist_patterns):
+                        continue
+                    if raw in original_to_stub:
+                        continue
+                    counters["PHONE"] = counters.get("PHONE", 0) + 1
+                    stub = f"[PHONE_{counters['PHONE']}]"
+                    original_to_stub[raw] = stub
+                    replacements.append((raw, stub))
+            except Exception:
                 continue
-            if raw in original_to_stub:
-                continue
-            counters["PHONE"] = counters.get("PHONE", 0) + 1
-            stub = f"[PHONE_{counters['PHONE']}]"
-            original_to_stub[raw] = stub
-            replacements.append((raw, stub))
+
         # Replace longest matches first to avoid partial substitutions
         for original, stub in sorted(
             replacements, key=lambda x: len(x[0]), reverse=True

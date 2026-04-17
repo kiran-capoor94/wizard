@@ -35,6 +35,9 @@ class ConfigurationError(Exception):
 class JiraClient:
     def __init__(self, base_url: str, token: str, project_key: str, email: str = ""):
         self._base_url = base_url.rstrip("/")
+        # Validate project_key to prevent JQL injection
+        if project_key and not re.match(r"^[A-Z0-9-]+$", project_key.upper()):
+            raise ConfigurationError(f"Invalid Jira project key: {project_key}")
         self._project_key = project_key
         self._email = email
         self._token = token
