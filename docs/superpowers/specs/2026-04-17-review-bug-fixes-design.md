@@ -3,23 +3,55 @@
 **Date:** 2026-04-17
 **Scope:** 6 surgical fixes — no refactoring, no new abstractions
 
-## Fix 1: PHONE regex misses +44 numbers
+## Fix 1: Replace PHONE regex with `phonenumbers` library
 
 **File:** `src/wizard/security.py:20`
 **Bug:** `\b` before `\+44` never fires because `+` is a non-word character.
-All UK phone numbers starting with `+44` pass through unscrubbed.
+All UK phone numbers starting with `+44` pass through unscrubbed. The
+regex also only covers UK formats.
 
-**Fix:** Replace leading `\b` with `(?<!\w)` — a negative lookbehind that
-matches the same positions as `\b` for the `0` branch but also matches
-before `+` (where no word character precedes it).
+**Fix:** Drop the PHONE regex entry entirely. Use Google's `phonenumbers`
+library (`PhoneNumberMatcher`) to detect phone numbers from any country.
+This is more robust than hand-rolled regex and handles international
+formats, spacing variations, and parenthesised area codes.
+
+**New dependency:** `phonenumbers` (add to `pyproject.toml`).
+
+### Changes to `security.py`
+
+1. Remove the PHONE tuple from `PATTERNS`.
+2. Add a `_scrub_phones` method that uses `PhoneNumberMatcher` to find
+   all phone numbers in the text, checks each against the allowlist,
+   and replaces with `[PHONE_N]` stubs.
+3. Call `_scrub_phones` in `scrub()` after the regex loop (or before —
+   order doesn't matter since phone stubs won't match other patterns).
 
 ```python
-# Before
-("PHONE", r"\b(\+44|0)[\d\s\-]{9,13}\b", "PHONE"),
+import phonenumbers
 
-# After
-("PHONE", r"(?<!\w)(\+44|0)[\d\s\-]{9,13}\b", "PHONE"),
+def _scrub_phones(self, text: str, original_to_stub: dict[str, str],
+                  counters: dict[str, int]) -> str:
+    # Default region GB for numberless-prefix local numbers
+    for match in phonenumbers.PhoneNumberMatcher(text, "GB"):
+        raw = match.raw_string
+        if any(p.search(raw) for p in self._allowlist_patterns):
+            continue
+        if raw in original_to_stub:
+            continue
+        counters["PHONE"] = counters.get("PHONE", 0) + 1
+        stub = f"[PHONE_{counters['PHONE']}]"
+        original_to_stub[raw] = stub
+    # Replace longest matches first to avoid partial substitutions
+    for original, stub in sorted(original_to_stub.items(),
+                                  key=lambda x: len(x[0]), reverse=True):
+        if stub.startswith("[PHONE_"):
+            text = text.replace(original, stub)
+    return text
 ```
+
+The default region `"GB"` ensures local UK numbers (like `07700 900000`)
+are recognised without a country code. International numbers with `+`
+prefixes are detected regardless of default region.
 
 ## Fix 2: SecretStr for API tokens
 
@@ -175,8 +207,9 @@ def push_task_priority(self, task: Task) -> WriteBackStatus:
 ## Testing
 
 - Run `uv run pytest` after all fixes to confirm no regressions.
-- Fix 1 should be verified with a manual test:
-  `SecurityService().scrub("call +44 7700 900000")` should produce
-  `[PHONE_1]` in the output.
+- Fix 1 should be verified with a manual test covering multiple formats:
+  `SecurityService().scrub("call +44 7700 900000")` -> `[PHONE_1]`
+  `SecurityService().scrub("call 07700 900000")` -> `[PHONE_1]`
+  `SecurityService().scrub("call +1 (555) 123-4567")` -> `[PHONE_1]`
 - Fix 2 may require test updates if any tests check `settings.jira.token`
   as a plain string.
