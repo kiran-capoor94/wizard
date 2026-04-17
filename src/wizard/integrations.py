@@ -108,9 +108,7 @@ class JiraClient:
         client = self._require_client()
         transition_id = self._get_transition_id(source_id, status)
         if transition_id is None:
-            logger.warning(
-                "No Jira transition found for status %r on %s", status, source_id
-            )
+            logger.warning("No Jira transition found for status %r on %s", status, source_id)
             return False
         try:
             response = client.post(
@@ -278,30 +276,22 @@ class NotionClient:
             if self.archive_page(stale_id):
                 archived_count += 1
 
-        return DailyPageResult(
-            page_id=page_id, created=created, archived_count=archived_count
-        )
+        return DailyPageResult(page_id=page_id, created=created, archived_count=archived_count)
 
     def fetch_tasks(self) -> list[NotionTaskData]:
         """Query Tasks DB, return normalised NotionTaskData models."""
         self._require_client()
         try:
-            pages = collect_paginated_api(
-                self._query_database, data_source_id=self._tasks_ds_id
-            )
+            pages = collect_paginated_api(self._query_database, data_source_id=self._tasks_ds_id)
             tasks = []
             for page in pages:
                 page_id = page.get("id")
                 props = page.get("properties", {})
 
-                jira_url = NotionUrl.model_validate(
-                    props.get(self._schema.task_jira_key, {})
-                ).url
+                jira_url = NotionUrl.model_validate(props.get(self._schema.task_jira_key, {})).url
                 task = NotionTaskData(
                     notion_id=page_id,
-                    name=NotionTitle.model_validate(
-                        props.get(self._schema.task_name, {})
-                    ).text,
+                    name=NotionTitle.model_validate(props.get(self._schema.task_name, {})).text,
                     status=NotionStatus.model_validate(
                         props.get(self._schema.task_status, {})
                     ).name,
@@ -324,9 +314,7 @@ class NotionClient:
         """Query Meeting Notes DB, return normalised NotionMeetingData models."""
         self._require_client()
         try:
-            pages = collect_paginated_api(
-                self._query_database, data_source_id=self._meetings_ds_id
-            )
+            pages = collect_paginated_api(self._query_database, data_source_id=self._meetings_ds_id)
             meetings = []
             for page in pages:
                 page_id = page.get("id")
@@ -343,12 +331,8 @@ class NotionClient:
                     summary=NotionRichText.model_validate(
                         props.get(self._schema.meeting_summary, {})
                     ).text,
-                    krisp_url=NotionUrl.model_validate(
-                        props.get(self._schema.meeting_url, {})
-                    ).url,
-                    date=NotionDate.model_validate(
-                        props.get(self._schema.meeting_date, {})
-                    ).start,
+                    krisp_url=NotionUrl.model_validate(props.get(self._schema.meeting_url, {})).url,
+                    date=NotionDate.model_validate(props.get(self._schema.meeting_date, {})).start,
                 )
                 meetings.append(meeting)
             return meetings
@@ -436,20 +420,8 @@ class NotionClient:
 
     def update_meeting_summary(self, page_id: str, summary: str) -> bool:
         """Update Summary property on meeting page."""
-        client = self._require_client()
-        try:
-            client.pages.update(
-                page_id=page_id,
-                properties={
-                    self._schema.meeting_summary: {
-                        "rich_text": [{"text": {"content": summary}}]
-                    }
-                },
-            )
-            return True
-        except APIResponseError as e:
-            logger.warning("Notion update_meeting_summary failed: %s", e)
-            return False
+        props = {self._schema.meeting_summary: {"rich_text": [{"text": {"content": summary}}]}}
+        return self._update_page_property(page_id, props, "update_meeting_summary")
 
     def append_paragraph_to_page(self, page_id: str, text: str) -> bool:
         """Append a paragraph block to an existing Notion page."""
@@ -461,9 +433,7 @@ class NotionClient:
                     {
                         "object": "block",
                         "type": "paragraph",
-                        "paragraph": {
-                            "rich_text": [{"type": "text", "text": {"content": text}}]
-                        },
+                        "paragraph": {"rich_text": [{"type": "text", "text": {"content": text}}]},
                     }
                 ],
             )

@@ -46,7 +46,10 @@ class SyncService:
             if not source_client[source].is_configured:
                 results.append(
                     SourceSyncStatus(
-                        source=source, ok=False, skipped=True, error="not configured",
+                        source=source,
+                        ok=True,
+                        skipped=True,
+                        error="not configured",
                     )
                 )
                 continue
@@ -99,13 +102,9 @@ class SyncService:
             # Dedup: jira_key → source_id lookup first, then notion_id
             existing = None
             if jira_key:
-                existing = db.exec(
-                    select(Task).where(Task.source_id == jira_key)
-                ).first()
+                existing = db.exec(select(Task).where(Task.source_id == jira_key)).first()
             if existing is None and notion_id:
-                existing = db.exec(
-                    select(Task).where(Task.notion_id == notion_id)
-                ).first()
+                existing = db.exec(select(Task).where(Task.notion_id == notion_id)).first()
 
             raw_priority = raw.priority or "Medium"
             priority = PriorityMapper.notion_to_local(raw_priority)
@@ -161,13 +160,9 @@ class SyncService:
             # Dedup: krisp_id → source_id, then notion_id
             existing = None
             if krisp_id:
-                existing = db.exec(
-                    select(Meeting).where(Meeting.source_id == krisp_id)
-                ).first()
+                existing = db.exec(select(Meeting).where(Meeting.source_id == krisp_id)).first()
             if existing is None and notion_id:
-                existing = db.exec(
-                    select(Meeting).where(Meeting.notion_id == notion_id)
-                ).first()
+                existing = db.exec(select(Meeting).where(Meeting.notion_id == notion_id)).first()
 
             # Map category — first non-GENERAL match wins, fallback GENERAL
             raw_categories = raw.categories or []
@@ -192,9 +187,7 @@ class SyncService:
                 meeting = Meeting(
                     title=scrubbed_title,
                     content="",
-                    summary=(
-                        self._security.scrub(raw_summary).clean if raw_summary else None
-                    ),
+                    summary=(self._security.scrub(raw_summary).clean if raw_summary else None),
                     notion_id=notion_id,
                     source_id=krisp_id,
                     source_type="KRISP" if krisp_id else None,
@@ -207,15 +200,16 @@ class SyncService:
 
 class WriteBackService:
     def __init__(
-        self, jira: JiraClient, notion: NotionClient, security: SecurityService | None = None,
+        self,
+        jira: JiraClient,
+        notion: NotionClient,
+        security: SecurityService | None = None,
     ):
         self._jira = jira
         self._notion = notion
         self._security = security or SecurityService()
 
-    def _call(
-        self, fn: Callable[[], Any], error_label: str, **status_kwargs
-    ) -> WriteBackStatus:
+    def _call(self, fn: Callable[[], Any], error_label: str, **status_kwargs) -> WriteBackStatus:
         try:
             result = fn()
             if result:
@@ -300,9 +294,7 @@ class WriteBackService:
             )
             if page_id:
                 return WriteBackStatus(ok=True, page_id=page_id)
-            return WriteBackStatus(
-                ok=False, error="Notion create_task_page returned no page ID"
-            )
+            return WriteBackStatus(ok=False, error="Notion create_task_page returned no page ID")
         except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
             err_msg = self._security.scrub(str(e)).clean
             logger.warning("WriteBack push_task_to_notion failed: %s", err_msg)
@@ -335,9 +327,7 @@ class WriteBackService:
             )
             if page_id:
                 return WriteBackStatus(ok=True, page_id=page_id)
-            return WriteBackStatus(
-                ok=False, error="Notion create_meeting_page returned no page ID"
-            )
+            return WriteBackStatus(ok=False, error="Notion create_meeting_page returned no page ID")
         except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
             err_msg = self._security.scrub(str(e)).clean
             logger.warning("WriteBack push_meeting_to_notion (create) failed: %s", err_msg)
