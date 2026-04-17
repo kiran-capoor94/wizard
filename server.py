@@ -3,6 +3,11 @@ import stat
 import sys
 from pathlib import Path
 
+import wizard.prompts  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.prompt decorators
+import wizard.resources  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.resource decorators
+import wizard.tools  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers MCP tools via submodule imports
+from wizard.mcp_instance import mcp
+
 # uv sets UF_HIDDEN on .pth files it creates inside .venv; Python 3.14+
 # respects that flag and silently skips them, so the editable install
 # breaks on every fresh venv.  Fix: ensure src/ is on sys.path before
@@ -21,11 +26,6 @@ if hasattr(os, "chflags"):
             if getattr(_st, "st_flags", 0) & stat.UF_HIDDEN:
                 os.chflags(_pth, _st.st_flags & ~stat.UF_HIDDEN)
 
-from wizard.mcp_instance import mcp
-
-import wizard.prompts  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.prompt decorators
-import wizard.resources  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.resource decorators
-import wizard.tools  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers MCP tools via submodule imports
 
 if __name__ == "__main__":
     mcp.run()

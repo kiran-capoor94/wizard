@@ -1,7 +1,9 @@
+import datetime
 import json
 import logging
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +22,9 @@ from wizard.cli.configure import (
     run_notion_discovery,
 )
 from wizard.cli.doctor import db_is_healthy, doctor
+from wizard.config import settings
 from wizard.database import get_session as get_db_session
+from wizard.deps import get_sync_service
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +62,6 @@ def _ensure_editable_pth() -> None:
 
     Only needs to be re-run after a full venv rebuild (uv venv / uv pip install -e .).
     """
-    import stat
-
     repo_root = Path(__file__).resolve().parents[3]
     py_ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
     site_packages = repo_root / ".venv" / "lib" / py_ver / "site-packages"
@@ -264,11 +266,8 @@ def configure(
 @app.command()
 def sync() -> None:
     """Run Jira and Notion sync manually (outside a session)."""
-    from wizard.database import get_session
-    from wizard.deps import get_sync_service
-
     svc = get_sync_service()
-    with get_session() as session:
+    with get_db_session() as session:
         results = svc.sync_all(session)
 
     for r in results:
@@ -362,11 +361,6 @@ def analytics(
     to_date: Optional[str] = typer.Option(None, "--to", help="End date YYYY-MM-DD"),
 ) -> None:
     """Show wizard usage analytics."""
-    import datetime
-    import os
-
-    from wizard.config import settings
-
     today = datetime.date.today()
 
     options_set = sum([day, week, bool(from_date or to_date)])
