@@ -222,11 +222,11 @@ file. Supported agents and their config locations:
 
 | Agent | Config file | Format |
 |-------|------------|--------|
-| `claude-code` | `~/.claude/claude_code_config.json` | JSON (`mcpServers`) |
+| `claude-code` | `~/.claude.json` | JSON (`mcpServers`) |
 | `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON (`mcpServers`) |
 | `gemini` | `~/.gemini/settings.json` | JSON (`mcpServers`) |
-| `opencode` | `~/.config/opencode/config.json` | JSON (`mcp`) |
-| `codex` | `~/.codex/config.toml` | TOML (`mcpServers`) |
+| `opencode` | `~/.config/opencode/opencode.json` | JSON (`mcp`) |
+| `codex` | `~/.codex/config.toml` | TOML (`mcp_servers`) |
 
 `wizard setup --agent all` registers all five. MCP entry point:
 

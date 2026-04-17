@@ -46,6 +46,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import WriteBackService
+from ..skills import SKILL_TASK_START, load_skill
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -69,9 +70,7 @@ async def task_start(
             task = t_repo.get_by_id(db, task_id)
             task_ctx = t_repo.get_task_context(db, task)
 
-            notes = n_repo.get_for_task(
-                db, task_id=task.id, source_id=task.source_id
-            )
+            notes = n_repo.get_for_task(db, task_id=task.id, source_id=task.source_id)
             notes_by_type: dict[str, int] = {}
             for note in notes:
                 key = note.note_type.value
@@ -90,6 +89,7 @@ async def task_start(
                 notes_by_type=notes_by_type,
                 prior_notes=prior_notes,
                 latest_mental_model=latest_mental_model,
+                skill_instructions=load_skill(SKILL_TASK_START),
             )
     except ValueError as e:
         logger.warning("task_start failed: %s", e)
@@ -113,10 +113,7 @@ async def save_note(
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             task = t_repo.get_by_id(db, task_id)
-            if (
-                note_type in (NoteType.INVESTIGATION, NoteType.DECISION)
-                and mental_model is None
-            ):
+            if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
                 try:
                     result = await ctx.elicit(
                         "Optional: summarise what you now understand in 1-2 sentences "
@@ -173,13 +170,9 @@ def _apply_task_fields(
         updated.append("priority")
     if due_date is not None:
         try:
-            due_date_dt = datetime.datetime.fromisoformat(
-                due_date.replace("Z", "+00:00")
-            )
+            due_date_dt = datetime.datetime.fromisoformat(due_date.replace("Z", "+00:00"))
         except ValueError as exc:
-            raise ToolError(
-                f"Invalid due_date format: {due_date}. Use ISO 8601."
-            ) from exc
+            raise ToolError(f"Invalid due_date format: {due_date}. Use ISO 8601.") from exc
         task.due_date = due_date_dt
         updated.append("due_date")
     if notion_id is not None:
@@ -245,9 +238,7 @@ async def update_task(
     """
     logger.info("update_task task_id=%d", task_id)
 
-    if all(
-        v is None for v in [status, priority, due_date, notion_id, name, source_url]
-    ):
+    if all(v is None for v in [status, priority, due_date, notion_id, name, source_url]):
         raise ToolError("At least one field must be provided to update_task")
 
     try:
@@ -288,8 +279,8 @@ async def update_task(
                 except (NotImplementedError, AttributeError) as e:
                     logger.debug("ctx.elicit unavailable for task outcome: %s", e)
 
-            status_writeback, due_date_writeback, priority_writeback = (
-                _dispatch_writebacks(task, updated_fields, wb)
+            status_writeback, due_date_writeback, priority_writeback = _dispatch_writebacks(
+                task, updated_fields, wb
             )
 
             return UpdateTaskResponse(
@@ -367,9 +358,7 @@ async def rewind_task(
         if task_state is None:
             raise ToolError(f"TaskState missing for task {task_id}")
 
-        notes_desc = n_repo.get_for_task(
-            db, task_id=task.id, source_id=task.source_id
-        )
+        notes_desc = n_repo.get_for_task(db, task_id=task.id, source_id=task.source_id)
         # Filter persisted notes only (id is None for unpersisted models; DB rows always have id)
         notes_asc = [n for n in reversed(notes_desc) if n.id is not None]
 
@@ -426,46 +415,67 @@ async def what_am_i_missing(
 
         # Rule 1: no notes at all
         if nc == 0:
-            signals.append(Signal(
-                type="no_context", severity="high",
-                message="No notes recorded for this task",
-            ))
+            signals.append(
+                Signal(
+                    type="no_context",
+                    severity="high",
+                    message="No notes recorded for this task",
+                )
+            )
         # Rule 2: stale
         if sd >= 3:
-            signals.append(Signal(
-                type="stale", severity="medium",
-                message=f"No activity for {sd} days",
-            ))
+            signals.append(
+                Signal(
+                    type="stale",
+                    severity="medium",
+                    message=f"No activity for {sd} days",
+                )
+            )
         # Rule 3: very few notes
         if 0 < nc <= 2:
-            signals.append(Signal(
-                type="low_context", severity="medium",
-                message="Very few notes — context may be shallow",
-            ))
+            signals.append(
+                Signal(
+                    type="low_context",
+                    severity="medium",
+                    message="Very few notes — context may be shallow",
+                )
+            )
         # Rule 4: notes exist but no decisions
         if dc == 0 and nc > 0:
-            signals.append(Signal(
-                type="no_decisions", severity="medium",
-                message="No decisions recorded",
-            ))
+            signals.append(
+                Signal(
+                    type="no_decisions",
+                    severity="medium",
+                    message="No decisions recorded",
+                )
+            )
         # Rule 5: many investigations, no decisions
         if n_repo.count_investigations(db, task_id) > 3 and dc == 0:
-            signals.append(Signal(
-                type="analysis_loop", severity="high",
-                message="Multiple investigations without a decision",
-            ))
+            signals.append(
+                Signal(
+                    type="analysis_loop",
+                    severity="high",
+                    message="Multiple investigations without a decision",
+                )
+            )
         # Rule 6: has notes and stale 2-3 days (rule 2 covers >= 3 days; avoid double-signal)
         if task_state.last_note_at is not None and 2 <= sd < 3:
-            signals.append(Signal(
-                type="lost_context", severity="medium",
-                message="Context may be degrading due to inactivity",
-            ))
+            signals.append(
+                Signal(
+                    type="lost_context",
+                    severity="medium",
+                    message="Context may be degrading due to inactivity",
+                )
+            )
         # Rule 7: no mental model captured
         if nc >= 2 and not n_repo.has_mental_model(db, task_id):
-            signals.append(Signal(
-                type="no_model", severity="medium",
-                message="No mental model captured — understanding may be shallow",
-            ))
+            signals.append(
+                Signal(
+                    type="no_model",
+                    severity="medium",
+                    message="No mental model captured — understanding may be shallow",
+                )
+            )
 
         signals.sort(key=lambda s: SEVERITY_ORDER[s.severity])
         return MissingResponse(signals=signals)

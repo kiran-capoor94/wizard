@@ -174,9 +174,17 @@ class ConfigResource(BaseModel):
 
 
 class SourceSyncStatus(BaseModel):
+    """Per-source sync result.
+
+    Semantics: ok=True means sync succeeded. skipped=True means the source
+    was not configured and was intentionally skipped (not a failure).
+    Consumers should check ``skipped`` before ``ok``.
+    """
+
     source: str
     ok: bool
     error: str | None = None
+    skipped: bool = False
 
 
 class WriteBackStatus(BaseModel):
@@ -210,9 +218,7 @@ class TaskContext(BaseModel):
         latest_note: Note | None = None,
     ) -> "TaskContext":
         if task.id is None:
-            raise ValueError(
-                "Cannot build TaskContext from an unpersisted Task (id is None)"
-            )
+            raise ValueError("Cannot build TaskContext from an unpersisted Task (id is None)")
         return cls(
             id=task.id,
             name=task.name,
@@ -273,9 +279,7 @@ class NoteDetail(BaseModel):
     @classmethod
     def from_model(cls, note) -> "NoteDetail":
         if note.id is None:
-            raise ValueError(
-                "Cannot build NoteDetail from an unpersisted Note (id is None)"
-            )
+            raise ValueError("Cannot build NoteDetail from an unpersisted Note (id is None)")
         return cls(
             id=note.id,
             note_type=note.note_type,
@@ -299,6 +303,7 @@ class SessionStartResponse(BaseModel):
     unsummarised_meetings: list[MeetingContext]
     sync_results: list[SourceSyncStatus]
     daily_page: DailyPageResult | None = None
+    skill_instructions: str | None = None
 
 
 class TaskStartResponse(BaseModel):
@@ -307,6 +312,7 @@ class TaskStartResponse(BaseModel):
     notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
     prior_notes: list[NoteDetail]  # all notes, oldest first
     latest_mental_model: str | None = None
+    skill_instructions: str | None = None
 
 
 class SaveNoteResponse(BaseModel):
@@ -331,6 +337,7 @@ class GetMeetingResponse(BaseModel):
     already_summarised: bool
     existing_summary: str | None
     open_tasks: list[TaskContext]  # tasks linked to this meeting
+    skill_instructions: str | None = None
 
 
 class SaveMeetingSummaryResponse(BaseModel):
@@ -347,6 +354,7 @@ class SessionEndResponse(BaseModel):
     open_loops_count: int = 0
     next_actions_count: int = 0
     intent: str | None = None
+    skill_instructions: str | None = None
 
 
 class IngestMeetingResponse(BaseModel):
@@ -385,3 +393,4 @@ class ResumeSessionResponse(BaseModel):
     unsummarised_meetings: list[MeetingContext]
     sync_results: list[SourceSyncStatus]
     daily_page: DailyPageResult | None
+    skill_instructions: str | None = None

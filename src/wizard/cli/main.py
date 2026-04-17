@@ -271,7 +271,12 @@ def sync() -> None:
         results = svc.sync_all(session)
 
     for r in results:
-        status = "ok" if r.ok else f"FAILED: {r.error}"
+        if r.skipped:
+            status = "skipped (not configured)"
+        elif r.ok:
+            status = "ok"
+        else:
+            status = f"FAILED: {r.error}"
         typer.echo(f"  {r.source}: {status}")
 
     typer.echo("Sync complete.")
