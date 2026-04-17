@@ -300,6 +300,7 @@ class SessionStartResponse(BaseModel):
     unsummarised_meetings: list[MeetingContext]
     sync_results: list[SourceSyncStatus]
     daily_page: DailyPageResult | None = None
+    skill_instructions: str | None = None
 
 
 class TaskStartResponse(BaseModel):
@@ -308,6 +309,7 @@ class TaskStartResponse(BaseModel):
     notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
     prior_notes: list[NoteDetail]  # all notes, oldest first
     latest_mental_model: str | None = None
+    skill_instructions: str | None = None
 
 
 class SaveNoteResponse(BaseModel):
@@ -332,6 +334,7 @@ class GetMeetingResponse(BaseModel):
     already_summarised: bool
     existing_summary: str | None
     open_tasks: list[TaskContext]  # tasks linked to this meeting
+    skill_instructions: str | None = None
 
 
 class SaveMeetingSummaryResponse(BaseModel):
@@ -348,6 +351,7 @@ class SessionEndResponse(BaseModel):
     open_loops_count: int = 0
     next_actions_count: int = 0
     intent: str | None = None
+    skill_instructions: str | None = None
 
 
 class IngestMeetingResponse(BaseModel):
@@ -386,3 +390,4 @@ class ResumeSessionResponse(BaseModel):
     unsummarised_meetings: list[MeetingContext]
     sync_results: list[SourceSyncStatus]
     daily_page: DailyPageResult | None
+    skill_instructions: str | None = None
