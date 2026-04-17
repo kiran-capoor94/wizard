@@ -1116,3 +1116,13 @@ def test_jira_fetch_open_tasks_uses_browse_url():
 
     assert len(tasks) == 1
     assert tasks[0].url == "https://jira.example.com/browse/ENG-42"
+
+
+def test_jira_update_task_status_returns_false_on_missing_transition(monkeypatch):
+    from wizard.integrations import JiraClient
+
+    client = JiraClient(base_url="https://jira.example.com", token="tok", project_key="ENG", email="a@b.com")
+    # Stub _get_transition_id to return None
+    monkeypatch.setattr(client, "_get_transition_id", lambda *args: None)
+    result = client.update_task_status("ENG-1", "Nonexistent Status")
+    assert result is False

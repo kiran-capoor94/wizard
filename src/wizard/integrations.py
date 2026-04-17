@@ -97,10 +97,16 @@ class JiraClient:
 
     def update_task_status(self, source_id: str, status: str) -> bool:
         client = self._require_client()
+        transition_id = self._get_transition_id(source_id, status)
+        if transition_id is None:
+            logger.warning(
+                "No Jira transition found for status %r on %s", status, source_id
+            )
+            return False
         try:
             response = client.post(
                 f"/issue/{source_id}/transitions",
-                json={"transition": {"id": self._get_transition_id(source_id, status)}},
+                json={"transition": {"id": transition_id}},
             )
             response.raise_for_status()
             return True
