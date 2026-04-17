@@ -4,11 +4,15 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from wizard.models import NoteType, TaskStatus
-from wizard.tools.session_tools import session_end, resume_session
-from wizard.tools.task_tools import (
-    task_start, save_note, update_task, rewind_task, what_am_i_missing,
-)
 from wizard.tools.meeting_tools import get_meeting, save_meeting_summary
+from wizard.tools.session_tools import session_end
+from wizard.tools.task_tools import (
+    rewind_task,
+    save_note,
+    task_start,
+    update_task,
+    what_am_i_missing,
+)
 
 
 @pytest.mark.asyncio
