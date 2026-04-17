@@ -957,6 +957,79 @@ def test_setup_both_configures_notion_and_jira(tmp_path):
     assert cfg["jira"]["token"] == "jira-token"
 
 
+def test_setup_skips_notion_when_already_configured(tmp_path):
+    """If Notion token + DB IDs are already set, skip prompts and print hint."""
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    cfg = {
+        "notion": {
+            "token": "existing-token",
+            "tasks_ds_id": "existing-tasks",
+            "meetings_ds_id": "existing-meetings",
+            "daily_page_parent_id": "",
+        },
+        "jira": {"base_url": "", "project_key": "", "token": "", "email": ""},
+        "scrubbing": {"enabled": True, "allowlist": []},
+    }
+    (wizard_dir / "config.json").write_text(json.dumps(cfg))
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery") as mock_disc:
+            mock_ar.read_registered_agents.return_value = []
+            # Select Notion (1) — but it should be skipped because already configured
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="1\n")
+
+    assert result.exit_code == 0
+    mock_disc.assert_not_called()
+    assert "already configured" in result.output.lower()
+    assert "wizard configure --notion" in result.output
+
+
+def test_setup_skips_jira_when_already_configured(tmp_path):
+    """If all Jira fields are set, skip prompts and print hint."""
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    cfg = {
+        "notion": {"token": "", "tasks_ds_id": "", "meetings_ds_id": "", "daily_page_parent_id": ""},
+        "jira": {
+            "base_url": "https://acme.atlassian.net",
+            "project_key": "ENG",
+            "token": "existing-token",
+            "email": "dev@acme.com",
+        },
+        "scrubbing": {"enabled": True, "allowlist": []},
+    }
+    (wizard_dir / "config.json").write_text(json.dumps(cfg))
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="2\n")
+
+    assert result.exit_code == 0
+    assert "already configured" in result.output.lower()
+    assert "wizard configure --jira" in result.output
+
+
+def test_setup_final_summary_shows_configured_integrations(tmp_path):
+    """Final summary lists Notion as configured and Jira as skipped."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery"):
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input="1\nmy-token\n\ntasks-id\nmeetings-id\n",
+            )
+    assert result.exit_code == 0
+    assert "notion" in result.output.lower()
+    assert "configured" in result.output.lower()
+    assert "jira" in result.output.lower()
+    assert "wizard configure --jira" in result.output
+
+
 def test_setup_both_does_not_clobber_notion_schema(tmp_path):
     """When Both is selected, Jira write must not discard notion_schema written by discovery."""
     wizard_dir = tmp_path / ".wizard"
