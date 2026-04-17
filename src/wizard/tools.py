@@ -513,11 +513,11 @@ async def session_end(
                 raise ToolError(f"Session {session_id} not found")
 
             state = SessionState(
-                intent=intent,
+                intent=sec.scrub(intent).clean,
                 working_set=working_set,
-                state_delta=state_delta,
-                open_loops=open_loops,
-                next_actions=next_actions,
+                state_delta=sec.scrub(state_delta).clean,
+                open_loops=[sec.scrub(loop).clean for loop in open_loops],
+                next_actions=[sec.scrub(action).clean for action in next_actions],
                 closure_status=closure_status,
                 tool_registry=tool_registry,
             )

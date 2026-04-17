@@ -39,8 +39,9 @@ class SyncService:
                 fn(db)
                 results.append(SourceSyncStatus(source=source, ok=True))
             except Exception as e:
-                logger.warning("Sync failed for %s: %s", source, e)
-                results.append(SourceSyncStatus(source=source, ok=False, error=str(e)))
+                err_msg = self._security.scrub(str(e)).clean
+                logger.warning("Sync failed for %s: %s", source, err_msg)
+                results.append(SourceSyncStatus(source=source, ok=False, error=err_msg))
         return results
 
     def sync_jira(self, db: Session) -> None:
@@ -192,9 +193,10 @@ class SyncService:
 
 
 class WriteBackService:
-    def __init__(self, jira: JiraClient, notion: NotionClient):
+    def __init__(self, jira: JiraClient, notion: NotionClient, security: SecurityService | None = None):
         self._jira = jira
         self._notion = notion
+        self._security = security or SecurityService()
 
     def _call(
         self, fn: Callable[[], Any], error_label: str, **status_kwargs
@@ -205,8 +207,9 @@ class WriteBackService:
                 return WriteBackStatus(ok=True, **status_kwargs)
             return WriteBackStatus(ok=False, error=f"{error_label} failed")
         except Exception as e:
-            logger.warning("%s failed: %s", error_label, e)
-            return WriteBackStatus(ok=False, error=str(e))
+            err_msg = self._security.scrub(str(e)).clean
+            logger.warning("%s failed: %s", error_label, err_msg)
+            return WriteBackStatus(ok=False, error=err_msg)
 
     def push_task_status(self, task: Task) -> WriteBackStatus:
         if not task.source_id:
