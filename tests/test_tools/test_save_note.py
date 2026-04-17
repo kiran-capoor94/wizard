@@ -26,7 +26,7 @@ async def test_save_note_scrubs_and_persists(db_session):
     assert task.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         result = await save_note(
             ctx,
             task_id=task.id,
@@ -56,7 +56,7 @@ async def test_save_note_stores_mental_model_when_provided(db_session):
     assert task.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         response = await save_note(
@@ -88,7 +88,7 @@ async def test_save_note_leaves_mental_model_null_when_not_provided(db_session):
     assert task.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         response = await save_note(
@@ -119,7 +119,7 @@ async def test_save_note_mental_model_saved_true_when_model_provided(db_session)
     assert task.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -148,7 +148,7 @@ async def test_save_note_mental_model_saved_false_when_model_absent(db_session):
     assert task.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -184,7 +184,7 @@ async def test_save_note_updates_task_state(db_session):
     task_state_repo().create_for_task(db_session, task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         await save_note(
@@ -219,7 +219,7 @@ async def test_save_note_uses_session_id_from_ctx_state_when_set(db_session):
     ctx = MockContext()
     await ctx.set_state("current_session_id", 42)
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -249,7 +249,7 @@ async def test_save_note_session_id_null_when_no_ctx_state(db_session):
 
     ctx = MockContext()  # no set_state called
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -282,7 +282,7 @@ async def test_save_note_elicits_mental_model_for_investigation(db_session):
 
     ctx = MockContext(elicit_response="I now understand the root cause is X")
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -312,7 +312,7 @@ async def test_save_note_elicits_mental_model_for_decision(db_session):
 
     ctx = MockContext(elicit_response="We chose approach B for simplicity")
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -342,7 +342,7 @@ async def test_save_note_does_not_elicit_for_docs_notes(db_session):
 
     ctx = MockContext(elicit_response="should not be used")
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -373,7 +373,7 @@ async def test_save_note_mental_model_param_skips_elicitation(db_session):
 
     ctx = MockContext(elicit_response="this should not win")
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -404,7 +404,7 @@ async def test_save_note_handles_elicit_failure_gracefully(db_session):
 
     ctx = MockContext(supports_elicit=False)
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(
@@ -432,7 +432,7 @@ async def test_save_note_scrubs_mental_model_when_passed_directly(db_session):
     assert task.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await save_note(

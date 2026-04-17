@@ -148,7 +148,7 @@ def _today_title() -> str:
     return f"{today:%A} {today.day} {today:%B %Y}"
 
 
-def _extract_krisp_id(url: str | None) -> str | None:
+def extract_krisp_id(url: str | None) -> str | None:
     """Extract meeting ID from last path segment of a Krisp URL."""
     if not url:
         return None

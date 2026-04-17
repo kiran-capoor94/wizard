@@ -31,7 +31,7 @@ async def test_task_start_returns_compounding_true_when_prior_notes(db_session):
     db_session.commit()
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         result = await task_start(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
     assert result.compounding is True
@@ -50,7 +50,7 @@ async def test_task_start_returns_compounding_false_when_no_notes(db_session):
     assert task.id is not None
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         result = await task_start(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
     assert result.compounding is False
@@ -64,7 +64,7 @@ async def test_task_start_raises_when_task_not_found(db_session):
     from wizard.tools import task_start
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         with pytest.raises(ToolError, match="Task 999 not found"):
             await task_start(ctx, task_id=999, t_repo=TaskRepository(), n_repo=NoteRepository())
 
@@ -103,7 +103,7 @@ async def test_task_start_latest_mental_model_returns_newest_note_model(db_sessi
     db_session.commit()
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         result = await task_start(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
     assert result.latest_mental_model == "State machine"
@@ -130,7 +130,7 @@ async def test_task_start_latest_mental_model_none_when_no_notes_have_model(db_s
     db_session.commit()
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         result = await task_start(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
     assert result.latest_mental_model is None
@@ -186,7 +186,7 @@ async def test_task_start_returns_prior_notes_oldest_first(db_session):
     db_session.commit()
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository
         result = await task_start(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
