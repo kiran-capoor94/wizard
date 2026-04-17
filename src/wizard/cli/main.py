@@ -189,6 +189,29 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
     _run_notion_discovery(config_path)
 
 
+def _configure_jira(cfg: dict, config_path: Path) -> None:
+    """Prompt for all Jira credentials and save to config."""
+    typer.echo("\nJira integration")
+    base_url = typer.prompt("  Base URL (e.g. https://yourorg.atlassian.net)")
+    cfg.setdefault("jira", {})["base_url"] = base_url
+    typer.echo(f"  base_url: {base_url}")
+
+    project_key = typer.prompt("  Project key (e.g. ENG)")
+    cfg["jira"]["project_key"] = project_key
+    typer.echo(f"  project_key: {project_key}")
+
+    email = typer.prompt("  Email")
+    cfg["jira"]["email"] = email
+    typer.echo("  email: set")
+
+    token = typer.prompt("  API token (id.atlassian.com/manage-profile/security/api-tokens)")
+    cfg["jira"]["token"] = token
+    typer.echo("  token: set")
+
+    with open(config_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
 @app.command()
 def setup(
     agent: Optional[str] = typer.Option(
@@ -229,6 +252,9 @@ def setup(
 
     if configure_notion:
         _configure_notion(cfg, config_path)
+
+    if configure_jira:
+        _configure_jira(cfg, config_path)
 
     _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")

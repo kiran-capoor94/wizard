@@ -920,3 +920,38 @@ def test_setup_notion_optional_daily_page_id_can_be_skipped(tmp_path):
             )
     cfg = json.loads((wizard_dir / "config.json").read_text())
     assert cfg["notion"]["daily_page_parent_id"] == ""
+
+
+def test_setup_jira_collects_all_fields(tmp_path):
+    """Selecting Jira (2) prompts for base_url, project_key, email, token."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input="2\nhttps://acme.atlassian.net\nENG\ndev@acme.com\njira-api-token\n",
+            )
+    assert result.exit_code == 0
+    cfg = json.loads((wizard_dir / "config.json").read_text())
+    assert cfg["jira"]["base_url"] == "https://acme.atlassian.net"
+    assert cfg["jira"]["project_key"] == "ENG"
+    assert cfg["jira"]["email"] == "dev@acme.com"
+    assert cfg["jira"]["token"] == "jira-api-token"
+
+
+def test_setup_both_configures_notion_and_jira(tmp_path):
+    """Selecting Both (3) runs both _configure_notion and _configure_jira."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery"):
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input="3\nmy-token\n\ntasks-id\nmeetings-id\nhttps://acme.atlassian.net\nENG\ndev@acme.com\njira-token\n",
+            )
+    assert result.exit_code == 0
+    cfg = json.loads((wizard_dir / "config.json").read_text())
+    assert cfg["notion"]["token"] == "my-token"
+    assert cfg["jira"]["token"] == "jira-token"
