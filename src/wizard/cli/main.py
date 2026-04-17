@@ -164,6 +164,16 @@ def _run_notion_discovery(config_path: Path) -> None:
         typer.echo(f"  {k}: {v}")
 
 
+def _notion_is_configured(cfg: dict) -> bool:
+    n = cfg.get("notion", {})
+    return bool(n.get("token") and n.get("tasks_ds_id") and n.get("meetings_ds_id"))
+
+
+def _jira_is_configured(cfg: dict) -> bool:
+    j = cfg.get("jira", {})
+    return bool(j.get("token") and j.get("base_url") and j.get("project_key") and j.get("email"))
+
+
 def _configure_notion(cfg: dict, config_path: Path) -> None:
     """Prompt for all Notion credentials, save to config, run schema discovery."""
     typer.echo("\nNotion integration")
@@ -254,11 +264,24 @@ def setup(
     configure_notion = int_idx in (1, 3)
     configure_jira = int_idx in (2, 3)
 
+    notion_status = "skipped"
+    jira_status = "skipped"
+
     if configure_notion:
-        _configure_notion(cfg, config_path)
+        if _notion_is_configured(cfg):
+            typer.echo("\nNotion already configured — run 'wizard configure --notion' to update")
+            notion_status = "already configured"
+        else:
+            _configure_notion(cfg, config_path)
+            notion_status = "configured"
 
     if configure_jira:
-        _configure_jira(cfg, config_path)
+        if _jira_is_configured(cfg):
+            typer.echo("\nJira already configured — run 'wizard configure --jira' to update")
+            jira_status = "already configured"
+        else:
+            _configure_jira(cfg, config_path)
+            jira_status = "configured"
 
     _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")
@@ -306,7 +329,16 @@ def setup(
             typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
 
     agent_registration.write_registered_agents(agents_to_register)
+    typer.echo("\n" + "─" * 45)
     typer.echo("Setup complete.")
+    typer.echo(f"  Notion  {notion_status}" + (
+        "" if notion_status != "skipped" else " (run 'wizard configure --notion' to add)"
+    ))
+    typer.echo(f"  Jira    {jira_status}" + (
+        "" if jira_status != "skipped" else " (run 'wizard configure --jira' to add)"
+    ))
+    agent_label = ", ".join(agents_to_register)
+    typer.echo(f"  Agent   {agent_label}")
 
 
 @app.command()
