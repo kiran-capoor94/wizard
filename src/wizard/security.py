@@ -96,7 +96,8 @@ class SecurityService:
                     stub = f"[PHONE_{counters['PHONE']}]"
                     original_to_stub[raw] = stub
                     replacements.append((raw, stub))
-            except Exception:
+            except phonenumbers.NumberParseException as e:
+                logger.debug("Phone matching failed for region %s: %s", region, e)
                 continue
 
         # Replace longest matches first to avoid partial substitutions

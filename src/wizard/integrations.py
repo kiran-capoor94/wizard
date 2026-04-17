@@ -129,8 +129,8 @@ class JiraClient:
             for t in transitions:
                 if t.get("name", "").lower() == status.lower():
                     return t.get("id")
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as e:
+            logger.warning("Jira _get_transition_id failed for %s: %s", issue_key, e)
         return None
 
 
@@ -152,17 +152,8 @@ def _extract_krisp_id(url: str | None) -> str | None:
     """Extract meeting ID from last path segment of a Krisp URL."""
     if not url:
         return None
-    try:
-        segment = url.rstrip("/").split("/")[-1].split("?")[0].strip()
-        return segment or None
-    except Exception:
-        logger.warning("Failed to extract krisp_id from URL: %s", url)
-        return None
-
-
-# ============================================================================
-# NotionClient
-# ============================================================================
+    segment = url.rstrip("/").split("/")[-1].split("?")[0].strip()
+    return segment or None
 
 
 def _is_daily_page_title(title: str) -> bool:
@@ -253,7 +244,6 @@ class NotionClient:
 
     def ensure_daily_page(self) -> DailyPageResult:
         """Find or create today's daily page. Archive stale daily pages."""
-
         title = _today_title()
         children = self._list_daily_page_parent_children()
 
@@ -265,7 +255,6 @@ class NotionClient:
                 page_id = block["id"]
             elif _is_daily_page_title(block_title):
                 stale_ids.append(block["id"])
-            # Non-daily pages are left untouched
 
         created = False
         if page_id is None:
@@ -288,7 +277,6 @@ class NotionClient:
     def fetch_tasks(self) -> list[NotionTaskData]:
         """Query Tasks DB, return normalised NotionTaskData models."""
         self._require_client()
-
         try:
             pages = collect_paginated_api(
                 self._query_database, data_source_id=self._tasks_ds_id
@@ -327,7 +315,6 @@ class NotionClient:
     def fetch_meetings(self) -> list[NotionMeetingData]:
         """Query Meeting Notes DB, return normalised NotionMeetingData models."""
         self._require_client()
-
         try:
             pages = collect_paginated_api(
                 self._query_database, data_source_id=self._meetings_ds_id
@@ -371,7 +358,6 @@ class NotionClient:
     ) -> str | None:
         """Create page in Tasks DB, return page_id."""
         client = self._require_client()
-
         properties: dict = {
             self._schema.task_name: {"title": [{"text": {"content": name}}]},
             self._schema.task_status: {"status": {"name": status}},
@@ -399,7 +385,6 @@ class NotionClient:
     ) -> str | None:
         """Create page in Meeting Notes DB, return page_id."""
         client = self._require_client()
-
         properties: dict = {
             self._schema.meeting_title: {"title": [{"text": {"content": title}}]},
             self._schema.meeting_category: {"multi_select": [{"name": category}]},
@@ -421,7 +406,6 @@ class NotionClient:
     def update_task_status(self, page_id: str, status: str) -> bool:
         """Update Status property on task page."""
         client = self._require_client()
-
         try:
             client.pages.update(
                 page_id=page_id,
@@ -461,7 +445,6 @@ class NotionClient:
     def update_meeting_summary(self, page_id: str, summary: str) -> bool:
         """Update Summary property on meeting page."""
         client = self._require_client()
-
         try:
             client.pages.update(
                 page_id=page_id,

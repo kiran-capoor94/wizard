@@ -1,6 +1,9 @@
+import logging
 from pathlib import Path
 
 import typer
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_TABLES = {"task", "note", "meeting", "wizardsession", "toolcall", "task_state"}
 
@@ -19,7 +22,8 @@ def _db_is_healthy(db_path: Path) -> bool:
                 ).fetchall()
             }
         return REQUIRED_TABLES.issubset(tables)
-    except Exception:
+    except Exception as e:
+        logger.debug("_db_is_healthy failed: %s", e)
         return False
 
 
