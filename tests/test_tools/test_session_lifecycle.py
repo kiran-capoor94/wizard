@@ -393,10 +393,8 @@ async def test_session_end_tool_registry_defaults_to_none(db_session):
 # ---------------------------------------------------------------------------
 
 
-async def test_resume_session_links_tool_call_to_new_session(db_session):
-    from sqlmodel import select
-
-    from wizard.models import Note, NoteType, ToolCall, WizardSession
+async def test_resume_session_creates_new_session(db_session):
+    from wizard.models import Note, NoteType, WizardSession
     from wizard.tools import resume_session
 
     prior = WizardSession()
@@ -420,9 +418,6 @@ async def test_resume_session_links_tool_call_to_new_session(db_session):
             m_repo=MeetingRepository(),
         )
 
-    rows = db_session.exec(select(ToolCall)).all()
-    assert len(rows) == 1
-    assert rows[0].tool_name == "resume_session"
-    # Must be linked to the *new* session, not the prior one and not None
-    assert rows[0].session_id == result.session_id
-    assert rows[0].session_id != prior.id
+    # New session must be distinct from prior
+    assert result.session_id != prior.id
+    assert result.resumed_from_session_id == prior.id

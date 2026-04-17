@@ -168,203 +168,59 @@ def test_fastmcp_serializes_pydantic_models():
 
 
 # ---------------------------------------------------------------------------
-# ToolCall telemetry
+# ToolCall telemetry — middleware unit tests
 # ---------------------------------------------------------------------------
 
 
-async def test_session_start_logs_tool_call(db_session):
+async def test_middleware_writes_tool_call_row(db_session):
+    """ToolLoggingMiddleware writes a ToolCall row on every tool invocation."""
+    from unittest.mock import AsyncMock
+
     from sqlmodel import select
 
+    from wizard.middleware import ToolLoggingMiddleware
     from wizard.models import ToolCall
-    from wizard.repositories import MeetingRepository, TaskRepository, TaskStateRepository
-    from wizard.tools import session_start
 
-    ctx = MockContext()
-    sync_mock = MagicMock()
-    sync_mock.sync_jira = MagicMock(return_value=None)
-    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
-    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
+    middleware = ToolLoggingMiddleware()
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
-        result = await session_start(
-            ctx,
-            sync_svc=sync_mock,
-            notion=_make_notion_mock(),
-            t_state_repo=TaskStateRepository(),
-            t_repo=TaskRepository(),
-            m_repo=MeetingRepository(),
-        )
+    # Build a minimal MiddlewareContext-like mock
+    context = MagicMock()
+    context.message.name = "session_start"
+    context.fastmcp_context.get_state = AsyncMock(return_value=42)
+
+    call_next = AsyncMock(return_value=MagicMock())
+
+    with patch("wizard.middleware.get_session", mock_session(db_session)):
+        await middleware.on_call_tool(context, call_next)
 
     rows = db_session.exec(select(ToolCall)).all()
     assert len(rows) == 1
     assert rows[0].tool_name == "session_start"
-    assert rows[0].session_id == result.session_id
+    assert rows[0].session_id == 42
+    call_next.assert_awaited_once_with(context)
 
 
-async def test_task_start_logs_tool_call_without_session_id(db_session):
+async def test_middleware_writes_tool_call_row_without_session(db_session):
+    """ToolLoggingMiddleware writes a ToolCall row with session_id=None when no session active."""
+    from unittest.mock import AsyncMock
+
     from sqlmodel import select
 
-    from wizard.models import Task, ToolCall
-    from wizard.tools import task_start
+    from wizard.middleware import ToolLoggingMiddleware
+    from wizard.models import ToolCall
 
-    task = Task(name="test", source_id="T-1", source_type="JIRA")
-    db_session.add(task)
-    db_session.flush()
-    db_session.refresh(task)
-    assert task.id is not None
+    middleware = ToolLoggingMiddleware()
 
-    ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
-        from wizard.repositories import NoteRepository, TaskRepository
-        await task_start(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
+    context = MagicMock()
+    context.message.name = "task_start"
+    context.fastmcp_context.get_state = AsyncMock(side_effect=Exception("no state"))
+
+    call_next = AsyncMock(return_value=MagicMock())
+
+    with patch("wizard.middleware.get_session", mock_session(db_session)):
+        await middleware.on_call_tool(context, call_next)
 
     rows = db_session.exec(select(ToolCall)).all()
     assert len(rows) == 1
     assert rows[0].tool_name == "task_start"
     assert rows[0].session_id is None
-
-
-async def test_session_end_logs_tool_call_with_session_id(db_session):
-    from sqlmodel import select
-
-    from wizard.models import ToolCall, WizardSession
-    from wizard.tools import session_end
-
-    session = WizardSession(daily_page_id="p-1")
-    db_session.add(session)
-    db_session.flush()
-    db_session.refresh(session)
-    assert session.id is not None
-
-    ctx = MockContext()
-    from wizard.repositories import NoteRepository
-    from wizard.schemas import WriteBackStatus
-    from wizard.security import SecurityService
-
-    wb_mock = MagicMock()
-    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
-
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
-        await session_end(
-            ctx,
-            session_id=session.id,
-            summary="done",
-            intent="done",
-            working_set=[],
-            state_delta="no changes",
-            open_loops=[],
-            next_actions=[],
-            closure_status="clean",
-            sec=SecurityService(),
-            n_repo=NoteRepository(),
-            wb=wb_mock,
-        )
-
-    rows = db_session.exec(select(ToolCall)).all()
-    assert len(rows) == 1
-    assert rows[0].tool_name == "session_end"
-    assert rows[0].session_id == session.id
-
-
-async def test_ingest_meeting_logs_tool_call_without_session_id(db_session):
-    from sqlmodel import select
-
-    from wizard.models import ToolCall
-    from wizard.tools import ingest_meeting
-
-    ctx = MockContext()
-    from wizard.schemas import WriteBackStatus
-    from wizard.security import SecurityService
-
-    wb_mock = MagicMock()
-    wb_mock.push_meeting_to_notion = MagicMock(
-        return_value=WriteBackStatus(ok=False, error="no token")
-    )
-
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
-        await ingest_meeting(
-            ctx,
-            title="standup",
-            content="transcript here",
-            sec=SecurityService(),
-            wb=wb_mock,
-        )
-
-    rows = db_session.exec(select(ToolCall)).all()
-    assert len(rows) == 1
-    assert rows[0].tool_name == "ingest_meeting"
-    assert rows[0].session_id is None
-
-
-async def test_tool_call_sequence_within_session(db_session):
-    """session_start -> save_note -> session_end produces ordered ToolCall rows."""
-    from sqlmodel import col, select
-
-    from wizard.models import NoteType, Task, ToolCall
-    from wizard.schemas import WriteBackStatus
-    from wizard.tools import save_note, session_end, session_start
-
-    task = Task(name="test", source_id="T-1", source_type="JIRA")
-    db_session.add(task)
-    db_session.flush()
-    db_session.refresh(task)
-    assert task.id is not None
-
-    ctx = MockContext()
-    sync_mock = MagicMock()
-    sync_mock.sync_jira = MagicMock(return_value=None)
-    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
-    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
-    wb_mock = MagicMock()
-    wb_mock.push_session_summary = MagicMock(return_value=WriteBackStatus(ok=True))
-
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
-        from wizard.repositories import (
-            MeetingRepository,
-            NoteRepository,
-            TaskRepository,
-            TaskStateRepository,
-        )
-        from wizard.security import SecurityService
-
-        s = await session_start(
-            ctx,
-            sync_svc=sync_mock,
-            notion=_make_notion_mock(),
-            t_state_repo=TaskStateRepository(),
-            t_repo=TaskRepository(),
-            m_repo=MeetingRepository(),
-        )
-        await save_note(
-            ctx,
-            task_id=task.id,
-            note_type=NoteType.INVESTIGATION,
-            content="finding",
-            t_repo=TaskRepository(),
-            sec=SecurityService(),
-            n_repo=NoteRepository(),
-            t_state_repo=TaskStateRepository(),
-        )
-        await session_end(
-            ctx,
-            session_id=s.session_id,
-            summary="wrap up",
-            intent="wrap up",
-            working_set=[],
-            state_delta="no changes",
-            open_loops=[],
-            next_actions=[],
-            closure_status="clean",
-            sec=SecurityService(),
-            n_repo=NoteRepository(),
-            wb=wb_mock,
-        )
-
-    rows = db_session.exec(select(ToolCall).order_by(col(ToolCall.called_at))).all()
-    names = [r.tool_name for r in rows]
-    assert names == ["session_start", "save_note", "session_end"]
-    assert rows[0].session_id == s.session_id
-    assert (
-        rows[1].session_id == s.session_id
-    )  # ctx state carries session_id into save_note
-    assert rows[2].session_id == s.session_id

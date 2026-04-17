@@ -34,7 +34,6 @@ from ..schemas import (
 from ..security import SecurityService
 from ..services import WriteBackService
 from . import _helpers
-from ._helpers import _log_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +52,6 @@ async def get_meeting(
     logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
         with _helpers.get_session() as db:
-            session_id: int | None = await ctx.get_state("current_session_id")
-            await _log_tool_call(db, "get_meeting", session_id=session_id)
             meeting = m_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
                 raise ToolError("Internal error: meeting was not assigned an id after flush")
@@ -95,7 +92,6 @@ async def save_meeting_summary(
     try:
         with _helpers.get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
-            await _log_tool_call(db, "save_meeting_summary", session_id=session_id)
             meeting = m_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
                 raise ToolError("Internal error: meeting was not assigned an id after flush")
@@ -153,8 +149,6 @@ async def ingest_meeting(
     """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
     logger.info("ingest_meeting source_id=%s", source_id)
     with _helpers.get_session() as db:
-        session_id: int | None = await ctx.get_state("current_session_id")
-        await _log_tool_call(db, "ingest_meeting", session_id=session_id)
         clean_title = sec.scrub(title).clean
         clean_content = sec.scrub(content).clean
 
