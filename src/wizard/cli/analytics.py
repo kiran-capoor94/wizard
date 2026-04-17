@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
     from sqlmodel import select
+
     from wizard.models import ToolCall
 
     start_dt = datetime.datetime.combine(start, datetime.time.min)
@@ -20,8 +21,14 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
 
     total_tool_calls = len(calls)
 
-    starts = {c.session_id: c.called_at for c in calls if c.tool_name == "session_start" and c.session_id}
-    ends = {c.session_id: c.called_at for c in calls if c.tool_name == "session_end" and c.session_id}
+    starts = {
+        c.session_id: c.called_at
+        for c in calls if c.tool_name == "session_start" and c.session_id
+    }
+    ends = {
+        c.session_id: c.called_at
+        for c in calls if c.tool_name == "session_end" and c.session_id
+    }
 
     session_count = len(starts)
     durations = []
@@ -41,6 +48,7 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
 
 def query_notes(db, start: datetime.date, end: datetime.date) -> dict:
     from sqlmodel import select
+
     from wizard.models import Note
 
     start_dt = datetime.datetime.combine(start, datetime.time.min)
@@ -57,7 +65,9 @@ def query_notes(db, start: datetime.date, end: datetime.date) -> dict:
     by_type: dict[str, int] = {}
     mental_models = 0
     for note in notes:
-        type_name = note.note_type.value if hasattr(note.note_type, "value") else str(note.note_type)
+        type_name = (
+            note.note_type.value if hasattr(note.note_type, "value") else str(note.note_type)
+        )
         by_type[type_name] = by_type.get(type_name, 0) + 1
         if note.mental_model:
             mental_models += 1
@@ -74,6 +84,7 @@ def query_notes(db, start: datetime.date, end: datetime.date) -> dict:
 
 def query_tasks(db, start: datetime.date, end: datetime.date) -> dict:
     from sqlmodel import select
+
     from wizard.models import Note, TaskState
 
     start_dt = datetime.datetime.combine(start, datetime.time.min)
@@ -109,6 +120,7 @@ def query_tasks(db, start: datetime.date, end: datetime.date) -> dict:
 
 def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
     from sqlmodel import select
+
     from wizard.models import Note, ToolCall
 
     start_dt = datetime.datetime.combine(start, datetime.time.min)

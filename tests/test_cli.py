@@ -127,8 +127,8 @@ def test_sync_calls_sync_all(db_session):
 
 
 def test_sync_reports_results(db_session):
-    from wizard.schemas import SourceSyncStatus
     from tests.helpers import mock_session
+    from wizard.schemas import SourceSyncStatus
 
     sync_mock = MagicMock()
     sync_mock.sync_all.return_value = [
@@ -483,8 +483,8 @@ def test_setup_integration_invalid_selection_exits(tmp_path):
 
 
 def test_configure_notion_runs_discovery(tmp_path):
-    from unittest.mock import patch
     import json
+    from unittest.mock import patch
     wizard_dir = tmp_path / ".wizard"
     wizard_dir.mkdir()
     config = {
@@ -520,6 +520,7 @@ def test_doctor_check_1_db_file_exists(tmp_path, monkeypatch):
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
     monkeypatch.setenv("WIZARD_DB", str(tmp_path / "no_such.db"))
     from typer.testing import CliRunner
+
     from wizard.cli.main import app
     runner_local = CliRunner()
     result = runner_local.invoke(app, ["doctor"])
@@ -546,6 +547,7 @@ def test_doctor_all_checks_pass_with_valid_setup(tmp_path, monkeypatch):
          patch("wizard.cli.doctor._check_skills_installed", return_value=(True, "ok")), \
          patch("wizard.cli.doctor._check_notion_schema", return_value=(True, "Notion schema matches live DB")):
         from typer.testing import CliRunner
+
         from wizard.cli.main import app
         runner_local = CliRunner()
         result = runner_local.invoke(app, ["doctor", "--all"])
@@ -556,6 +558,7 @@ def test_doctor_stops_at_first_failure_without_all_flag(tmp_path, monkeypatch):
     monkeypatch.setenv("WIZARD_CONFIG_FILE", str(tmp_path / "config.json"))
     monkeypatch.setenv("WIZARD_DB", str(tmp_path / "no_such.db"))
     from typer.testing import CliRunner
+
     from wizard.cli.main import app
     runner_local = CliRunner()
     result = runner_local.invoke(app, ["doctor"])
@@ -806,6 +809,7 @@ def test_db_is_healthy_returns_false_when_file_missing(tmp_path):
 
 def test_db_is_healthy_returns_false_when_tables_missing(tmp_path):
     import sqlite3
+
     from wizard.cli.doctor import _db_is_healthy
     db = tmp_path / "wizard.db"
     conn = sqlite3.connect(str(db))
@@ -817,6 +821,7 @@ def test_db_is_healthy_returns_false_when_tables_missing(tmp_path):
 
 def test_db_is_healthy_returns_true_when_all_tables_present(tmp_path):
     import sqlite3
+
     from wizard.cli.doctor import _db_is_healthy
     db = tmp_path / "wizard.db"
     conn = sqlite3.connect(str(db))
@@ -1178,6 +1183,7 @@ def test_resolve_notion_page_id_raises_on_invalid_url():
 
 def test_resolve_ds_id_returns_page_id_on_success():
     from unittest.mock import MagicMock
+
     from wizard.cli.main import _resolve_ds_id
     client = MagicMock()
     page_id = "abc123de-f456-7890-1234-5678901234ab"
@@ -1188,6 +1194,7 @@ def test_resolve_ds_id_returns_page_id_on_success():
 
 def test_resolve_ds_id_raises_on_api_error():
     from unittest.mock import MagicMock
+
     from wizard.cli.main import _resolve_ds_id
     client = MagicMock()
     client.data_sources.retrieve.side_effect = Exception("API error: 404 not found")

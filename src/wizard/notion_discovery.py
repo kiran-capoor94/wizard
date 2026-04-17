@@ -28,7 +28,10 @@ _TYPE_HINTS: dict[str, str] = {
 _SYNONYMS: dict[str, list[str]] = {
     "task_status": ["state", "workflow", "stage"],
     "meeting_category": ["type", "meeting type", "kind"],
-    "meeting_url": ["recording", "transcript", "krisp", "fathom", "video", "transcript url", "fathom url", "krisp url"],
+    "meeting_url": [
+        "recording", "transcript", "krisp", "fathom", "video",
+        "transcript url", "fathom url", "krisp url",
+    ],
 }
 
 

@@ -129,6 +129,7 @@ def test_note_has_session_summary_type(db_session):
 
 def test_wizard_session_table_name(db_session):
     from sqlalchemy import inspect
+
     from wizard.database import engine
     inspector = inspect(engine)
     tables = inspector.get_table_names()
