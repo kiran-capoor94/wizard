@@ -175,11 +175,11 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
     cfg["notion"]["daily_page_parent_id"] = page_id
     typer.echo(f"  daily page ID: {'set' if page_id else 'skipped'}")
 
-    tasks_id = typer.prompt("  Tasks database ID")
+    tasks_id = typer.prompt("  Tasks data source ID (not the URL page ID — use the data_sources API field)")
     cfg["notion"]["tasks_ds_id"] = tasks_id
     typer.echo("  tasks database: set")
 
-    meetings_id = typer.prompt("  Meetings database ID")
+    meetings_id = typer.prompt("  Meetings data source ID (not the URL page ID — use the data_sources API field)")
     cfg["notion"]["meetings_ds_id"] = meetings_id
     typer.echo("  meetings database: set")
 
