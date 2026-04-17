@@ -161,9 +161,7 @@ async def ingest_meeting(
         meeting: Meeting | None = None
         already_existed = False
         if source_id:
-            meeting = db.exec(
-                select(Meeting).where(Meeting.source_id == source_id)
-            ).first()
+            meeting = db.exec(select(Meeting).where(Meeting.source_id == source_id)).first()
         if meeting:
             already_existed = True
             meeting.title = clean_title
