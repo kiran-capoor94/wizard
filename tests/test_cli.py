@@ -1054,3 +1054,32 @@ def test_setup_both_does_not_clobber_notion_schema(tmp_path):
     cfg = json.loads((wizard_dir / "config.json").read_text())
     assert cfg.get("notion", {}).get("notion_schema") == {"task_name": "Task"}
     assert cfg["jira"]["token"] == "jira-token"
+
+
+def test_configure_jira_prompts_and_saves_fields(tmp_path):
+    """configure --jira re-prompts all Jira fields and saves them."""
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    (wizard_dir / "config.json").write_text(json.dumps({"jira": {}, "notion": {}, "scrubbing": {}}))
+
+    with _fresh_app(wizard_dir) as ctx:
+        result = runner.invoke(
+            ctx.app, ["configure", "--jira"],
+            input="https://acme.atlassian.net\nENG\ndev@acme.com\njira-token\n",
+        )
+
+    assert result.exit_code == 0
+    cfg = json.loads((wizard_dir / "config.json").read_text())
+    assert cfg["jira"]["base_url"] == "https://acme.atlassian.net"
+    assert cfg["jira"]["project_key"] == "ENG"
+    assert cfg["jira"]["email"] == "dev@acme.com"
+    assert cfg["jira"]["token"] == "jira-token"
+
+
+def test_configure_no_flags_shows_available_options(tmp_path):
+    """configure with no flags prints both --notion and --jira as available."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        result = runner.invoke(ctx.app, ["configure"])
+    assert "--notion" in result.output
+    assert "--jira" in result.output
