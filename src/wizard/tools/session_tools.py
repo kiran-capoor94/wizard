@@ -215,7 +215,7 @@ def _group_prior_notes(
     # Build a TaskContext lookup for all referenced tasks
     task_ids = list(by_task.keys())
     task_contexts = {
-        tc.task_id: tc for tc in t_repo.get_task_contexts_by_ids(db, task_ids)
+        tc.id: tc for tc in t_repo.get_task_contexts_by_ids(db, task_ids)
     }
 
     result: list[ResumedTaskNotes] = []

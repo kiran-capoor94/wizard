@@ -292,8 +292,9 @@ class WriteBackService:
                 ok=False, error="Notion create_task_page returned no page ID"
             )
         except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
-            logger.warning("WriteBack push_task_to_notion failed: %s", e)
-            return WriteBackStatus(ok=False, error=str(e))
+            err_msg = self._security.scrub(str(e)).clean
+            logger.warning("WriteBack push_task_to_notion failed: %s", err_msg)
+            return WriteBackStatus(ok=False, error=err_msg)
 
     def push_meeting_to_notion(self, meeting: Meeting) -> WriteBackStatus:
         """Create or update meeting in Notion. Returns page_id in WriteBackStatus on success."""
@@ -326,8 +327,9 @@ class WriteBackService:
                 ok=False, error="Notion create_meeting_page returned no page ID"
             )
         except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
-            logger.warning("WriteBack push_meeting_to_notion (create) failed: %s", e)
-            return WriteBackStatus(ok=False, error=str(e))
+            err_msg = self._security.scrub(str(e)).clean
+            logger.warning("WriteBack push_meeting_to_notion (create) failed: %s", err_msg)
+            return WriteBackStatus(ok=False, error=err_msg)
 
     def push_meeting_summary(self, meeting: Meeting) -> WriteBackStatus:
         if not meeting.notion_id:
