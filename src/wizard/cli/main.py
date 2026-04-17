@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -9,10 +8,17 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from notion_client import Client as NotionSdkClient
 
-from wizard import agent_registration, notion_discovery
+from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
+from wizard.cli.configure import (
+    _configure_jira,
+    _configure_notion,
+    _jira_is_configured,
+    _notion_is_configured,
+    _run_jira_configure,
+    _run_notion_discovery,
+)
 from wizard.cli.doctor import _db_is_healthy, doctor
 from wizard.database import get_session as get_db_session
 
@@ -98,219 +104,11 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
     return ok, (result.stdout + result.stderr).strip()
 
 
-def _run_notion_discovery(config_path: Path) -> None:
-    from wizard.integrations import ConfigurationError
+def _prompt_integrations(cfg: dict, config_path: Path) -> tuple[str, str]:
+    """Run integration selection prompt and configure chosen integrations.
 
-    if not config_path.exists():
-        typer.echo("Config not found. Run 'wizard setup' first.", err=True)
-        raise typer.Exit(1)
-
-    with open(config_path) as f:
-        cfg = json.load(f)
-
-    notion_cfg = cfg.get("notion", {})
-    token = notion_cfg.get("token", "")
-    tasks_ds_id = notion_cfg.get("tasks_ds_id", "")
-    meetings_ds_id = notion_cfg.get("meetings_ds_id", "")
-
-    if not token:
-        typer.echo(
-            "No Notion token configured. Set notion.token in config.json first.",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    client = NotionSdkClient(auth=token)
-    typer.echo("  Discovering schema...")
-
-    tasks_props = notion_discovery.fetch_db_properties(client, tasks_ds_id)
-    meetings_props = notion_discovery.fetch_db_properties(client, meetings_ds_id)
-    all_props = {**tasks_props, **meetings_props}
-
-    required_fields = ["task_name", "task_status", "meeting_title"]
-    all_fields = [
-        "task_name",
-        "task_status",
-        "task_priority",
-        "task_due_date",
-        "task_jira_key",
-        "meeting_title",
-        "meeting_category",
-        "meeting_date",
-        "meeting_url",
-        "meeting_summary",
-    ]
-
-    matches = notion_discovery.match_properties(all_props, all_fields)
-
-    for field in required_fields:
-        if matches[field] is None:
-            available_names = list(all_props.keys())
-            typer.echo(f"Could not auto-match required field '{field}'.")
-            typer.echo(f"Available properties: {', '.join(available_names)}")
-            value = typer.prompt(
-                f"Enter Notion property name for '{field}' (or press Enter to skip)"
-            )
-            if not value:
-                raise ConfigurationError(f"Required field '{field}' must be mapped.")
-            matches[field] = value
-
-    schema = {k: v for k, v in matches.items() if v is not None}
-    cfg.setdefault("notion", {})["notion_schema"] = schema
-    with open(config_path, "w") as f:
-        json.dump(cfg, f, indent=2)
-
-    for k, v in schema.items():
-        typer.echo(f"    {k:<20} → {v}")
-    typer.echo("  Schema saved.")
-
-
-def _resolve_notion_page_id(url: str) -> str:
-    """Extract 32-char hex page ID from a Notion URL and format as UUID.
-
-    Handles:
-      https://www.notion.so/workspace/My-Tasks-abc123def456789012345678901234ab
-      https://www.notion.so/abc123def456789012345678901234ab
-      https://www.notion.so/My-Tasks-abc123def456789012345678901234ab?v=...
-
-    Query strings are stripped before matching. URL fragments (#...) are not
-    stripped separately, but the hex-only regex ignores them in practice.
+    Returns (notion_status, jira_status).
     """
-    path = url.split("?")[0]
-    matches = re.findall(r"[0-9a-f]{32}", path.lower())
-    if not matches:
-        raise ValueError(f"Could not extract page ID from URL: {url}")
-    raw = matches[-1]
-    return f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
-
-
-def _resolve_ds_id(client, page_id: str) -> str:
-    """Confirm page_id is a valid data source ID and return it unchanged.
-
-    In notion-client v3.0, the 32-char page ID extracted from a Notion database
-    URL IS the data source ID — no translation or lookup is needed. This call
-    confirms the ID is reachable before we persist it, and raises on 404 / auth
-    errors so the caller's retry loop can re-prompt the user.
-    """
-    client.data_sources.retrieve(data_source_id=page_id)
-    return page_id
-
-
-def _notion_is_configured(cfg: dict) -> bool:
-    n = cfg.get("notion", {})
-    return bool(n.get("token") and n.get("tasks_ds_id") and n.get("meetings_ds_id"))
-
-
-def _jira_is_configured(cfg: dict) -> bool:
-    j = cfg.get("jira", {})
-    return bool(j.get("token") and j.get("base_url") and j.get("project_key") and j.get("email"))
-
-
-def _configure_notion(cfg: dict, config_path: Path) -> None:
-    """Prompt for all Notion credentials, save to config, run schema discovery."""
-    typer.echo("\nNotion integration")
-    token = typer.prompt(
-        "  Notion integration token (notion.so/profile/integrations)", hide_input=True,
-    )
-    cfg.setdefault("notion", {})["token"] = token
-    typer.echo("  token: set")
-
-    page_id = typer.prompt("  Daily page parent ID (Enter to skip)", default="")
-    cfg["notion"]["daily_page_parent_id"] = page_id
-    typer.echo(f"  daily page ID: {'set' if page_id else 'skipped'}")
-
-    client = NotionSdkClient(auth=token)
-
-    while True:
-        tasks_url = typer.prompt("  Tasks database URL")
-        try:
-            pid = _resolve_notion_page_id(tasks_url)
-        except ValueError as exc:
-            typer.echo(f"  failed: {exc}")
-            continue
-        try:
-            typer.echo("  → Resolving...", nl=False)
-            tasks_ds_id = _resolve_ds_id(client, pid)
-            typer.echo("  ok")
-            cfg["notion"]["tasks_ds_id"] = tasks_ds_id
-            typer.echo("  tasks database: set")
-            break
-        except Exception as exc:
-            typer.echo(f"\n  failed: {exc}")
-
-    while True:
-        meetings_url = typer.prompt("  Meetings database URL")
-        try:
-            pid = _resolve_notion_page_id(meetings_url)
-        except ValueError as exc:
-            typer.echo(f"  failed: {exc}")
-            continue
-        try:
-            typer.echo("  → Resolving...", nl=False)
-            meetings_ds_id = _resolve_ds_id(client, pid)
-            typer.echo("  ok")
-            cfg["notion"]["meetings_ds_id"] = meetings_ds_id
-            typer.echo("  meetings database: set")
-            break
-        except Exception as exc:
-            typer.echo(f"\n  failed: {exc}")
-
-    with open(config_path, "w") as f:
-        json.dump(cfg, f, indent=2)
-
-    _run_notion_discovery(config_path)
-
-
-def _configure_jira(cfg: dict, config_path: Path) -> None:
-    """Prompt for all Jira credentials and save to config."""
-    # Re-read to pick up any changes written by prior steps (e.g. notion_schema from discovery)
-    if config_path.exists():
-        with open(config_path) as f:
-            cfg.update(json.load(f))
-    typer.echo("\nJira integration")
-    base_url = typer.prompt("  Base URL (e.g. https://yourorg.atlassian.net)")
-    cfg.setdefault("jira", {})["base_url"] = base_url
-    typer.echo(f"  base_url: {base_url}")
-
-    project_key = typer.prompt("  Project key (e.g. ENG)")
-    cfg["jira"]["project_key"] = project_key
-    typer.echo(f"  project_key: {project_key}")
-
-    email = typer.prompt("  Email")
-    cfg["jira"]["email"] = email
-    typer.echo("  email: set")
-
-    token = typer.prompt(
-        "  API token (id.atlassian.com/manage-profile/security/api-tokens)", hide_input=True,
-    )
-    cfg["jira"]["token"] = token
-    typer.echo("  token: set")
-
-    with open(config_path, "w") as f:
-        json.dump(cfg, f, indent=2)
-
-
-@app.command()
-def setup(  # noqa: C901
-    agent: Optional[str] = typer.Option(
-        None,
-        "--agent",
-        help="Agent to register: claude-code, claude-desktop, gemini, opencode, codex, all",
-    ),
-) -> None:
-    """Create ~/.wizard, default config, install skills, and register MCP."""
-    WIZARD_HOME.mkdir(parents=True, exist_ok=True)
-
-    config_path = WIZARD_HOME / "config.json"
-    if not config_path.exists():
-        config_path.write_text(json.dumps(_DEFAULT_CONFIG, indent=2))
-        typer.echo(f"Created default config at {config_path}")
-    else:
-        typer.echo(f"Config already exists at {config_path}")
-
-    with open(config_path) as f:
-        cfg = json.load(f)
-
     typer.echo("\nWhich integrations would you like to configure?")
     typer.echo("  1. Notion")
     typer.echo("  2. Jira")
@@ -346,7 +144,7 @@ def setup(  # noqa: C901
     if configure_jira:
         # Re-read to get the authoritative on-disk state after the Notion step
         with open(config_path) as f:
-            cfg = json.load(f)
+            cfg.update(json.load(f))
         if _jira_is_configured(cfg):
             typer.echo("\nJira already configured — run 'wizard configure --jira' to update")
             jira_status = "already configured"
@@ -354,24 +152,14 @@ def setup(  # noqa: C901
             _configure_jira(cfg, config_path)
             jira_status = "configured"
 
-    _ensure_editable_pth()
-    _refresh_skills(WIZARD_HOME / "skills")
+    return notion_status, jira_status
 
-    _wizard_db_env = os.environ.get("WIZARD_DB")
-    db_path = Path(_wizard_db_env) if _wizard_db_env else (WIZARD_HOME / "wizard.db")
-    if not _db_is_healthy(db_path):
-        typer.echo("Initialising database...")
-        repo_root = Path(__file__).resolve().parents[3]
-        alembic_args = (
-            ["uv", "run", "alembic", "upgrade", "head"]
-            if shutil.which("uv")
-            else [sys.executable, "-m", "alembic", "upgrade", "head"]
-        )
-        ok, output = _run_update_step("run migrations", alembic_args, repo_root)
-        if not ok:
-            typer.echo(output, err=True)
-            raise typer.Exit(1)
 
+def _prompt_and_register_agents(agent: str | None) -> list[str]:
+    """Run agent selection prompt (or validate --agent flag) and register.
+
+    Returns list of registered agent IDs.
+    """
     if agent is None:
         typer.echo("Which agent would you like to register?")
         for i, choice in enumerate(_AGENT_CHOICES, 1):
@@ -400,6 +188,52 @@ def setup(  # noqa: C901
             typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
 
     agent_registration.write_registered_agents(agents_to_register)
+    return agents_to_register
+
+
+@app.command()
+def setup(
+    agent: Optional[str] = typer.Option(
+        None,
+        "--agent",
+        help="Agent to register: claude-code, claude-desktop, gemini, opencode, codex, all",
+    ),
+) -> None:
+    """Create ~/.wizard, default config, install skills, and register MCP."""
+    WIZARD_HOME.mkdir(parents=True, exist_ok=True)
+
+    config_path = WIZARD_HOME / "config.json"
+    if not config_path.exists():
+        config_path.write_text(json.dumps(_DEFAULT_CONFIG, indent=2))
+        typer.echo(f"Created default config at {config_path}")
+    else:
+        typer.echo(f"Config already exists at {config_path}")
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    notion_status, jira_status = _prompt_integrations(cfg, config_path)
+
+    _ensure_editable_pth()
+    _refresh_skills(WIZARD_HOME / "skills")
+
+    _wizard_db_env = os.environ.get("WIZARD_DB")
+    db_path = Path(_wizard_db_env) if _wizard_db_env else (WIZARD_HOME / "wizard.db")
+    if not _db_is_healthy(db_path):
+        typer.echo("Initialising database...")
+        repo_root = Path(__file__).resolve().parents[3]
+        alembic_args = (
+            ["uv", "run", "alembic", "upgrade", "head"]
+            if shutil.which("uv")
+            else [sys.executable, "-m", "alembic", "upgrade", "head"]
+        )
+        ok, output = _run_update_step("run migrations", alembic_args, repo_root)
+        if not ok:
+            typer.echo(output, err=True)
+            raise typer.Exit(1)
+
+    agents_to_register = _prompt_and_register_agents(agent)
+
     typer.echo("\n" + "─" * 45)
     typer.echo("Setup complete.")
     typer.echo(f"  Notion  {notion_status}" + (
@@ -410,15 +244,6 @@ def setup(  # noqa: C901
     ))
     agent_label = ", ".join(agents_to_register)
     typer.echo(f"  Agent   {agent_label}")
-
-
-def _run_jira_configure(config_path: Path) -> None:
-    if not config_path.exists():
-        typer.echo("Config not found. Run 'wizard setup' first.", err=True)
-        raise typer.Exit(1)
-    with open(config_path) as f:
-        cfg = json.load(f)
-    _configure_jira(cfg, config_path)
 
 
 @app.command()
@@ -453,8 +278,36 @@ def sync() -> None:
     typer.echo("Sync complete.")
 
 
+def _confirm_uninstall(
+    registered: list[str],
+    existing_files: list[tuple[str, str | None]],
+    has_wizard_dir: bool,
+) -> bool:
+    """Print deletion manifest and prompt for confirmation. Returns True if confirmed."""
+    typer.echo("This will permanently delete:")
+    for name, desc in existing_files:
+        suffix = f"  ({desc})" if desc else ""
+        typer.echo(f"  ~/.wizard/{name}{suffix}")
+    if has_wizard_dir and not existing_files:
+        typer.echo("  ~/.wizard/")
+    for aid in registered:
+        typer.echo(f"  wizard MCP entry for {aid}")
+    typer.echo("")
+    return typer.confirm("Are you sure?")
+
+
+def _deregister_agents(registered: list[str]) -> None:
+    """Deregister all agents, printing status for each."""
+    for aid in registered:
+        try:
+            agent_registration.deregister(aid)
+            typer.echo(f"  Removed wizard MCP from {aid}")
+        except Exception as exc:
+            typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
+
+
 @app.command()
-def uninstall(  # noqa: C901
+def uninstall(
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
 ) -> None:
     """Remove all Wizard runtime state and MCP registration."""
@@ -480,26 +333,11 @@ def uninstall(  # noqa: C901
         typer.echo("Nothing to uninstall.")
         return
 
-    if not yes:
-        typer.echo("This will permanently delete:")
-        for name, desc in existing_files:
-            suffix = f"  ({desc})" if desc else ""
-            typer.echo(f"  ~/.wizard/{name}{suffix}")
-        if has_wizard_dir and not existing_files:
-            typer.echo("  ~/.wizard/")
-        for aid in registered:
-            typer.echo(f"  wizard MCP entry for {aid}")
-        typer.echo("")
-        if not typer.confirm("Are you sure?"):
-            typer.echo("Aborted.")
-            return
+    if not yes and not _confirm_uninstall(registered, existing_files, has_wizard_dir):
+        typer.echo("Aborted.")
+        return
 
-    for aid in registered:
-        try:
-            agent_registration.deregister(aid)
-            typer.echo(f"  Removed wizard MCP from {aid}")
-        except Exception as exc:
-            typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
+    _deregister_agents(registered)
 
     if has_wizard_dir:
         try:
