@@ -2,7 +2,7 @@ import logging
 
 from sqlmodel import Session
 
-from ..database import get_session  # noqa: F401 — re-exported for submodules
+from ..database import get_session  # noqa: F401 — re-exported so tests patch one target
 
 logger = logging.getLogger(__name__)
 
