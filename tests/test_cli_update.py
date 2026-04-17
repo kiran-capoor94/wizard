@@ -48,6 +48,7 @@ def test_refresh_skills_noop_when_source_missing(tmp_path):
 
 def test_run_update_step_returns_true_on_success(tmp_path):
     from unittest.mock import MagicMock
+
     from wizard.cli.main import _run_update_step
 
     mock_result = MagicMock(returncode=0, stdout="all good\n", stderr="")
@@ -60,6 +61,7 @@ def test_run_update_step_returns_true_on_success(tmp_path):
 
 def test_run_update_step_returns_false_on_failure(tmp_path):
     from unittest.mock import MagicMock
+
     from wizard.cli.main import _run_update_step
 
     mock_result = MagicMock(returncode=1, stdout="", stderr="fatal: not a git repo\n")
@@ -72,6 +74,7 @@ def test_run_update_step_returns_false_on_failure(tmp_path):
 
 def test_run_update_step_passes_cwd_to_subprocess(tmp_path):
     from unittest.mock import MagicMock
+
     from wizard.cli.main import _run_update_step
 
     mock_result = MagicMock(returncode=0, stdout="", stderr="")
@@ -84,6 +87,7 @@ def test_run_update_step_passes_cwd_to_subprocess(tmp_path):
 
 
 import sys
+
 from typer.testing import CliRunner
 
 runner = CliRunner()

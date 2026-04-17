@@ -1,13 +1,13 @@
 from unittest.mock import MagicMock
 
-from wizard.schemas import JiraTaskData, NotionTaskData, NotionMeetingData
+from wizard.schemas import JiraTaskData, NotionMeetingData, NotionTaskData
 
 
 def make_sync_service():
-    from wizard.services import SyncService
     from wizard.integrations import JiraClient, NotionClient
-    from wizard.security import SecurityService
     from wizard.repositories import TaskStateRepository
+    from wizard.security import SecurityService
+    from wizard.services import SyncService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     security = SecurityService()
@@ -94,9 +94,9 @@ def test_sync_scrubs_content_before_storing(db_session):
 
 
 def test_push_task_status_calls_jira(db_session):
-    from wizard.services import WriteBackService
-    from wizard.models import Task, TaskStatus
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Task, TaskStatus
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     jira.update_task_status.return_value = True
@@ -112,9 +112,9 @@ def test_push_task_status_calls_jira(db_session):
 
 
 def test_push_task_status_skips_when_no_source_id(db_session):
-    from wizard.services import WriteBackService
-    from wizard.models import Task, TaskStatus
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Task, TaskStatus
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
 
@@ -129,9 +129,9 @@ def test_push_task_status_skips_when_no_source_id(db_session):
 
 
 def test_push_meeting_summary_calls_notion(db_session):
-    from wizard.services import WriteBackService
-    from wizard.models import Meeting
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Meeting
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     notion.update_meeting_summary.return_value = True
@@ -147,9 +147,9 @@ def test_push_meeting_summary_calls_notion(db_session):
 
 
 def test_push_session_summary_calls_notion_daily_page(db_session):
-    from wizard.services import WriteBackService
-    from wizard.models import WizardSession
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import WizardSession
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     notion.update_daily_page.return_value = True
@@ -165,9 +165,9 @@ def test_push_session_summary_calls_notion_daily_page(db_session):
 
 
 def test_push_session_summary_uses_session_daily_page_id():
-    from wizard.services import WriteBackService
-    from wizard.models import WizardSession
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import WizardSession
+    from wizard.services import WriteBackService
     mock_notion = MagicMock(spec=NotionClient)
     mock_notion.update_daily_page.return_value = True
     service = WriteBackService(jira=MagicMock(spec=JiraClient), notion=mock_notion)
@@ -178,9 +178,9 @@ def test_push_session_summary_uses_session_daily_page_id():
 
 
 def test_push_session_summary_fails_without_daily_page_id():
-    from wizard.services import WriteBackService
-    from wizard.models import WizardSession
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import WizardSession
+    from wizard.services import WriteBackService
     service = WriteBackService(jira=MagicMock(spec=JiraClient), notion=MagicMock(spec=NotionClient))
     session = WizardSession(id=1, summary="Good session", daily_page_id=None)
     result = service.push_session_summary(session)
@@ -326,9 +326,9 @@ def test_sync_continues_on_notion_tasks_failure(db_session):
 
 def test_push_task_status_uses_jira_transition_name(db_session):
     """TaskStatus.DONE → sends string 'Done' to Jira, not the enum value 'done'"""
-    from wizard.services import WriteBackService
-    from wizard.models import Task, TaskStatus
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Task, TaskStatus
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     jira.update_task_status.return_value = True
@@ -344,9 +344,9 @@ def test_push_task_status_uses_jira_transition_name(db_session):
 
 def test_push_task_status_to_notion(db_session):
     """TaskStatus.DONE → calls notion.update_task_status with 'Done'"""
-    from wizard.services import WriteBackService
-    from wizard.models import Task, TaskStatus
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Task, TaskStatus
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     notion.update_task_status.return_value = True
@@ -362,9 +362,9 @@ def test_push_task_status_to_notion(db_session):
 
 def test_push_task_status_to_notion_skips_when_no_notion_id(db_session):
     """Task without notion_id → push_task_status_to_notion returns error"""
-    from wizard.services import WriteBackService
-    from wizard.models import Task, TaskStatus
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Task, TaskStatus
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
 
@@ -380,9 +380,9 @@ def test_push_task_status_to_notion_skips_when_no_notion_id(db_session):
 
 def test_push_task_to_notion_creates_page(db_session):
     """Task without notion_id → create_task_page called, returns page_id"""
-    from wizard.services import WriteBackService
-    from wizard.models import Task, TaskStatus, TaskPriority
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Task, TaskPriority, TaskStatus
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     notion.create_task_page.return_value = "new-notion-page-id"
@@ -399,9 +399,9 @@ def test_push_task_to_notion_creates_page(db_session):
 
 def test_push_task_to_notion_updates_status_if_notion_id_exists(db_session):
     """Task with existing notion_id → update status only, returns existing notion_id"""
-    from wizard.services import WriteBackService
-    from wizard.models import Task, TaskStatus
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Task, TaskStatus
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     notion.update_task_status.return_value = True
@@ -419,9 +419,9 @@ def test_push_task_to_notion_updates_status_if_notion_id_exists(db_session):
 
 def test_push_meeting_to_notion_creates_page(db_session):
     """Meeting without notion_id + mappable category → create_meeting_page called, returns page_id"""
-    from wizard.services import WriteBackService
-    from wizard.models import Meeting, MeetingCategory
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Meeting, MeetingCategory
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     notion.create_meeting_page.return_value = "new-meeting-page-id"
@@ -440,9 +440,9 @@ def test_push_meeting_to_notion_creates_page(db_session):
 
 def test_push_meeting_to_notion_skips_unmapped_category(db_session):
     """Meeting with general category (no Notion mapping) → returns error with reason"""
-    from wizard.services import WriteBackService
-    from wizard.models import Meeting, MeetingCategory
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Meeting, MeetingCategory
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
 
@@ -458,9 +458,9 @@ def test_push_meeting_to_notion_skips_unmapped_category(db_session):
 
 def test_push_meeting_to_notion_updates_summary_if_notion_id_exists(db_session):
     """Meeting with notion_id and summary -> update summary, returns notion_id"""
-    from wizard.services import WriteBackService
-    from wizard.models import Meeting, MeetingCategory
     from wizard.integrations import JiraClient, NotionClient
+    from wizard.models import Meeting, MeetingCategory
+    from wizard.services import WriteBackService
     jira = MagicMock(spec=JiraClient)
     notion = MagicMock(spec=NotionClient)
     notion.update_meeting_summary.return_value = True
@@ -587,8 +587,9 @@ def test_sync_notion_new_meeting_stores_summary(db_session):
 
 
 def test_sync_jira_creates_task_state_for_new_task(db_session):
-    from wizard.models import TaskState
     from sqlmodel import select
+
+    from wizard.models import TaskState
     svc, jira, notion = make_sync_service()
     notion.fetch_tasks.return_value = []
     notion.fetch_meetings.return_value = []
@@ -605,8 +606,9 @@ def test_sync_jira_creates_task_state_for_new_task(db_session):
 
 
 def test_sync_notion_tasks_creates_task_state_for_new_task(db_session):
-    from wizard.models import TaskState
     from sqlmodel import select
+
+    from wizard.models import TaskState
     svc, jira, notion = make_sync_service()
     jira.fetch_open_tasks.return_value = []
     notion.fetch_meetings.return_value = []
@@ -622,8 +624,9 @@ def test_sync_notion_tasks_creates_task_state_for_new_task(db_session):
 
 
 def test_sync_jira_does_not_duplicate_task_state_on_upsert(db_session):
-    from wizard.models import Task, TaskState, TaskStatus
     from sqlmodel import select
+
+    from wizard.models import Task, TaskState, TaskStatus
     svc, jira, notion = make_sync_service()
     notion.fetch_tasks.return_value = []
     notion.fetch_meetings.return_value = []

@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch
 
 from fastmcp.resources import ResourceResult
+
 from tests.helpers import mock_session
 
 
@@ -57,7 +58,7 @@ def test_blocked_tasks_resource(db_session):
 
 
 def test_current_session_resource_active(db_session):
-    from wizard.models import WizardSession, Task, TaskStatus
+    from wizard.models import Task, TaskStatus, WizardSession
     from wizard.repositories import TaskRepository
     from wizard.resources import current_session
 
@@ -89,8 +90,8 @@ def test_current_session_resource_none(db_session):
 
 
 def test_task_context_resource(db_session):
-    from wizard.models import Task, TaskStatus, Note, NoteType
-    from wizard.repositories import TaskRepository, NoteRepository
+    from wizard.models import Note, NoteType, Task, TaskStatus
+    from wizard.repositories import NoteRepository, TaskRepository
     from wizard.resources import task_context
 
     task = Task(name="Fix auth", status=TaskStatus.IN_PROGRESS, source_id="ENG-1")

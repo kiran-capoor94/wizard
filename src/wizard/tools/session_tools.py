@@ -18,22 +18,19 @@ from ..deps import (
 )
 from ..integrations import NotionClient
 from ..mcp_instance import mcp
-from ..repositories import (
-    find_latest_session_with_notes,
-    MeetingRepository,
-    NoteRepository,
-    TaskRepository,
-    TaskStateRepository,
-)
-from ..security import SecurityService
-from ..services import SyncService, WriteBackService
 from ..models import (
     Note,
     NoteType,
     Task,
     TaskState,
-    ToolCall,
     WizardSession,
+)
+from ..repositories import (
+    MeetingRepository,
+    NoteRepository,
+    TaskRepository,
+    TaskStateRepository,
+    find_latest_session_with_notes,
 )
 from ..schemas import (
     NoteDetail,
@@ -44,9 +41,9 @@ from ..schemas import (
     SessionState,
     SourceSyncStatus,
     TaskContext,
-    WriteBackStatus,
 )
-
+from ..security import SecurityService
+from ..services import SyncService, WriteBackService
 from . import _helpers
 from ._helpers import _log_tool_call
 
@@ -82,7 +79,7 @@ async def session_start(
     t_repo: TaskRepository = Depends(get_task_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
 ) -> SessionStartResponse:
-    """Creates a session, syncs Jira and Notion, returns open and blocked tasks + unsummarised meetings."""
+    """Create a session, sync Jira/Notion, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start")
     with _helpers.get_session() as db:
         session, daily_page = _init_session(db, notion)
@@ -204,7 +201,7 @@ async def session_end(
         raise ToolError(str(e)) from e
 
 
-async def resume_session(
+async def resume_session(  # noqa: C901
     ctx: Context,
     session_id: int | None = None,
     sync_svc: SyncService = Depends(get_sync_service),

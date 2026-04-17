@@ -209,7 +209,9 @@ def _jira_is_configured(cfg: dict) -> bool:
 def _configure_notion(cfg: dict, config_path: Path) -> None:
     """Prompt for all Notion credentials, save to config, run schema discovery."""
     typer.echo("\nNotion integration")
-    token = typer.prompt("  Notion integration token (notion.so/profile/integrations)", hide_input=True)
+    token = typer.prompt(
+        "  Notion integration token (notion.so/profile/integrations)", hide_input=True,
+    )
     cfg.setdefault("notion", {})["token"] = token
     typer.echo("  token: set")
 
@@ -278,7 +280,9 @@ def _configure_jira(cfg: dict, config_path: Path) -> None:
     cfg["jira"]["email"] = email
     typer.echo("  email: set")
 
-    token = typer.prompt("  API token (id.atlassian.com/manage-profile/security/api-tokens)", hide_input=True)
+    token = typer.prompt(
+        "  API token (id.atlassian.com/manage-profile/security/api-tokens)", hide_input=True,
+    )
     cfg["jira"]["token"] = token
     typer.echo("  token: set")
 
@@ -287,7 +291,7 @@ def _configure_jira(cfg: dict, config_path: Path) -> None:
 
 
 @app.command()
-def setup(
+def setup(  # noqa: C901
     agent: Optional[str] = typer.Option(
         None,
         "--agent",
@@ -319,7 +323,7 @@ def setup(
             raise ValueError
     except ValueError:
         typer.echo("Invalid selection.", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     configure_notion = int_idx in (1, 3)
     configure_jira = int_idx in (2, 3)
@@ -337,7 +341,7 @@ def setup(
                 notion_status = "configured"
             except Exception as exc:
                 typer.echo(f"\nNotion configuration failed: {exc}", err=True)
-                raise typer.Exit(1)
+                raise typer.Exit(1) from exc
 
     if configure_jira:
         # Re-read to get the authoritative on-disk state after the Notion step
@@ -378,7 +382,7 @@ def setup(
             agent = _AGENT_CHOICES[idx]
         except (ValueError, IndexError):
             typer.echo("Invalid selection.", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     if agent == "all":
         agents_to_register = [a for a in _AGENT_CHOICES if a != "all"]
@@ -450,7 +454,7 @@ def sync() -> None:
 
 
 @app.command()
-def uninstall(
+def uninstall(  # noqa: C901
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
 ) -> None:
     """Remove all Wizard runtime state and MCP registration."""
@@ -503,7 +507,7 @@ def uninstall(
             typer.echo(f"  Removed {WIZARD_HOME}")
         except OSError as e:
             typer.echo(f"  Failed to remove {WIZARD_HOME}: {e}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
 
     typer.echo(
         "Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package."
@@ -547,7 +551,7 @@ def analytics(
             end = datetime.date.fromisoformat(to_date) if to_date else today
         except ValueError as exc:
             typer.echo(f"Invalid date format: {exc}", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
     else:
         start = today - datetime.timedelta(days=7)
         end = today

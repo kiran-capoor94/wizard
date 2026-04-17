@@ -46,7 +46,9 @@ class JiraClient:
             self._client = httpx.Client(
                 base_url=f"{self._base_url}/rest/api/3",
                 headers={
-                    "Authorization": f"Basic {base64.b64encode(f'{email}:{token}'.encode()).decode()}",
+                    "Authorization": (
+                        f"Basic {base64.b64encode(f'{email}:{token}'.encode()).decode()}"
+                    ),
                     "Content-Type": "application/json",
                     "Accept": "application/json",
                 },
@@ -229,7 +231,9 @@ class NotionClient:
                 parent={"page_id": self._daily_page_parent_id},
                 properties={
                     "title": [{"text": {"content": title}}],
-                    self._schema.daily_page_session_summary: {"rich_text": [{"text": {"content": ""}}]},
+                    self._schema.daily_page_session_summary: {
+                        "rich_text": [{"text": {"content": ""}}],
+                    },
                 },
             )
             return response.get("id")  # pyright: ignore[reportAttributeAccessIssue]
@@ -500,7 +504,9 @@ class NotionClient:
             client.pages.update(
                 page_id=page_id,
                 properties={
-                    self._schema.daily_page_session_summary: {"rich_text": [{"text": {"content": summary}}]}
+                    self._schema.daily_page_session_summary: {
+                        "rich_text": [{"text": {"content": summary}}],
+                    }
                 },
             )
             return True

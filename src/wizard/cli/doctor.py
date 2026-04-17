@@ -118,9 +118,9 @@ def _check_migration_current() -> tuple[bool, str]:
     try:
         import os
 
+        from alembic.runtime.migration import MigrationContext
         from sqlalchemy import create_engine
 
-        from alembic.runtime.migration import MigrationContext
         from wizard.config import settings
 
         db_path_str = os.environ.get("WIZARD_DB", settings.db)

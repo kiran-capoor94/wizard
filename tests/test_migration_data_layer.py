@@ -9,10 +9,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlmodel import SQLModel
 
+from alembic import command
 
 PREVIOUS_HEAD = "15146de1d71a"  # add toolcall table
 NEW_HEAD = "c821b5437485"  # add task_state mental_model session_state

@@ -7,8 +7,12 @@ from pathlib import Path
 # Add scripts/ to path so we can import the module
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from bump_version import determine_bump_type, bump_version, read_current_version, update_version_files
-
+from bump_version import (
+    bump_version,
+    determine_bump_type,
+    read_current_version,
+    update_version_files,
+)
 
 # --- determine_bump_type tests ---
 

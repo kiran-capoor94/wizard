@@ -1,5 +1,6 @@
 def test_fetch_db_properties_returns_name_type_dict():
     from unittest.mock import MagicMock
+
     from wizard.notion_discovery import fetch_db_properties
 
     mock_client = MagicMock()
@@ -16,6 +17,7 @@ def test_fetch_db_properties_returns_name_type_dict():
 
 def test_fetch_db_properties_returns_empty_on_error():
     from unittest.mock import MagicMock
+
     from wizard.notion_discovery import fetch_db_properties
 
     mock_client = MagicMock()

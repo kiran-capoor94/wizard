@@ -96,7 +96,7 @@ def test_notion_schema_defaults():
 
 
 def test_notion_settings_has_schema():
-    from wizard.config import NotionSettings, NotionSchemaSettings
+    from wizard.config import NotionSchemaSettings, NotionSettings
     notion = NotionSettings()
     assert hasattr(notion, "notion_schema")
     assert isinstance(notion.notion_schema, NotionSchemaSettings)
@@ -111,6 +111,7 @@ def test_notion_schema_has_meeting_category_field():
 
 def test_token_is_secret_str():
     from pydantic import SecretStr
+
     from wizard.config import JiraSettings, NotionSettings
 
     j = JiraSettings()

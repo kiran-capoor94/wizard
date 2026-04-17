@@ -1,7 +1,7 @@
 import datetime as _dt
 import logging
 
-from sqlmodel import Session, and_, case, col, func, select, or_
+from sqlmodel import Session, and_, case, col, func, or_, select
 
 from .models import (
     Meeting,
@@ -81,7 +81,7 @@ class TaskRepository:
         """Blocked tasks sorted by priority then last-worked desc."""
         return self._query_task_contexts(db, Task.status == TaskStatus.BLOCKED)
 
-    def _query_task_contexts(self, db: Session, *where) -> list[TaskContext]:
+    def _query_task_contexts(self, db: Session, *where) -> list[TaskContext]:  # noqa: C901
         last_worked = _latest_note_subquery()
         stmt = (
             select(Task, last_worked)
