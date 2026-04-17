@@ -28,74 +28,32 @@ _PRIORITY_ORDER = case(
 )
 
 
-def _latest_note_subquery():
-    """Scalar sub-select: created_at of the most recent Note for a given Task."""
-    return (
-        select(func.max(Note.created_at))
-        .where(
-            or_(
-                Note.task_id == Task.id,
-                and_(
-                    Note.source_id == Task.source_id,
-                    Note.source_type == "JIRA",
-                ),
-            )
-        )
-        .correlate(Task)
-        .scalar_subquery()
-        .label("last_worked_at")
-    )
-
-
-def _batch_load_latest_notes(
-    db: Session, tasks: list[Task]
-) -> dict[int, Note]:
-    """Batch-load the latest note per task, including Jira source_id fallback.
-
-    Returns {task_id: latest_note}. Direct task_id matches take precedence
-    over source_id matches.
-    """
-    task_ids = [t.id for t in tasks if t.id is not None]
-    jira_source_ids = [t.source_id for t in tasks if t.source_id is not None]
-    source_id_to_task_id: dict[str, int] = {
-        t.source_id: t.id
-        for t in tasks
-        if t.source_id is not None and t.id is not None
-    }
-
-    note_conditions: list = []
-    if task_ids:
-        note_conditions.append(col(Note.task_id).in_(task_ids))
-    if jira_source_ids:
-        note_conditions.append(
-            and_(col(Note.source_id).in_(jira_source_ids), Note.source_type == "JIRA")
-        )
-
-    latest: dict[int, Note] = {}
-    if not note_conditions:
-        return latest
-
-    for n in db.execute(
-        select(Note)
-        .where(or_(*note_conditions))
-        .order_by(col(Note.created_at).desc())
-    ).scalars().all():
-        if n.task_id is not None:
-            if n.task_id not in latest:
-                latest[n.task_id] = n
-        elif n.source_id is not None and n.source_type == "JIRA":
-            tid = source_id_to_task_id.get(n.source_id)
-            if tid is not None and tid not in latest:
-                latest[tid] = n
-    return latest
-
-
 # ---------------------------------------------------------------------------
 # TaskRepository
 # ---------------------------------------------------------------------------
 
 
 class TaskRepository:
+
+    @staticmethod
+    def _latest_note_subquery():
+        """Scalar sub-select: created_at of the most recent Note for a given Task."""
+        return (
+            select(func.max(Note.created_at))
+            .where(
+                or_(
+                    Note.task_id == Task.id,
+                    and_(
+                        Note.source_id == Task.source_id,
+                        Note.source_type == "JIRA",
+                    ),
+                )
+            )
+            .correlate(Task)
+            .scalar_subquery()
+            .label("last_worked_at")
+        )
+
     def get_by_id(self, db: Session, task_id: int) -> Task:
         task = db.get(Task, task_id)
         if task is None:
@@ -117,7 +75,7 @@ class TaskRepository:
         return self._query_task_contexts(db, Task.status == TaskStatus.BLOCKED)
 
     def _query_task_contexts(self, db: Session, *where) -> list[TaskContext]:
-        last_worked = _latest_note_subquery()
+        last_worked = self._latest_note_subquery()
         stmt = (
             select(Task, last_worked)
             .where(*where)
@@ -138,8 +96,7 @@ class TaskRepository:
             ).scalars().all():
                 task_states[ts.task_id] = ts
 
-        # Batch load latest note per task — one query replaces N _latest_note_for calls
-        latest_notes = _batch_load_latest_notes(db, tasks)
+        latest_notes = self._batch_load_latest_notes(db, tasks)
 
         results: list[TaskContext] = []
         for task in tasks:
@@ -154,26 +111,83 @@ class TaskRepository:
     def get_task_context(self, db: Session, task: Task) -> TaskContext:
         """Fetch related state and build a TaskContext for a known task."""
         task_state = db.get(TaskState, task.id)
-        latest = self._latest_note_for(db, task)
+        latest = self._batch_load_latest_notes(db, [task]).get(task.id)
         return TaskContext.from_model(task, task_state, latest)
 
-    def _latest_note_for(self, db: Session, task: Task) -> Note | None:
-        conditions = []
-        if task.id is not None:
-            conditions.append(Note.task_id == task.id)
-        if task.source_id is not None:
-            conditions.append(
-                and_(Note.source_id == task.source_id, Note.source_type == "JIRA")
-            )
-        if not conditions:
-            return None
-        stmt = (
-            select(Note)
-            .where(or_(*conditions))
-            .order_by(col(Note.created_at).desc())
-            .limit(1)
+    def get_task_contexts_by_ids(
+        self, db: Session, task_ids: list[int]
+    ) -> list[TaskContext]:
+        """Batch-load Tasks, TaskStates, and latest notes for a set of IDs."""
+        if not task_ids:
+            return []
+        tasks = list(
+            db.execute(select(Task).where(col(Task.id).in_(task_ids))).scalars().all()
         )
-        return db.exec(stmt).first()
+        if not tasks:
+            return []
+
+        states: dict[int, TaskState] = {}
+        for ts in db.execute(
+            select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+        ).scalars().all():
+            states[ts.task_id] = ts
+
+        latest_notes = self._batch_load_latest_notes(db, tasks)
+
+        # Preserve the order of task_ids
+        tasks_by_id = {t.id: t for t in tasks}
+        results: list[TaskContext] = []
+        for tid in task_ids:
+            t = tasks_by_id.get(tid)
+            if t is not None:
+                results.append(TaskContext.from_model(
+                    t,
+                    states.get(tid),
+                    latest_notes.get(tid),
+                ))
+        return results
+
+    def _batch_load_latest_notes(
+        self, db: Session, tasks: list[Task]
+    ) -> dict[int, Note]:
+        """Batch-load the latest note per task, including Jira source_id fallback.
+
+        Returns {task_id: latest_note}. Direct task_id matches take precedence
+        over source_id matches.
+        """
+        task_ids = [t.id for t in tasks if t.id is not None]
+        jira_source_ids = [t.source_id for t in tasks if t.source_id is not None]
+        source_id_to_task_id: dict[str, int] = {
+            t.source_id: t.id
+            for t in tasks
+            if t.source_id is not None and t.id is not None
+        }
+
+        note_conditions: list = []
+        if task_ids:
+            note_conditions.append(col(Note.task_id).in_(task_ids))
+        if jira_source_ids:
+            note_conditions.append(
+                and_(col(Note.source_id).in_(jira_source_ids), Note.source_type == "JIRA")
+            )
+
+        latest: dict[int, Note] = {}
+        if not note_conditions:
+            return latest
+
+        for n in db.execute(
+            select(Note)
+            .where(or_(*note_conditions))
+            .order_by(col(Note.created_at).desc())
+        ).scalars().all():
+            if n.task_id is not None:
+                if n.task_id not in latest:
+                    latest[n.task_id] = n
+            elif n.source_id is not None and n.source_type == "JIRA":
+                tid = source_id_to_task_id.get(n.source_id)
+                if tid is not None and tid not in latest:
+                    latest[tid] = n
+        return latest
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +254,22 @@ class NoteRepository:
             select(Note).where(or_(*conditions)).order_by(col(Note.created_at).desc())
         )
         return list(db.exec(stmt).all())
+
+    def get_notes_grouped_by_task(
+        self, db: Session, session_id: int
+    ) -> dict[int, list[Note]]:
+        """Return notes for a session grouped by task_id, ordered by created_at asc."""
+        stmt = (
+            select(Note)
+            .where(Note.session_id == session_id)
+            .order_by(col(Note.created_at).asc())
+        )
+        all_notes = list(db.execute(stmt).scalars().all())
+        by_task: dict[int, list[Note]] = {}
+        for n in all_notes:
+            if n.task_id is not None:
+                by_task.setdefault(n.task_id, []).append(n)
+        return by_task
 
     def count_investigations(self, db: Session, task_id: int) -> int:
         """Count investigation notes for a task."""
