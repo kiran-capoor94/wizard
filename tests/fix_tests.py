@@ -9,7 +9,6 @@ tools = [
     "task_start",
     "save_note",
     "update_task",
-    "update_task_status",
     "get_meeting",
     "save_meeting_summary",
     "session_end",

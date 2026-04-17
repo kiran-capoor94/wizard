@@ -326,86 +326,6 @@ async def test_save_note_scrubs_and_persists(db_session):
 
 
 # ---------------------------------------------------------------------------
-# update_task_status
-# ---------------------------------------------------------------------------
-
-
-async def test_update_task_status_persists_and_writebacks(db_session):
-    from wizard.tools import update_task_status
-    from wizard.models import Task, TaskStatus
-    from wizard.schemas import WriteBackStatus
-    from wizard.repositories import TaskRepository, TaskStateRepository
-    from wizard.security import SecurityService
-
-    wb_mock = MagicMock()
-    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
-    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(
-        ok=False,
-        error="Task has no notion_id",
-    )
-
-    task = Task(name="fix auth", source_id="ENG-1", status=TaskStatus.IN_PROGRESS)
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-    assert task.id is not None
-    task_id = task.id
-
-    ctx = MockContext()
-    with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        result = await update_task_status(
-            ctx,
-            task_id=task_id,
-            new_status=TaskStatus.DONE,
-            t_repo=TaskRepository(),
-            t_state_repo=TaskStateRepository(),
-            sec=SecurityService(),
-            wb=wb_mock,
-        )
-
-    assert result.new_status == TaskStatus.DONE
-    assert result.jira_write_back.ok is True
-    assert result.notion_write_back.ok is False
-    assert result.notion_write_back.error == "Task has no notion_id"
-
-    task_fresh = db_session.get(Task, task_id)
-    assert task_fresh.status == TaskStatus.DONE
-
-
-async def test_update_task_status_dual_writeback(db_session):
-    from wizard.tools import update_task_status
-    from wizard.models import Task, TaskStatus
-    from wizard.schemas import WriteBackStatus
-    from wizard.repositories import TaskRepository, TaskStateRepository
-    from wizard.security import SecurityService
-
-    wb_mock = MagicMock()
-    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
-    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
-
-    task = Task(name="fix", source_id="ENG-1", status=TaskStatus.IN_PROGRESS)
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-    assert task.id is not None
-
-    ctx = MockContext()
-    with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        result = await update_task_status(
-            ctx,
-            task_id=task.id,
-            new_status=TaskStatus.DONE,
-            t_repo=TaskRepository(),
-            t_state_repo=TaskStateRepository(),
-            sec=SecurityService(),
-            wb=wb_mock,
-        )
-
-    assert result.jira_write_back.ok is True
-    assert result.notion_write_back.ok is True
-
-
-# ---------------------------------------------------------------------------
 # get_meeting
 # ---------------------------------------------------------------------------
 
@@ -812,14 +732,14 @@ async def test_create_task_creates_paired_task_state(db_session):
 
 async def test_compounding_loop_across_two_sessions(db_session):
     """Proves the full compounding context loop:
-    session 1: session_start -> task_start -> save_note -> update_task_status -> session_end
+    session 1: session_start -> task_start -> save_note -> update_task -> session_end
     session 2: session_start -> task_start returns compounding=True with prior notes
     """
     from wizard.tools import (
         session_start,
         task_start,
         save_note,
-        update_task_status,
+        update_task,
         session_end,
     )
     from wizard.models import Task, TaskStatus, NoteType
@@ -883,11 +803,11 @@ async def test_compounding_loop_across_two_sessions(db_session):
             t_state_repo=TaskStateRepository(),
         )
 
-        # update_task_status
-        await update_task_status(
+        # update_task
+        await update_task(
             ctx,
             task_id=task_id,
-            new_status=TaskStatus.IN_PROGRESS,
+            status=TaskStatus.IN_PROGRESS,
             t_repo=TaskRepository(),
             t_state_repo=TaskStateRepository(),
             sec=SecurityService(),
@@ -1315,95 +1235,6 @@ async def test_save_note_updates_task_state(db_session):
 
 
 # ---------------------------------------------------------------------------
-# update_task_status — TaskState wiring
-# ---------------------------------------------------------------------------
-
-
-async def test_update_task_status_records_last_status_change_at(db_session):
-    import datetime as _dt
-    from wizard.tools import update_task_status
-    from wizard.models import Task, TaskState, TaskStatus
-    from wizard.schemas import WriteBackStatus
-    from wizard.repositories import TaskStateRepository as _TaskStateRepo; task_state_repo = lambda: _TaskStateRepo()
-
-    wb_mock = MagicMock()
-    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
-    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
-
-    task = Task(name="t", status=TaskStatus.TODO)
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-    assert task.id is not None
-    task_state_repo().create_for_task(db_session, task)
-
-    ctx = MockContext()
-    with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        from wizard.repositories import TaskRepository, TaskStateRepository
-        from wizard.security import SecurityService
-        await update_task_status(
-            ctx,
-            task_id=task.id,
-            new_status=TaskStatus.IN_PROGRESS,
-            t_repo=TaskRepository(),
-            t_state_repo=TaskStateRepository(),
-            sec=SecurityService(),
-            wb=wb_mock,
-        )
-
-    state = db_session.get(TaskState, task.id)
-    db_session.refresh(state)
-    assert state is not None
-    assert state.last_status_change_at is not None
-    delta = _dt.datetime.now() - state.last_status_change_at
-    assert delta.total_seconds() < 5
-
-
-async def test_update_task_status_does_not_reset_stale_days(db_session):
-    from wizard.tools import update_task_status
-    from wizard.models import Task, TaskState, TaskStatus
-    from wizard.schemas import WriteBackStatus
-
-    wb_mock = MagicMock()
-    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
-    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
-
-    task = Task(name="t", status=TaskStatus.TODO)
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-    assert task.id is not None
-
-    state = TaskState(
-        task_id=task.id,
-        last_touched_at=task.created_at,
-        stale_days=7,
-        note_count=3,
-        decision_count=1,
-    )
-    db_session.add(state)
-    db_session.commit()
-
-    ctx = MockContext()
-    with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        from wizard.repositories import TaskRepository, TaskStateRepository
-        from wizard.security import SecurityService
-        await update_task_status(
-            ctx,
-            task_id=task.id,
-            new_status=TaskStatus.DONE,
-            t_repo=TaskRepository(),
-            t_state_repo=TaskStateRepository(),
-            sec=SecurityService(),
-            wb=wb_mock,
-        )
-
-    db_session.refresh(state)
-    assert state.stale_days == 7
-    assert state.note_count == 3
-
-
-# ---------------------------------------------------------------------------
 # rewind_task
 # ---------------------------------------------------------------------------
 
@@ -1739,76 +1570,6 @@ async def test_save_note_handles_elicit_failure_gracefully(db_session):
         )
 
     assert result.note_id is not None  # tool succeeded despite elicit failure
-
-
-# --- elicitation: update_task_status ---
-
-
-async def test_update_task_status_elicits_outcome_when_done(db_session):
-    from wizard.tools import update_task_status
-    from wizard.models import Task, TaskStatus
-    from wizard.schemas import WriteBackStatus
-
-    task = Task(name="task", status=TaskStatus.IN_PROGRESS, notion_id="notion-page-123")
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-    assert task.id is not None
-
-    ctx = MockContext(elicit_response="Shipped the fix to production.")
-    wb_mock = MagicMock()
-    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
-    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
-    wb_mock.append_task_outcome.return_value = WriteBackStatus(ok=True)
-
-    with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        from wizard.repositories import TaskRepository, TaskStateRepository
-        from wizard.security import SecurityService
-        await update_task_status(
-            ctx,
-            task_id=task.id,
-            new_status=TaskStatus.DONE,
-            t_repo=TaskRepository(),
-            t_state_repo=TaskStateRepository(),
-            sec=SecurityService(),
-            wb=wb_mock,
-        )
-
-    wb_mock.append_task_outcome.assert_called_once()
-    call_args = wb_mock.append_task_outcome.call_args
-    assert "Shipped the fix" in call_args[0][1]
-
-
-async def test_update_task_status_does_not_elicit_for_in_progress(db_session):
-    from wizard.tools import update_task_status
-    from wizard.models import Task, TaskStatus
-    from wizard.schemas import WriteBackStatus
-
-    task = Task(name="task", status=TaskStatus.TODO)
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-    assert task.id is not None
-
-    ctx = MockContext(elicit_response="should not be called")
-    wb_mock = MagicMock()
-    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
-    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
-
-    with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        from wizard.repositories import TaskRepository, TaskStateRepository
-        from wizard.security import SecurityService
-        await update_task_status(
-            ctx,
-            task_id=task.id,
-            new_status=TaskStatus.IN_PROGRESS,
-            t_repo=TaskRepository(),
-            t_state_repo=TaskStateRepository(),
-            sec=SecurityService(),
-            wb=wb_mock,
-        )
-
-    wb_mock.append_task_outcome.assert_not_called()
 
 
 # --- session_end expansion ---
@@ -2230,40 +1991,6 @@ async def test_update_task_raises_when_no_fields(db_session):
             )
 
 
-async def test_update_task_status_triggers_writebacks(db_session):
-    from wizard.tools import update_task
-    from wizard.models import Task, TaskStatus
-    from wizard.schemas import WriteBackStatus
-
-    wb_mock = MagicMock()
-    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
-    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
-
-    task = Task(name="test", source_id="ENG-1", status=TaskStatus.TODO)
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-
-    ctx = MockContext()
-    with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        from wizard.repositories import TaskRepository, TaskStateRepository
-        from wizard.security import SecurityService
-        result = await update_task(
-            ctx,
-            task_id=task.id,
-            status=TaskStatus.IN_PROGRESS,
-            t_repo=TaskRepository(),
-            sec=SecurityService(),
-            t_state_repo=TaskStateRepository(),
-            wb=wb_mock,
-        )
-
-    assert result.status_writeback is not None
-    assert result.status_writeback.ok is True
-    wb_mock.push_task_status.assert_called_once()
-    wb_mock.push_task_status_to_notion.assert_called_once()
-
-
 async def test_update_task_done_elicits_outcome(db_session):
     from wizard.tools import update_task
     from wizard.models import Task, TaskStatus
@@ -2471,41 +2198,6 @@ async def test_update_task_notion_id(db_session):
     assert "notion_id" in result.updated_fields
     db_session.refresh(task)
     assert task.notion_id == "notion-456"
-
-
-async def test_update_task_status_deprecated(db_session, caplog):
-    import logging
-    from wizard.tools import update_task_status
-    from wizard.models import Task, TaskStatus
-    from wizard.schemas import WriteBackStatus
-
-    wb_mock = MagicMock()
-    wb_mock.push_task_status.return_value = WriteBackStatus(ok=True)
-    wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
-
-    task = Task(name="test", status=TaskStatus.TODO, source_id="ENG-1")
-    db_session.add(task)
-    db_session.commit()
-    db_session.refresh(task)
-
-    ctx = MockContext()
-    with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        from wizard.repositories import TaskRepository, TaskStateRepository
-        from wizard.security import SecurityService
-        with caplog.at_level(logging.WARNING):
-            result = await update_task_status(
-                ctx,
-                task_id=task.id,
-                new_status=TaskStatus.IN_PROGRESS,
-                t_repo=TaskRepository(),
-                t_state_repo=TaskStateRepository(),
-                sec=SecurityService(),
-                wb=wb_mock,
-            )
-
-    assert "deprecated" in caplog.text.lower()
-    assert result.deprecation_warning is not None
-    assert "update_task" in result.deprecation_warning
 
 
 async def test_update_task_source_url(db_session):
