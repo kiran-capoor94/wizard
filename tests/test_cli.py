@@ -955,3 +955,29 @@ def test_setup_both_configures_notion_and_jira(tmp_path):
     cfg = json.loads((wizard_dir / "config.json").read_text())
     assert cfg["notion"]["token"] == "my-token"
     assert cfg["jira"]["token"] == "jira-token"
+
+
+def test_setup_both_does_not_clobber_notion_schema(tmp_path):
+    """When Both is selected, Jira write must not discard notion_schema written by discovery."""
+    wizard_dir = tmp_path / ".wizard"
+
+    def fake_discovery(config_path):
+        """Simulate _run_notion_discovery writing notion_schema to disk."""
+        with open(config_path) as f:
+            cfg = json.load(f)
+        cfg.setdefault("notion", {})["notion_schema"] = {"task_name": "Task"}
+        with open(config_path, "w") as f:
+            json.dump(cfg, f, indent=2)
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery", side_effect=fake_discovery):
+            mock_ar.read_registered_agents.return_value = []
+            runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input="3\nmy-token\n\ntasks-id\nmeetings-id\nhttps://acme.atlassian.net\nENG\ndev@acme.com\njira-token\n",
+            )
+
+    cfg = json.loads((wizard_dir / "config.json").read_text())
+    assert cfg.get("notion", {}).get("notion_schema") == {"task_name": "Task"}
+    assert cfg["jira"]["token"] == "jira-token"

@@ -191,6 +191,10 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
 
 def _configure_jira(cfg: dict, config_path: Path) -> None:
     """Prompt for all Jira credentials and save to config."""
+    # Re-read to pick up any changes written by prior steps (e.g. notion_schema from discovery)
+    if config_path.exists():
+        with open(config_path) as f:
+            cfg.update(json.load(f))
     typer.echo("\nJira integration")
     base_url = typer.prompt("  Base URL (e.g. https://yourorg.atlassian.net)")
     cfg.setdefault("jira", {})["base_url"] = base_url
