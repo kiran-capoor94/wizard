@@ -22,6 +22,10 @@ def db_session(monkeypatch, tmp_path):
         "wizard.schemas",
         "wizard.services",
         "wizard.tools",
+        "wizard.tools._helpers",
+        "wizard.tools.session_tools",
+        "wizard.tools.task_tools",
+        "wizard.tools.meeting_tools",
         "wizard.resources",
         "wizard.cli.main",
     ]:

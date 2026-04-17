@@ -2,6 +2,8 @@ import logging
 
 from sqlmodel import Session
 
+from ..database import get_session  # noqa: F401 — re-exported for submodules
+
 logger = logging.getLogger(__name__)
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}

@@ -1,0 +1,309 @@
+import logging
+from typing import Literal
+
+from fastmcp import Context
+from fastmcp.dependencies import Depends
+from fastmcp.exceptions import ToolError
+from sqlmodel import Session, col, select
+
+from ..deps import (
+    get_meeting_repo,
+    get_note_repo,
+    get_notion_client,
+    get_security,
+    get_sync_service,
+    get_task_repo,
+    get_task_state_repo,
+    get_writeback,
+)
+from ..integrations import NotionClient
+from ..mcp_instance import mcp
+from ..repositories import (
+    find_latest_session_with_notes,
+    MeetingRepository,
+    NoteRepository,
+    TaskRepository,
+    TaskStateRepository,
+)
+from ..security import SecurityService
+from ..services import SyncService, WriteBackService
+from ..models import (
+    Note,
+    NoteType,
+    Task,
+    TaskState,
+    ToolCall,
+    WizardSession,
+)
+from ..schemas import (
+    NoteDetail,
+    ResumedTaskNotes,
+    ResumeSessionResponse,
+    SessionEndResponse,
+    SessionStartResponse,
+    SessionState,
+    SourceSyncStatus,
+    TaskContext,
+    WriteBackStatus,
+)
+
+from . import _helpers
+from ._helpers import _log_tool_call
+
+logger = logging.getLogger(__name__)
+
+
+def _init_session(
+    db: Session, notion: NotionClient
+) -> "tuple[WizardSession, object]":
+    """Create a new WizardSession and attach the daily page if available."""
+    session = WizardSession()
+    db.add(session)
+    db.flush()
+    db.refresh(session)
+    if session.id is None:
+        raise ToolError("Internal error: session was not assigned an id after flush")
+    daily_page = None
+    try:
+        daily_page = notion.ensure_daily_page()
+        session.daily_page_id = daily_page.page_id
+        db.add(session)
+        db.flush()
+    except Exception as e:
+        logger.warning("ensure_daily_page failed: %s", e)
+    return session, daily_page
+
+
+async def session_start(
+    ctx: Context,
+    sync_svc: SyncService = Depends(get_sync_service),
+    notion: NotionClient = Depends(get_notion_client),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
+    t_repo: TaskRepository = Depends(get_task_repo),
+    m_repo: MeetingRepository = Depends(get_meeting_repo),
+) -> SessionStartResponse:
+    """Creates a session, syncs Jira and Notion, returns open and blocked tasks + unsummarised meetings."""
+    logger.info("session_start")
+    with _helpers.get_session() as db:
+        session, daily_page = _init_session(db, notion)
+        await _log_tool_call(db, "session_start", session_id=session.id)
+
+        sync_results: list[SourceSyncStatus] = []
+        sync_steps = [
+            ("jira", sync_svc.sync_jira, "Syncing Jira..."),
+            ("notion_tasks", sync_svc.sync_notion_tasks, "Syncing Notion tasks..."),
+            ("notion_meetings", sync_svc.sync_notion_meetings, "Syncing Notion meetings..."),
+        ]
+        for i, (source, fn, label) in enumerate(sync_steps):
+            await ctx.report_progress(i, 3, label)
+            try:
+                fn(db)
+                sync_results.append(SourceSyncStatus(source=source, ok=True))
+            except Exception as e:
+                logger.warning("Sync failed for %s: %s", source, e)
+                sync_results.append(
+                    SourceSyncStatus(source=source, ok=False, error=str(e))
+                )
+        await ctx.report_progress(3, 3, "Sync complete.")
+
+        await ctx.set_state("current_session_id", session.id)
+        await ctx.info(f"Session {session.id} started.")
+
+        try:
+            t_state_repo.refresh_stale_days(db)
+        except Exception as e:
+            logger.warning("refresh_stale_days failed: %s", e)
+
+        return SessionStartResponse(
+            session_id=session.id,
+            open_tasks=t_repo.get_open_task_contexts(db),
+            blocked_tasks=t_repo.get_blocked_task_contexts(db),
+            unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
+            sync_results=sync_results,
+            daily_page=daily_page,
+        )
+
+
+async def session_end(
+    ctx: Context,
+    session_id: int,
+    summary: str,
+    intent: str,
+    working_set: list[int],
+    state_delta: str,
+    open_loops: list[str],
+    next_actions: list[str],
+    closure_status: Literal["clean", "interrupted", "blocked"],
+    tool_registry: str | None = None,
+    sec: SecurityService = Depends(get_security),
+    n_repo: NoteRepository = Depends(get_note_repo),
+    wb: WriteBackService = Depends(get_writeback),
+) -> SessionEndResponse:
+    """Persists session summary + SessionState to WizardSession. Writes Notion daily page."""
+    logger.info("session_end session_id=%d", session_id)
+    try:
+        with _helpers.get_session() as db:
+            await _log_tool_call(db, "session_end", session_id=session_id)
+            session = db.get(WizardSession, session_id)
+            if session is None:
+                await ctx.error(f"Session {session_id} not found")
+                raise ToolError(f"Session {session_id} not found")
+
+            state = SessionState(
+                intent=sec.scrub(intent).clean,
+                working_set=working_set,
+                state_delta=sec.scrub(state_delta).clean,
+                open_loops=[sec.scrub(loop).clean for loop in open_loops],
+                next_actions=[sec.scrub(action).clean for action in next_actions],
+                closure_status=closure_status,
+                tool_registry=tool_registry,
+            )
+            session_state_saved = False
+            try:
+                session.session_state = state.model_dump_json()
+                session_state_saved = True
+            except Exception as e:
+                logger.warning("session_end: failed to serialise session_state: %s", e)
+
+            clean_summary = sec.scrub(summary).clean
+            session.summary = clean_summary
+            db.add(session)
+            db.flush()
+            db.refresh(session)
+            if session.id is None:
+                raise ToolError("Internal error: session was not assigned an id after flush")
+
+            note = Note(
+                note_type=NoteType.SESSION_SUMMARY,
+                content=clean_summary,
+                session_id=session.id,
+            )
+            saved = n_repo.save(db, note)
+            if saved.id is None:
+                raise ToolError("Internal error: note was not assigned an id after flush")
+
+            wb_result = wb.push_session_summary(session)
+
+            await ctx.delete_state("current_session_id")
+            await ctx.info(
+                f"Session {session.id} closed. Status: {closure_status}. "
+                f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
+            )
+
+            return SessionEndResponse(
+                note_id=saved.id,
+                notion_write_back=wb_result,
+                session_state_saved=session_state_saved,
+                closure_status=closure_status,
+                open_loops_count=len(open_loops),
+                next_actions_count=len(next_actions),
+                intent=intent,
+            )
+    except ValueError as e:
+        logger.warning("session_end failed: %s", e)
+        raise ToolError(str(e)) from e
+
+
+async def resume_session(
+    ctx: Context,
+    session_id: int | None = None,
+    sync_svc: SyncService = Depends(get_sync_service),
+    notion: NotionClient = Depends(get_notion_client),
+    m_repo: MeetingRepository = Depends(get_meeting_repo),
+) -> ResumeSessionResponse:
+    """Resume a prior session in a new thread. Creates a new session and syncs."""
+    logger.info("resume_session session_id=%s", session_id)
+    with _helpers.get_session() as db:
+        # Find prior session
+        if session_id is not None:
+            prior = db.get(WizardSession, session_id)
+            if prior is None:
+                raise ToolError(f"Session {session_id} not found")
+        else:
+            prior = find_latest_session_with_notes(db)
+            if prior is None:
+                raise ToolError("No sessions with notes found")
+
+        if prior.id is None:
+            raise ToolError("Internal error: session was not assigned an id after flush")
+
+        # Create new session
+        new_session, daily_page = _init_session(db, notion)
+        await _log_tool_call(db, "resume_session", session_id=new_session.id)
+
+        # Sync
+        sync_results = sync_svc.sync_all(db)
+
+        # Deserialise prior session_state
+        session_state: SessionState | None = None
+        working_set_tasks: list[TaskContext] = []
+        if prior.session_state is not None:
+            try:
+                session_state = SessionState.model_validate_json(prior.session_state)
+                for tid in session_state.working_set:
+                    t = db.get(Task, tid)
+                    ts = db.get(TaskState, tid)
+                    if t is not None:
+                        working_set_tasks.append(TaskContext.from_model(t, ts))
+            except Exception as e:
+                logger.warning("Failed to deserialise session_state: %s", e)
+                session_state = None
+        else:
+            logger.warning(
+                "Session %d was not cleanly closed — no structured state available. "
+                "Falling back to note history.",
+                prior.id,
+            )
+
+        # Fetch prior notes grouped by task
+        note_stmt = (
+            select(Note)
+            .where(Note.session_id == prior.id)
+            .order_by(col(Note.created_at).asc())
+        )
+        all_prior_notes = list(db.execute(note_stmt).scalars().all())
+        by_task: dict[int, list[Note]] = {}
+        for n in all_prior_notes:
+            if n.task_id is not None:
+                by_task.setdefault(n.task_id, []).append(n)
+
+        prior_notes: list[ResumedTaskNotes] = []
+        for tid, notes in by_task.items():
+            t = db.get(Task, tid)
+            ts = db.get(TaskState, tid)
+            if t is not None:
+                latest_mm = next(
+                    (
+                        n.mental_model
+                        for n in reversed(notes)
+                        if n.mental_model is not None
+                    ),
+                    None,
+                )
+                prior_notes.append(
+                    ResumedTaskNotes(
+                        task=TaskContext.from_model(t, ts),
+                        notes=[NoteDetail.from_model(n) for n in notes],
+                        latest_mental_model=latest_mm,
+                    )
+                )
+
+        return ResumeSessionResponse(
+            session_id=new_session.id,
+            resumed_from_session_id=prior.id,
+            session_state=session_state,
+            working_set_tasks=working_set_tasks,
+            prior_notes=prior_notes,
+            unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
+            sync_results=sync_results,
+            daily_page=daily_page,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Register tools with MCP
+# ---------------------------------------------------------------------------
+
+mcp.tool()(session_start)
+mcp.tool()(session_end)
+mcp.tool()(resume_session)
