@@ -65,7 +65,6 @@ from .schemas import (
     TaskStartResponse,
     TimelineEntry,
     UpdateTaskResponse,
-    UpdateTaskStatusResponse,
     WriteBackStatus,
 )
 
@@ -377,79 +376,6 @@ async def update_task(
             )
     except ValueError as e:
         logger.warning("update_task failed: %s", e)
-        raise ToolError(str(e)) from e
-
-
-async def update_task_status(
-    ctx: Context,
-    task_id: int,
-    new_status: TaskStatus,
-    t_repo: TaskRepository = Depends(get_task_repo),
-    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
-    sec: SecurityService = Depends(get_security),
-    wb: WriteBackService = Depends(get_writeback),
-) -> UpdateTaskStatusResponse:
-    """Updates task status locally and attempts Jira and Notion write-back.
-
-    .. deprecated::
-        Use update_task instead. This tool will be removed in a future version.
-        Run ``wizard update`` to upgrade Wizard.
-    """
-    logger.warning(
-        "update_task_status is deprecated. Use update_task instead. "
-        "Run 'wizard update' to upgrade."
-    )
-    logger.info(
-        "update_task_status task_id=%d new_status=%s", task_id, new_status.value
-    )
-    try:
-        with get_session() as db:
-            session_id: int | None = await ctx.get_state("current_session_id")
-            await _log_tool_call(db, "update_task_status", session_id=session_id)
-            task = t_repo.get_by_id(db, task_id)
-            task.status = new_status
-            db.add(task)
-            db.flush()
-            db.refresh(task)
-            if task.id is None:
-                raise ToolError("Internal error: task was not assigned an id after flush")
-
-            t_state_repo.on_status_changed(db, task.id)
-
-            if new_status == TaskStatus.DONE:
-                try:
-                    elicit_result = await ctx.elicit(
-                        "Task closed. What was the outcome? (1-2 sentences, or press Enter to skip)",
-                        response_type=str,
-                    )
-                    if (
-                        isinstance(elicit_result, AcceptedElicitation)
-                        and elicit_result.data
-                    ):
-                        scrubbed_outcome = sec.scrub(elicit_result.data).clean
-                        if task.notion_id:
-                            wb.append_task_outcome(task, scrubbed_outcome)
-                        else:
-                            logger.info(
-                                "Task %d done with outcome but no notion_id; skipping notion append",
-                                task.id,
-                            )
-                except Exception as e:
-                    logger.debug("ctx.elicit unavailable for task outcome: %s", e)
-
-            jira_wb = wb.push_task_status(task)
-            notion_wb = wb.push_task_status_to_notion(task)
-
-            return UpdateTaskStatusResponse(
-                task_id=task.id,
-                new_status=task.status,
-                jira_write_back=jira_wb,
-                notion_write_back=notion_wb,
-                task_state_updated=True,
-                deprecation_warning="Use update_task instead. Run 'wizard update' to upgrade.",
-            )
-    except ValueError as e:
-        logger.warning("update_task_status failed: %s", e)
         raise ToolError(str(e)) from e
 
 
@@ -1011,7 +937,6 @@ mcp.tool()(session_start)
 mcp.tool()(task_start)
 mcp.tool()(save_note)
 mcp.tool()(update_task)
-mcp.tool()(update_task_status)
 mcp.tool()(get_meeting)
 mcp.tool()(save_meeting_summary)
 mcp.tool()(session_end)

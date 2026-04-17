@@ -314,17 +314,6 @@ class SaveNoteResponse(BaseModel):
     mental_model_saved: bool
 
 
-class UpdateTaskStatusResponse(BaseModel):
-    task_id: int
-    new_status: TaskStatus
-    jira_write_back: WriteBackStatus
-    notion_write_back: WriteBackStatus
-    task_state_updated: bool = True
-    deprecation_warning: str | None = (
-        "Use update_task instead. Run 'wizard update' to upgrade."
-    )
-
-
 class UpdateTaskResponse(BaseModel):
     task_id: int
     updated_fields: list[str]
