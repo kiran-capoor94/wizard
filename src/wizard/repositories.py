@@ -232,6 +232,26 @@ class NoteRepository:
         )
         return list(db.exec(stmt).all())
 
+    def count_investigations(self, db: Session, task_id: int) -> int:
+        """Count investigation notes for a task."""
+        stmt = (
+            select(func.count())
+            .select_from(Note)
+            .where(Note.task_id == task_id)
+            .where(Note.note_type == NoteType.INVESTIGATION)
+        )
+        return db.exec(stmt).one()
+
+    def has_mental_model(self, db: Session, task_id: int) -> bool:
+        """Check if any note for this task has a mental_model."""
+        stmt = (
+            select(Note)
+            .where(Note.task_id == task_id)
+            .where(Note.mental_model.is_not(None))  # type: ignore[union-attr]
+            .limit(1)
+        )
+        return db.exec(stmt).first() is not None
+
 
 # ---------------------------------------------------------------------------
 # TaskStateRepository

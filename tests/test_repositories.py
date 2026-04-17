@@ -546,3 +546,60 @@ def test_find_latest_session_with_notes_returns_most_recent_session_with_notes(d
     result = find_latest_session_with_notes(db_session)
     assert result is not None
     assert result.id == s2.id  # s2 is most recent with notes; s3 has no notes
+
+
+def test_count_investigations(db_session):
+    from wizard.models import Note, NoteType, Task, TaskStatus
+    from wizard.repositories import NoteRepository
+
+    task = Task(name="t", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    repo = NoteRepository()
+    assert repo.count_investigations(db_session, task.id) == 0
+
+    for i in range(2):
+        db_session.add(Note(task_id=task.id, note_type=NoteType.INVESTIGATION, content=f"inv {i}"))
+    db_session.add(Note(task_id=task.id, note_type=NoteType.DECISION, content="dec"))
+    db_session.flush()
+
+    assert repo.count_investigations(db_session, task.id) == 2
+
+
+def test_has_mental_model_false_when_none(db_session):
+    from wizard.models import Note, NoteType, Task, TaskStatus
+    from wizard.repositories import NoteRepository
+
+    task = Task(name="t", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    db_session.add(Note(task_id=task.id, note_type=NoteType.INVESTIGATION, content="inv"))
+    db_session.flush()
+
+    repo = NoteRepository()
+    assert repo.has_mental_model(db_session, task.id) is False
+
+
+def test_has_mental_model_true_when_present(db_session):
+    from wizard.models import Note, NoteType, Task, TaskStatus
+    from wizard.repositories import NoteRepository
+
+    task = Task(name="t", status=TaskStatus.TODO)
+    db_session.add(task)
+    db_session.flush()
+    db_session.refresh(task)
+
+    db_session.add(Note(
+        task_id=task.id,
+        note_type=NoteType.INVESTIGATION,
+        content="inv",
+        mental_model="the system works like X",
+    ))
+    db_session.flush()
+
+    repo = NoteRepository()
+    assert repo.has_mental_model(db_session, task.id) is True

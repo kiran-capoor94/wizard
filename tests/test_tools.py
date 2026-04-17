@@ -2387,7 +2387,8 @@ async def test_what_am_i_missing_links_tool_call_to_session(db_session):
     ctx = mock_ctx(impl)
 
     with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        await what_am_i_missing(ctx, task_id=task.id)
+        from wizard.repositories import TaskRepository, NoteRepository
+        await what_am_i_missing(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
     rows = db_session.exec(select(ToolCall)).all()
     assert len(rows) == 1
@@ -2506,7 +2507,8 @@ async def test_what_am_i_missing_stale_2_days_fires_lost_context_not_stale(db_se
 
     ctx = MockContext()
     with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        result = await what_am_i_missing(ctx, task_id=task.id)
+        from wizard.repositories import TaskRepository, NoteRepository
+        result = await what_am_i_missing(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
     signal_types = [s.type for s in result.signals]
     assert "lost_context" in signal_types
@@ -2543,7 +2545,8 @@ async def test_what_am_i_missing_stale_3_days_fires_stale_not_lost_context(db_se
 
     ctx = MockContext()
     with patch.multiple("wizard.tools", **_patch_tools(db_session)):
-        result = await what_am_i_missing(ctx, task_id=task.id)
+        from wizard.repositories import TaskRepository, NoteRepository
+        result = await what_am_i_missing(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
     signal_types = [s.type for s in result.signals]
     assert "stale" in signal_types
