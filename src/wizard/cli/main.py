@@ -120,7 +120,7 @@ def _run_notion_discovery(config_path: Path) -> None:
         raise typer.Exit(1)
 
     client = NotionSdkClient(auth=token)
-    typer.echo("Fetching Notion database schemas...")
+    typer.echo("  Discovering schema...")
 
     tasks_props = notion_discovery.fetch_db_properties(client, tasks_ds_id)
     meetings_props = notion_discovery.fetch_db_properties(client, meetings_ds_id)
@@ -159,9 +159,9 @@ def _run_notion_discovery(config_path: Path) -> None:
     with open(config_path, "w") as f:
         json.dump(cfg, f, indent=2)
 
-    typer.echo("Notion schema updated:")
     for k, v in schema.items():
-        typer.echo(f"  {k}: {v}")
+        typer.echo(f"    {k:<20} → {v}")
+    typer.echo("  Schema saved.")
 
 
 def _notion_is_configured(cfg: dict) -> bool:

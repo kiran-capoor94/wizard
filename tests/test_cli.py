@@ -1083,3 +1083,34 @@ def test_configure_no_flags_shows_available_options(tmp_path):
         result = runner.invoke(ctx.app, ["configure"])
     assert "--notion" in result.output
     assert "--jira" in result.output
+
+
+def test_configure_notion_prints_arrow_format(tmp_path):
+    """_run_notion_discovery prints matched fields as 'field → Property'."""
+    wizard_dir = tmp_path / ".wizard"
+    wizard_dir.mkdir()
+    config = {
+        "notion": {
+            "token": "test-token",
+            "tasks_ds_id": "tasks-db",
+            "meetings_ds_id": "meetings-db",
+        }
+    }
+    (wizard_dir / "config.json").write_text(json.dumps(config))
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.notion_discovery") as mock_nd, \
+             patch("wizard.cli.main.NotionSdkClient"):
+            mock_nd.fetch_db_properties.return_value = {"Task": "title", "Status": "status"}
+            mock_nd.match_properties.return_value = {
+                "task_name": "Task", "task_status": "Status",
+                "task_priority": None, "task_due_date": None,
+                "task_jira_key": None, "meeting_title": "Meeting name",
+                "meeting_category": None, "meeting_date": None,
+                "meeting_url": None, "meeting_summary": None,
+            }
+            result = runner.invoke(ctx.app, ["configure", "--notion"])
+
+    assert "→" in result.output
+    assert "task_name" in result.output
+    assert "Schema saved" in result.output
