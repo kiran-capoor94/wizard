@@ -29,7 +29,7 @@ async def test_update_task_updates_single_field(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await update_task(
@@ -66,7 +66,7 @@ async def test_update_task_updates_multiple_fields(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await update_task(
@@ -100,7 +100,7 @@ async def test_update_task_raises_when_no_fields(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         with pytest.raises(ToolError, match="At least one field"):
@@ -130,7 +130,7 @@ async def test_update_task_done_elicits_outcome(db_session):
     wb_mock.append_task_outcome.return_value = WriteBackStatus(ok=True)
 
     ctx = MockContext(elicit_response="Completed successfully")
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         await update_task(
@@ -161,7 +161,7 @@ async def test_update_task_done_without_notion_id_skips_elicit(db_session):
     wb_mock.push_task_status_to_notion.return_value = WriteBackStatus(ok=True)
 
     ctx = MockContext(elicit_response="should not be used")
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         await update_task(
@@ -189,7 +189,7 @@ async def test_update_task_invalid_due_date_format(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         with pytest.raises(ToolError, match="Invalid due_date format"):
@@ -214,7 +214,7 @@ async def test_update_task_name_is_scrubbed(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         await update_task(
@@ -246,7 +246,7 @@ async def test_update_task_due_date_writeback(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await update_task(
@@ -278,7 +278,7 @@ async def test_update_task_priority_writeback(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await update_task(
@@ -306,7 +306,7 @@ async def test_update_task_notion_id(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await update_task(
@@ -334,7 +334,7 @@ async def test_update_task_source_url(db_session):
     db_session.refresh(task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await update_task(
@@ -385,7 +385,7 @@ async def test_update_task_outcome_writeback_called_when_elicited(db_session):
     wb_mock.push_task_status_to_notion.return_value = MagicMock(ok=True, error=None, page_id="notion-page-123")
     wb_mock.append_task_outcome.return_value = MagicMock(ok=True, error=None)
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskRepository, TaskStateRepository
         from wizard.security import SecurityService
         result = await update_task(

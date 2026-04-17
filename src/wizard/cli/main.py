@@ -12,14 +12,14 @@ import typer
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
 from wizard.cli.configure import (
-    _configure_jira,
-    _configure_notion,
-    _jira_is_configured,
-    _notion_is_configured,
-    _run_jira_configure,
-    _run_notion_discovery,
+    configure_jira,
+    configure_notion,
+    jira_is_configured,
+    notion_is_configured,
+    run_jira_configure,
+    run_notion_discovery,
 )
-from wizard.cli.doctor import _db_is_healthy, doctor
+from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.database import get_session as get_db_session
 
 logger = logging.getLogger(__name__)
@@ -123,33 +123,33 @@ def _prompt_integrations(cfg: dict, config_path: Path) -> tuple[str, str]:
         typer.echo("Invalid selection.", err=True)
         raise typer.Exit(1) from None
 
-    configure_notion = int_idx in (1, 3)
-    configure_jira = int_idx in (2, 3)
+    wants_notion = int_idx in (1, 3)
+    wants_jira = int_idx in (2, 3)
 
     notion_status = "skipped"
     jira_status = "skipped"
 
-    if configure_notion:
-        if _notion_is_configured(cfg):
+    if wants_notion:
+        if notion_is_configured(cfg):
             typer.echo("\nNotion already configured — run 'wizard configure --notion' to update")
             notion_status = "already configured"
         else:
             try:
-                _configure_notion(cfg, config_path)
+                configure_notion(cfg, config_path)
                 notion_status = "configured"
             except Exception as exc:
                 typer.echo(f"\nNotion configuration failed: {exc}", err=True)
                 raise typer.Exit(1) from exc
 
-    if configure_jira:
+    if wants_jira:
         # Re-read to get the authoritative on-disk state after the Notion step
         with open(config_path) as f:
             cfg.update(json.load(f))
-        if _jira_is_configured(cfg):
+        if jira_is_configured(cfg):
             typer.echo("\nJira already configured — run 'wizard configure --jira' to update")
             jira_status = "already configured"
         else:
-            _configure_jira(cfg, config_path)
+            configure_jira(cfg, config_path)
             jira_status = "configured"
 
     return notion_status, jira_status
@@ -219,7 +219,7 @@ def setup(
 
     _wizard_db_env = os.environ.get("WIZARD_DB")
     db_path = Path(_wizard_db_env) if _wizard_db_env else (WIZARD_HOME / "wizard.db")
-    if not _db_is_healthy(db_path):
+    if not db_is_healthy(db_path):
         typer.echo("Initialising database...")
         repo_root = Path(__file__).resolve().parents[3]
         alembic_args = (
@@ -253,10 +253,10 @@ def configure(
 ) -> None:
     """Configure Wizard integrations."""
     if notion:
-        _run_notion_discovery(WIZARD_HOME / "config.json")
+        run_notion_discovery(WIZARD_HOME / "config.json")
         return
     if jira:
-        _run_jira_configure(WIZARD_HOME / "config.json")
+        run_jira_configure(WIZARD_HOME / "config.json")
         return
     typer.echo("Available flags: --notion, --jira")
 

@@ -8,7 +8,7 @@ import httpx
 from notion_client.errors import APIResponseError
 from sqlmodel import Session, select
 
-from .integrations import JiraClient, NotionClient, _extract_krisp_id
+from .integrations import JiraClient, NotionClient, extract_krisp_id
 from .mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
 from .models import Meeting, MeetingCategory, Task, WizardSession
 from .repositories import TaskStateRepository
@@ -144,7 +144,7 @@ class SyncService:
             notion_id = raw.notion_id
             krisp_url = raw.krisp_url
 
-            krisp_id = _extract_krisp_id(krisp_url)
+            krisp_id = extract_krisp_id(krisp_url)
 
             # Dedup: krisp_id → source_id, then notion_id
             existing = None

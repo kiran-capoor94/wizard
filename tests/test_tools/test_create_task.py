@@ -33,7 +33,7 @@ async def test_create_task_creates_and_links(db_session):
     meeting_id = meeting.id
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskStateRepository
         from wizard.security import SecurityService
         result = await create_task(
@@ -70,7 +70,7 @@ async def test_create_task_creates_paired_task_state(db_session):
     wb_mock.push_task_to_notion.return_value = WriteBackStatus(ok=True)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskStateRepository
         from wizard.security import SecurityService
         response = await create_task(
@@ -87,10 +87,8 @@ async def test_create_task_creates_paired_task_state(db_session):
     assert state.decision_count == 0
 
 
-async def test_create_task_links_tool_call_to_active_session(db_session):
-    from sqlmodel import select
-
-    from wizard.models import ToolCall, WizardSession
+async def test_create_task_with_active_session(db_session):
+    from wizard.models import WizardSession
     from wizard.schemas import WriteBackStatus
     from wizard.tools import create_task
 
@@ -107,10 +105,10 @@ async def test_create_task_links_tool_call_to_active_session(db_session):
     wb_mock.push_task_to_notion.return_value = WriteBackStatus(
         ok=False, error="no notion"
     )
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import TaskStateRepository
         from wizard.security import SecurityService
-        await create_task(
+        result = await create_task(
             ctx,
             name="new task",
             sec=SecurityService(),
@@ -118,6 +116,4 @@ async def test_create_task_links_tool_call_to_active_session(db_session):
             wb=wb_mock,
         )
 
-    rows = list(db_session.execute(select(ToolCall)).scalars().all())
-    assert len(rows) == 1
-    assert rows[0].session_id == session.id
+    assert result.task_id is not None

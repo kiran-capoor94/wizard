@@ -47,14 +47,6 @@ def _latest_note_subquery():
     )
 
 
-def _task_context_from_row(
-    task: Task,
-    task_state: TaskState | None,
-    latest_note: Note | None = None,
-) -> TaskContext:
-    return TaskContext.from_model(task, task_state, latest_note)
-
-
 def _batch_load_latest_notes(
     db: Session, tasks: list[Task]
 ) -> dict[int, Note]:
@@ -152,18 +144,18 @@ class TaskRepository:
         results: list[TaskContext] = []
         for task in tasks:
             tid = task.id
-            results.append(_task_context_from_row(
+            results.append(TaskContext.from_model(
                 task,
                 task_states.get(tid) if tid is not None else None,
                 latest_notes.get(tid) if tid is not None else None,
             ))
         return results
 
-    def build_task_context(self, db: Session, task: Task) -> TaskContext:
-        """Build a single TaskContext for a known task."""
+    def get_task_context(self, db: Session, task: Task) -> TaskContext:
+        """Fetch related state and build a TaskContext for a known task."""
         task_state = db.get(TaskState, task.id)
         latest = self._latest_note_for(db, task)
-        return _task_context_from_row(task, task_state, latest)
+        return TaskContext.from_model(task, task_state, latest)
 
     def _latest_note_for(self, db: Session, task: Task) -> Note | None:
         conditions = []
@@ -357,7 +349,6 @@ class TaskStateRepository:
         now = _dt.datetime.now()
         for state in db.exec(select(TaskState)).all():
             state.stale_days = (now - state.last_touched_at).days
-            db.add(state)
         db.flush()
 
     def _get_or_create(self, db: Session, task: Task) -> TaskState:

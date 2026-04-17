@@ -10,6 +10,7 @@ from notion_client.errors import APIResponseError
 from pydantic import ValidationError
 from sqlmodel import Session, col, select
 
+from ..database import get_session
 from ..deps import (
     get_meeting_repo,
     get_note_repo,
@@ -43,13 +44,10 @@ from ..schemas import (
     SessionEndResponse,
     SessionStartResponse,
     SessionState,
-    SourceSyncStatus,
     TaskContext,
 )
 from ..security import SecurityService
 from ..services import SyncService, WriteBackService
-from . import _helpers
-from ._helpers import _log_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -85,27 +83,11 @@ async def session_start(
 ) -> SessionStartResponse:
     """Create a session, sync Jira/Notion, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start")
-    with _helpers.get_session() as db:
+    with get_session() as db:
         session, daily_page = _init_session(db, notion)
-        await _log_tool_call(db, "session_start", session_id=session.id)
 
-        sync_results: list[SourceSyncStatus] = []
-        sync_steps = [
-            ("jira", sync_svc.sync_jira, "Syncing Jira..."),
-            ("notion_tasks", sync_svc.sync_notion_tasks, "Syncing Notion tasks..."),
-            ("notion_meetings", sync_svc.sync_notion_meetings, "Syncing Notion meetings..."),
-        ]
-        for i, (source, fn, label) in enumerate(sync_steps):
-            await ctx.report_progress(i, 3, label)
-            try:
-                fn(db)
-                sync_results.append(SourceSyncStatus(source=source, ok=True))
-            except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
-                logger.warning("Sync failed for %s: %s", source, e)
-                sync_results.append(
-                    SourceSyncStatus(source=source, ok=False, error=str(e))
-                )
-        await ctx.report_progress(3, 3, "Sync complete.")
+        sync_results = sync_svc.sync_all(db)
+        await ctx.report_progress(1, 1, "Sync complete.")
 
         await ctx.set_state("current_session_id", session.id)
         await ctx.info(f"Session {session.id} started.")
@@ -143,8 +125,7 @@ async def session_end(
     """Persists session summary + SessionState to WizardSession. Writes Notion daily page."""
     logger.info("session_end session_id=%d", session_id)
     try:
-        with _helpers.get_session() as db:
-            await _log_tool_call(db, "session_end", session_id=session_id)
+        with get_session() as db:
             session = db.get(WizardSession, session_id)
             if session is None:
                 await ctx.error(f"Session {session_id} not found")
@@ -218,10 +199,23 @@ def _deserialise_session_state(
         return None, []
     try:
         state = SessionState.model_validate_json(prior.session_state)
+        task_ids = list(state.working_set)
+        tasks_map: dict[int, Task] = {}
+        states_map: dict[int, TaskState] = {}
+        if task_ids:
+            for t in db.execute(
+                select(Task).where(col(Task.id).in_(task_ids))
+            ).scalars().all():
+                if t.id is not None:
+                    tasks_map[t.id] = t
+            for ts in db.execute(
+                select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+            ).scalars().all():
+                states_map[ts.task_id] = ts
         working_set: list[TaskContext] = []
         for tid in state.working_set:
-            t = db.get(Task, tid)
-            ts = db.get(TaskState, tid)
+            t = tasks_map.get(tid)
+            ts = states_map.get(tid)
             if t is not None:
                 working_set.append(TaskContext.from_model(t, ts))
         return state, working_set
@@ -243,10 +237,24 @@ def _group_prior_notes(db: Session, session_id: int) -> list[ResumedTaskNotes]:
         if n.task_id is not None:
             by_task.setdefault(n.task_id, []).append(n)
 
+    task_ids = list(by_task.keys())
+    tasks_map: dict[int, Task] = {}
+    states_map: dict[int, TaskState] = {}
+    if task_ids:
+        for t in db.execute(
+            select(Task).where(col(Task.id).in_(task_ids))
+        ).scalars().all():
+            if t.id is not None:
+                tasks_map[t.id] = t
+        for ts in db.execute(
+            select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+        ).scalars().all():
+            states_map[ts.task_id] = ts
+
     result: list[ResumedTaskNotes] = []
     for tid, notes in by_task.items():
-        t = db.get(Task, tid)
-        ts = db.get(TaskState, tid)
+        t = tasks_map.get(tid)
+        ts = states_map.get(tid)
         if t is not None:
             latest_mm = next(
                 (
@@ -275,7 +283,7 @@ async def resume_session(
 ) -> ResumeSessionResponse:
     """Resume a prior session in a new thread. Creates a new session and syncs."""
     logger.info("resume_session session_id=%s", session_id)
-    with _helpers.get_session() as db:
+    with get_session() as db:
         # Find prior session
         if session_id is not None:
             prior = db.get(WizardSession, session_id)
@@ -291,7 +299,6 @@ async def resume_session(
 
         # Create new session
         new_session, daily_page = _init_session(db, notion)
-        await _log_tool_call(db, "resume_session", session_id=new_session.id)
 
         # Sync
         sync_results = sync_svc.sync_all(db)
