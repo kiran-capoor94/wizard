@@ -185,18 +185,22 @@ def setup(
     with open(config_path) as f:
         cfg = json.load(f)
 
-    if not cfg.get("notion", {}).get("daily_page_parent_id"):
-        page_id = typer.prompt(
-            "Notion daily page parent ID (the page where daily session notes are created)",
-            default="",
-        )
-        if page_id:
-            cfg.setdefault("notion", {})["daily_page_parent_id"] = page_id
-            with open(config_path, "w") as f:
-                json.dump(cfg, f, indent=2)
-            typer.echo(f"  Set daily_page_parent_id: {page_id}")
-        else:
-            typer.echo("  Skipped — set notion.daily_page_parent_id in config.json later")
+    typer.echo("\nWhich integrations would you like to configure?")
+    typer.echo("  1. Notion")
+    typer.echo("  2. Jira")
+    typer.echo("  3. Both")
+    typer.echo("  4. Neither")
+    int_selection = typer.prompt("Enter number (1-4)")
+    try:
+        int_idx = int(int_selection)
+        if int_idx not in (1, 2, 3, 4):
+            raise ValueError
+    except ValueError:
+        typer.echo("Invalid selection.", err=True)
+        raise typer.Exit(1)
+
+    configure_notion = int_idx in (1, 3)
+    configure_jira = int_idx in (2, 3)
 
     _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")

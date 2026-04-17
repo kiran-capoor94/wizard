@@ -35,7 +35,7 @@ def test_setup_creates_wizard_dir(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code == 0
     assert wizard_dir.exists()
@@ -48,7 +48,7 @@ def test_setup_creates_default_config(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     config = json.loads((wizard_dir / "config.json").read_text())
     assert "jira" in config
@@ -62,7 +62,7 @@ def test_setup_copies_skills(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code == 0
     skills_dir = wizard_dir / "skills"
@@ -84,7 +84,7 @@ def test_setup_handles_missing_skills_source(tmp_path):
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
             with patch("wizard.cli.main._package_skills_dir", return_value=fake_skills):
-                result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+                result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code == 0
     assert not (wizard_dir / "skills").exists()
@@ -96,8 +96,8 @@ def test_setup_is_idempotent(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code == 0
 
@@ -212,7 +212,7 @@ def test_setup_registers_mcp_in_claude_configs(tmp_path):
 
             mock_ar.register.side_effect = _real_register
             mock_ar.write_registered_agents.return_value = None
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code == 0
     code_data = json.loads(code_cfg.read_text())
@@ -227,7 +227,7 @@ def test_setup_skips_mcp_when_config_missing(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code == 0
     assert not code_cfg.exists()
@@ -392,7 +392,7 @@ def test_setup_agent_flag_registers_gemini(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "gemini"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "gemini"], input="4\n")
 
     mock_ar.register.assert_called_with("gemini")
     mock_ar.write_registered_agents.assert_called()
@@ -405,7 +405,7 @@ def test_setup_agent_all_registers_all_five(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "all"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "all"], input="4\n")
 
     registered_ids = [call.args[0] for call in mock_ar.register.call_args_list]
     assert set(registered_ids) == {"claude-code", "claude-desktop", "gemini", "opencode", "codex"}
@@ -418,7 +418,7 @@ def test_setup_writes_registered_agents_json(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     mock_ar.write_registered_agents.assert_called_once_with(["claude-code"])
     assert result.exit_code == 0
@@ -441,8 +441,8 @@ def test_setup_interactive_prompt_selects_agent(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            # "\n" skips daily_page_parent_id prompt; "3" selects "gemini"
-            result = runner.invoke(ctx.app, ["setup"], input="\n3\n")
+            # "4" selects "Neither" for integration; "3" selects "gemini"
+            result = runner.invoke(ctx.app, ["setup"], input="4\n3\n")
 
     mock_ar.register.assert_called_with("gemini")
     assert result.exit_code == 0
@@ -454,41 +454,28 @@ def test_setup_interactive_prompt_invalid_selection(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup"], input="\n99\n")
+            result = runner.invoke(ctx.app, ["setup"], input="4\n99\n")
 
     assert result.exit_code != 0
 
 
-def test_setup_saves_daily_page_parent_id_when_provided(tmp_path):
+def test_setup_asks_which_integrations(tmp_path):
     wizard_dir = tmp_path / ".wizard"
-
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(
-                ctx.app, ["setup", "--agent", "claude-code"], input="abc-123\n"
-            )
-
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
     assert result.exit_code == 0
-    config = json.loads((wizard_dir / "config.json").read_text())
-    assert config["notion"]["daily_page_parent_id"] == "abc-123"
+    assert "integration" in result.output.lower()
 
 
-def test_setup_skips_daily_page_prompt_when_already_set(tmp_path):
+def test_setup_integration_invalid_selection_exits(tmp_path):
     wizard_dir = tmp_path / ".wizard"
-    wizard_dir.mkdir()
-    config = {"notion": {"daily_page_parent_id": "existing-id"}}
-    (wizard_dir / "config.json").write_text(json.dumps(config))
-
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            # No input needed — prompt should not fire
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"])
-
-    assert result.exit_code == 0
-    updated = json.loads((wizard_dir / "config.json").read_text())
-    assert updated["notion"]["daily_page_parent_id"] == "existing-id"
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="9\n")
+    assert result.exit_code != 0
 
 
 # --- configure --notion tests ---
@@ -848,7 +835,7 @@ def test_setup_runs_migrations_when_db_missing(tmp_path):
              patch("wizard.cli.main._db_is_healthy", return_value=False), \
              patch("wizard.cli.main._run_update_step", return_value=(True, "")) as mock_step:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code == 0
     calls = [call for call in mock_step.call_args_list
@@ -865,7 +852,7 @@ def test_setup_skips_migrations_when_db_healthy(tmp_path):
              patch("wizard.cli.main._db_is_healthy", return_value=True), \
              patch("wizard.cli.main._run_update_step", return_value=(True, "")) as mock_step:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code == 0
     alembic_calls = [call for call in mock_step.call_args_list
@@ -882,6 +869,6 @@ def test_setup_exits_nonzero_when_migrations_fail(tmp_path):
              patch("wizard.cli.main._db_is_healthy", return_value=False), \
              patch("wizard.cli.main._run_update_step", return_value=(False, "alembic error output")):
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code != 0
