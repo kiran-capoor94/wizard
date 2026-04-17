@@ -209,7 +209,7 @@ def _jira_is_configured(cfg: dict) -> bool:
 def _configure_notion(cfg: dict, config_path: Path) -> None:
     """Prompt for all Notion credentials, save to config, run schema discovery."""
     typer.echo("\nNotion integration")
-    token = typer.prompt("  Notion integration token (notion.so/profile/integrations)")
+    token = typer.prompt("  Notion integration token (notion.so/profile/integrations)", hide_input=True)
     cfg.setdefault("notion", {})["token"] = token
     typer.echo("  token: set")
 
@@ -278,7 +278,7 @@ def _configure_jira(cfg: dict, config_path: Path) -> None:
     cfg["jira"]["email"] = email
     typer.echo("  email: set")
 
-    token = typer.prompt("  API token (id.atlassian.com/manage-profile/security/api-tokens)")
+    token = typer.prompt("  API token (id.atlassian.com/manage-profile/security/api-tokens)", hide_input=True)
     cfg["jira"]["token"] = token
     typer.echo("  token: set")
 
