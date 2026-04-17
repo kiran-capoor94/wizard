@@ -8,7 +8,7 @@ from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from notion_client.errors import APIResponseError
 from pydantic import ValidationError
-from sqlmodel import Session, col, select
+from sqlmodel import Session
 
 from ..database import get_session
 from ..deps import (
@@ -26,8 +26,6 @@ from ..mcp_instance import mcp
 from ..models import (
     Note,
     NoteType,
-    Task,
-    TaskState,
     WizardSession,
 )
 from ..repositories import (
@@ -187,7 +185,7 @@ async def session_end(
 
 
 def _deserialise_session_state(
-    db: Session, prior: WizardSession
+    db: Session, prior: WizardSession, t_repo: TaskRepository
 ) -> tuple[SessionState | None, list[TaskContext]]:
     """Deserialise prior session_state JSON and rebuild working set task contexts."""
     if prior.session_state is None:
@@ -199,63 +197,31 @@ def _deserialise_session_state(
         return None, []
     try:
         state = SessionState.model_validate_json(prior.session_state)
-        task_ids = list(state.working_set)
-        tasks_map: dict[int, Task] = {}
-        states_map: dict[int, TaskState] = {}
-        if task_ids:
-            for t in db.execute(
-                select(Task).where(col(Task.id).in_(task_ids))
-            ).scalars().all():
-                if t.id is not None:
-                    tasks_map[t.id] = t
-            for ts in db.execute(
-                select(TaskState).where(col(TaskState.task_id).in_(task_ids))
-            ).scalars().all():
-                states_map[ts.task_id] = ts
-        working_set: list[TaskContext] = []
-        for tid in state.working_set:
-            t = tasks_map.get(tid)
-            ts = states_map.get(tid)
-            if t is not None:
-                working_set.append(TaskContext.from_model(t, ts))
+        working_set = t_repo.get_task_contexts_by_ids(db, list(state.working_set))
         return state, working_set
     except (ValueError, ValidationError) as e:
         logger.warning("Failed to deserialise session_state: %s", e)
         return None, []
 
 
-def _group_prior_notes(db: Session, session_id: int) -> list[ResumedTaskNotes]:
+def _group_prior_notes(
+    db: Session, session_id: int, n_repo: NoteRepository, t_repo: TaskRepository
+) -> list[ResumedTaskNotes]:
     """Query notes for a session and group by task with latest mental model."""
-    note_stmt = (
-        select(Note)
-        .where(Note.session_id == session_id)
-        .order_by(col(Note.created_at).asc())
-    )
-    all_notes = list(db.execute(note_stmt).scalars().all())
-    by_task: dict[int, list[Note]] = {}
-    for n in all_notes:
-        if n.task_id is not None:
-            by_task.setdefault(n.task_id, []).append(n)
+    by_task = n_repo.get_notes_grouped_by_task(db, session_id)
+    if not by_task:
+        return []
 
+    # Build a TaskContext lookup for all referenced tasks
     task_ids = list(by_task.keys())
-    tasks_map: dict[int, Task] = {}
-    states_map: dict[int, TaskState] = {}
-    if task_ids:
-        for t in db.execute(
-            select(Task).where(col(Task.id).in_(task_ids))
-        ).scalars().all():
-            if t.id is not None:
-                tasks_map[t.id] = t
-        for ts in db.execute(
-            select(TaskState).where(col(TaskState.task_id).in_(task_ids))
-        ).scalars().all():
-            states_map[ts.task_id] = ts
+    task_contexts = {
+        tc.task_id: tc for tc in t_repo.get_task_contexts_by_ids(db, task_ids)
+    }
 
     result: list[ResumedTaskNotes] = []
     for tid, notes in by_task.items():
-        t = tasks_map.get(tid)
-        ts = states_map.get(tid)
-        if t is not None:
+        tc = task_contexts.get(tid)
+        if tc is not None:
             latest_mm = next(
                 (
                     n.mental_model
@@ -266,7 +232,7 @@ def _group_prior_notes(db: Session, session_id: int) -> list[ResumedTaskNotes]:
             )
             result.append(
                 ResumedTaskNotes(
-                    task=TaskContext.from_model(t, ts),
+                    task=tc,
                     notes=[NoteDetail.from_model(n) for n in notes],
                     latest_mental_model=latest_mm,
                 )
@@ -279,6 +245,8 @@ async def resume_session(
     session_id: int | None = None,
     sync_svc: SyncService = Depends(get_sync_service),
     notion: NotionClient = Depends(get_notion_client),
+    t_repo: TaskRepository = Depends(get_task_repo),
+    n_repo: NoteRepository = Depends(get_note_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
 ) -> ResumeSessionResponse:
     """Resume a prior session in a new thread. Creates a new session and syncs."""
@@ -303,9 +271,9 @@ async def resume_session(
         # Sync
         sync_results = sync_svc.sync_all(db)
 
-        session_state, working_set_tasks = _deserialise_session_state(db, prior)
+        session_state, working_set_tasks = _deserialise_session_state(db, prior, t_repo)
 
-        prior_notes = _group_prior_notes(db, prior.id)
+        prior_notes = _group_prior_notes(db, prior.id, n_repo, t_repo)
 
         return ResumeSessionResponse(
             session_id=new_session.id,
