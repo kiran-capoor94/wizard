@@ -436,33 +436,43 @@ async def what_am_i_missing(
         dc = task_state.decision_count
         sd = task_state.stale_days
 
+        # Rule 1: no notes at all
         if nc == 0:
             signals.append(Signal(
-                type="no_context", severity="high", message="No notes recorded for this task"
+                type="no_context", severity="high",
+                message="No notes recorded for this task",
             ))
+        # Rule 2: stale
         if sd >= 3:
             signals.append(Signal(
-                type="stale", severity="medium", message=f"No activity for {sd} days"
+                type="stale", severity="medium",
+                message=f"No activity for {sd} days",
             ))
+        # Rule 3: very few notes
         if 0 < nc <= 2:
             signals.append(Signal(
                 type="low_context", severity="medium",
                 message="Very few notes — context may be shallow",
             ))
+        # Rule 4: notes exist but no decisions
         if dc == 0 and nc > 0:
             signals.append(Signal(
-                type="no_decisions", severity="medium", message="No decisions recorded"
+                type="no_decisions", severity="medium",
+                message="No decisions recorded",
             ))
+        # Rule 5: many investigations, no decisions
         if n_repo.count_investigations(db, task_id) > 3 and dc == 0:
             signals.append(Signal(
                 type="analysis_loop", severity="high",
                 message="Multiple investigations without a decision",
             ))
+        # Rule 6: has notes and stale 2-3 days (rule 2 covers >= 3 days; avoid double-signal)
         if task_state.last_note_at is not None and 2 <= sd < 3:
             signals.append(Signal(
                 type="lost_context", severity="medium",
                 message="Context may be degrading due to inactivity",
             ))
+        # Rule 7: no mental model captured
         if nc >= 2 and not n_repo.has_mental_model(db, task_id):
             signals.append(Signal(
                 type="no_model", severity="medium",
