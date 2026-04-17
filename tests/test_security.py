@@ -60,3 +60,38 @@ def test_scrub_is_idempotent():
     first = svc.scrub("Email: user@test.com")
     second = svc.scrub(first.clean)
     assert first.clean == second.clean
+
+
+def test_uk_phone_with_plus44_is_redacted():
+    svc = SecurityService()
+    result = svc.scrub("Call +44 7911 123456 for help")
+    assert "[PHONE_1]" in result.clean
+    assert "+44 7911 123456" not in result.clean
+    assert result.was_modified is True
+
+
+def test_uk_local_phone_is_redacted():
+    svc = SecurityService()
+    result = svc.scrub("Call 07911 123456 for help")
+    assert "[PHONE_1]" in result.clean
+    assert "07911 123456" not in result.clean
+
+
+def test_us_phone_is_redacted():
+    svc = SecurityService()
+    result = svc.scrub("Call +1 202 555 0100 today")
+    assert "[PHONE_1]" in result.clean
+    assert "+1 202 555 0100" not in result.clean
+
+
+def test_multiple_phones_get_indexed_stubs():
+    svc = SecurityService()
+    result = svc.scrub("A: +44 7911 123456 B: +1 202 555 0100")
+    assert "[PHONE_1]" in result.clean
+    assert "[PHONE_2]" in result.clean
+
+
+def test_phone_allowlist_skips_match():
+    svc = SecurityService(allowlist=[r"\+44 7911 123456"])
+    result = svc.scrub("Call +44 7911 123456 for help")
+    assert "+44 7911 123456" in result.clean
