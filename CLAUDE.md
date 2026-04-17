@@ -196,24 +196,6 @@ In tests: call tool/resource functions with deps as explicit kwargs
 result = await my_tool(task_id=1, t_repo=TaskRepository())
 ```
 
-## Test Patterns
-
-Model/schema imports must be **inside test function bodies**, not at
-module level. The `db_session` fixture clears `sys.modules` between
-tests, which causes `UnmappedClassError` for module-level imports.
-
-```python
-# Correct
-def test_something(db_session):
-    from wizard.models import Task
-    task = Task(...)
-
-# Wrong — causes UnmappedClassError
-from wizard.models import Task
-def test_something(db_session):
-    task = Task(...)
-```
-
 ## Doctor Checks
 
 `wizard doctor` runs 10 checks in order. Stops at first failure unless
