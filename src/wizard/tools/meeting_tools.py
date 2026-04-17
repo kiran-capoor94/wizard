@@ -3,7 +3,7 @@ import logging
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
-from sqlmodel import select
+from sqlmodel import col, select
 
 from ..database import get_session
 from ..deps import (
@@ -56,12 +56,13 @@ async def get_meeting(
             if meeting.id is None:
                 raise ToolError("Internal error: meeting was not assigned an id after flush")
 
-            linked_tasks = [
-                t_repo.get_task_context(db, t)
+            open_task_ids = [
+                t.id
                 for t in meeting.tasks
-                if t.status
-                in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
+                if t.id is not None
+                and t.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
             ]
+            linked_tasks = t_repo.get_task_contexts_by_ids(db, open_task_ids)
 
             return GetMeetingResponse(
                 meeting_id=meeting.id,
@@ -111,14 +112,17 @@ async def save_meeting_summary(
                 raise ToolError("Internal error: note was not assigned an id after flush")
 
             if task_ids:
-                for tid in task_ids:
-                    existing_link = db.exec(
+                existing_links = {
+                    mt.task_id
+                    for mt in db.exec(
                         select(MeetingTasks).where(
                             MeetingTasks.meeting_id == meeting.id,
-                            MeetingTasks.task_id == tid,
+                            col(MeetingTasks.task_id).in_(task_ids),
                         )
-                    ).first()
-                    if not existing_link:
+                    ).all()
+                }
+                for tid in task_ids:
+                    if tid not in existing_links:
                         db.add(MeetingTasks(meeting_id=meeting.id, task_id=tid))
 
             db.flush()
