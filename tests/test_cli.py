@@ -430,7 +430,7 @@ def test_setup_unknown_agent_exits_nonzero(tmp_path):
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar:
             mock_ar.read_registered_agents.return_value = []
-            result = runner.invoke(ctx.app, ["setup", "--agent", "notarealbot"], input="\n")
+            result = runner.invoke(ctx.app, ["setup", "--agent", "notarealbot"], input="4\n")
 
     assert result.exit_code != 0
 
