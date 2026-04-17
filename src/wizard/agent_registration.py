@@ -197,7 +197,8 @@ def read_registered_agents() -> list[str]:
         return []
     try:
         return json.loads(_REGISTERED_AGENTS_PATH.read_text())
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning("Could not read registered_agents.json: %s", exc)
         return []
 
 
