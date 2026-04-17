@@ -49,7 +49,6 @@ from ..schemas import (
 from ..security import SecurityService
 from ..services import SyncService, WriteBackService
 from . import _helpers
-from ._helpers import _log_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +86,6 @@ async def session_start(
     logger.info("session_start")
     with _helpers.get_session() as db:
         session, daily_page = _init_session(db, notion)
-        await _log_tool_call(db, "session_start", session_id=session.id)
 
         sync_results: list[SourceSyncStatus] = []
         sync_steps = [
@@ -144,7 +142,6 @@ async def session_end(
     logger.info("session_end session_id=%d", session_id)
     try:
         with _helpers.get_session() as db:
-            await _log_tool_call(db, "session_end", session_id=session_id)
             session = db.get(WizardSession, session_id)
             if session is None:
                 await ctx.error(f"Session {session_id} not found")
@@ -291,7 +288,6 @@ async def resume_session(
 
         # Create new session
         new_session, daily_page = _init_session(db, notion)
-        await _log_tool_call(db, "resume_session", session_id=new_session.id)
 
         # Sync
         sync_results = sync_svc.sync_all(db)
