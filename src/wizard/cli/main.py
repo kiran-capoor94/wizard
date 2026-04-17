@@ -172,6 +172,9 @@ def _resolve_notion_page_id(url: str) -> str:
       https://www.notion.so/workspace/My-Tasks-abc123def456789012345678901234ab
       https://www.notion.so/abc123def456789012345678901234ab
       https://www.notion.so/My-Tasks-abc123def456789012345678901234ab?v=...
+
+    Query strings are stripped before matching. URL fragments (#...) are not
+    stripped separately, but the hex-only regex ignores them in practice.
     """
     path = url.split("?")[0]
     matches = re.findall(r"[0-9a-f]{32}", path.lower())
@@ -182,11 +185,12 @@ def _resolve_notion_page_id(url: str) -> str:
 
 
 def _resolve_ds_id(client, page_id: str) -> str:
-    """Validate page_id as a Notion data source and return it.
+    """Confirm page_id is a valid data source ID and return it unchanged.
 
-    In notion-client v3.0, the page ID from the URL is the data source ID.
-    Calls data_sources.retrieve() to confirm the ID is valid before saving.
-    Raises on invalid ID or API error (bad token, network, etc.).
+    In notion-client v3.0, the 32-char page ID extracted from a Notion database
+    URL IS the data source ID — no translation or lookup is needed. This call
+    confirms the ID is reachable before we persist it, and raises on 404 / auth
+    errors so the caller's retry loop can re-prompt the user.
     """
     client.data_sources.retrieve(data_source_id=page_id)
     return page_id
