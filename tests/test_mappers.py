@@ -1,7 +1,7 @@
 import logging
 
-from wizard.mappers import StatusMapper, PriorityMapper, MeetingCategoryMapper
-from wizard.models import TaskStatus, TaskPriority, MeetingCategory
+from wizard.mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
+from wizard.models import MeetingCategory, TaskPriority, TaskStatus
 
 
 class TestStatusMapperJiraToLocal:

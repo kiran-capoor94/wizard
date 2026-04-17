@@ -1,12 +1,18 @@
-import pytest
+from unittest.mock import MagicMock, patch
+
 import httpx
+import pytest
 import respx
-from unittest.mock import patch, MagicMock
 from notion_client.errors import APIResponseError
 
 from wizard.schemas import (
-    NotionTitle, NotionRichText, NotionSelect, NotionMultiSelect,
-    NotionUrl, NotionDate, NotionStatus,
+    NotionDate,
+    NotionMultiSelect,
+    NotionRichText,
+    NotionSelect,
+    NotionStatus,
+    NotionTitle,
+    NotionUrl,
 )
 
 
@@ -980,6 +986,7 @@ def test_notion_ensure_daily_page_leaves_non_daily_pages_alone():
 
 def test_notion_client_uses_schema_for_task_name():
     from unittest.mock import patch
+
     from wizard.config import NotionSchemaSettings
     from wizard.integrations import NotionClient
 
@@ -1009,6 +1016,7 @@ def test_notion_client_uses_schema_for_task_name():
 
 def test_notion_client_uses_schema_for_meeting_url():
     from unittest.mock import patch
+
     from wizard.config import NotionSchemaSettings
     from wizard.integrations import NotionClient
 

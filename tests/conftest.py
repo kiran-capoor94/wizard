@@ -34,8 +34,8 @@ def db_session(monkeypatch, tmp_path):
     SQLModel.metadata.clear()
     SQLModel._sa_registry.dispose(cascade=True)
 
-    from wizard.database import engine
     import wizard.models  # noqa: F401 — registers models with SQLModel.metadata
+    from wizard.database import engine
 
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:

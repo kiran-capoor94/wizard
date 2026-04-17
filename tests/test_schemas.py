@@ -2,7 +2,7 @@ import datetime
 
 
 def test_task_context_from_model_populates_task_state_fields():
-    from wizard.models import Task, TaskPriority, TaskCategory, TaskState, TaskStatus
+    from wizard.models import Task, TaskCategory, TaskPriority, TaskState, TaskStatus
     from wizard.schemas import TaskContext
 
     task = Task(
@@ -32,7 +32,7 @@ def test_task_context_from_model_populates_task_state_fields():
 
 
 def test_task_context_from_model_with_latest_note_populates_preview_fields():
-    from wizard.models import Note, NoteType, Task, TaskPriority, TaskCategory, TaskStatus
+    from wizard.models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskStatus
     from wizard.schemas import TaskContext
 
     task = Task(
@@ -57,7 +57,7 @@ def test_task_context_from_model_with_latest_note_populates_preview_fields():
 
 
 def test_task_context_from_model_null_task_state_uses_defaults():
-    from wizard.models import Task, TaskPriority, TaskCategory, TaskStatus
+    from wizard.models import Task, TaskCategory, TaskPriority, TaskStatus
     from wizard.schemas import TaskContext
 
     task = Task(
@@ -92,8 +92,9 @@ def test_note_detail_from_model_includes_mental_model():
 
 
 def test_meeting_context_has_already_summarised_field():
-    from wizard.schemas import MeetingContext, MeetingCategory
     import datetime
+
+    from wizard.schemas import MeetingCategory, MeetingContext
 
     ctx = MeetingContext(
         id=1,
@@ -117,7 +118,9 @@ def test_meeting_context_has_already_summarised_field():
 def test_utc_datetime_appends_z_to_naive():
     """Naive datetime (SQLite round-trip) serializes as UTC with Z suffix."""
     import json
+
     from pydantic import BaseModel
+
     from wizard.schemas import UTCDateTime
 
     class M(BaseModel):
@@ -131,7 +134,9 @@ def test_utc_datetime_appends_z_to_naive():
 def test_utc_datetime_preserves_already_utc_z():
     """UTC-aware datetime with Z still serializes correctly."""
     import json
+
     from pydantic import BaseModel
+
     from wizard.schemas import UTCDateTime
 
     class M(BaseModel):
@@ -167,6 +172,7 @@ def test_session_state_tool_registry_round_trips():
 def test_session_state_missing_tool_registry_field_deserialises_to_none():
     """Old session_state JSON without tool_registry must deserialise cleanly."""
     import json
+
     from wizard.schemas import SessionState
 
     old_json = json.dumps({
@@ -184,7 +190,9 @@ def test_session_state_missing_tool_registry_field_deserialises_to_none():
 def test_utc_datetime_converts_offset_aware_to_utc():
     """Offset-aware datetime (non-UTC) must be *converted* to UTC, not just stripped."""
     import json
+
     from pydantic import BaseModel
+
     from wizard.schemas import UTCDateTime
 
     class M(BaseModel):

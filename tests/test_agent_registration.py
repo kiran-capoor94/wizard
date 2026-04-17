@@ -1,5 +1,4 @@
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -107,6 +106,7 @@ def test_deregister_unknown_agent_is_noop():
 
 def test_register_unknown_agent_raises():
     import pytest
+
     from wizard.agent_registration import register
     from wizard.integrations import ConfigurationError
     with pytest.raises(ConfigurationError, match="Unknown agent"):
@@ -142,6 +142,7 @@ def test_register_codex_toml(tmp_path):
 
 def test_register_codex_toml_idempotent(tmp_path):
     import tomllib
+
     import tomli_w
     config_path = tmp_path / "codex.toml"
     existing = {"mcpServers": {"other": {"command": "other"}}, "other_section": {"key": "val"}}
@@ -158,6 +159,7 @@ def test_register_codex_toml_idempotent(tmp_path):
 
 def test_deregister_codex_toml(tmp_path):
     import tomllib
+
     import tomli_w
     config_path = tmp_path / "codex.toml"
     existing = {"mcpServers": {"other": {"command": "other"}, "wizard": {"command": "uv"}}}

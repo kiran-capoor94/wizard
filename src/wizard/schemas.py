@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, WrapSerializer
 
 from .models import (
+    MeetingCategory,
     Note,
     NoteType,
     Task,
@@ -11,7 +12,6 @@ from .models import (
     TaskPriority,
     TaskState,
     TaskStatus,
-    MeetingCategory,
 )
 
 

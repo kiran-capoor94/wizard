@@ -1,6 +1,5 @@
 import datetime
 
-
 # ---------------------------------------------------------------------------
 # NoteRepository
 # ---------------------------------------------------------------------------
@@ -133,12 +132,13 @@ def test_get_for_task_source_type_guard_includes_jira(db_session):
 
 async def test_save_note_propagates_source_type_from_task(db_session):
     """save_note copies source_type from the task onto the note."""
-    from unittest.mock import patch, MagicMock
-    from wizard.tools import save_note
-    from wizard.models import Task, Note, NoteType
-    from wizard.repositories import TaskRepository, NoteRepository, TaskStateRepository
-    from wizard.security import SecurityService
+    from unittest.mock import MagicMock, patch
+
     from tests.helpers import MockContext, mock_session
+    from wizard.models import Note, NoteType, Task
+    from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
+    from wizard.security import SecurityService
+    from wizard.tools import save_note
 
     task = Task(name="auth fix", source_id="PD-10", source_type="JIRA")
     db_session.add(task)
@@ -191,6 +191,7 @@ def test_task_get_by_id(db_session):
 
 def test_task_get_by_id_raises_when_missing(db_session):
     import pytest
+
     from wizard.repositories import TaskRepository
     repo = TaskRepository()
     with pytest.raises(ValueError, match="Task 999 not found"):
@@ -198,7 +199,7 @@ def test_task_get_by_id_raises_when_missing(db_session):
 
 
 def test_open_task_contexts_sorted_by_priority(db_session):
-    from wizard.models import Task, TaskStatus, TaskPriority
+    from wizard.models import Task, TaskPriority, TaskStatus
     from wizard.repositories import TaskRepository
     repo = TaskRepository()
     low = Task(name="low", status=TaskStatus.TODO, priority=TaskPriority.LOW)
@@ -227,7 +228,7 @@ def test_blocked_task_contexts(db_session):
 
 
 def test_build_task_context_includes_latest_note(db_session):
-    from wizard.models import Task, TaskStatus, Note, NoteType
+    from wizard.models import Note, NoteType, Task, TaskStatus
     from wizard.repositories import TaskRepository
     repo = TaskRepository()
     task = Task(name="fix auth", status=TaskStatus.TODO)
@@ -264,6 +265,7 @@ def test_meeting_get_by_id(db_session):
 
 def test_meeting_get_by_id_raises_when_missing(db_session):
     import pytest
+
     from wizard.repositories import MeetingRepository
     repo = MeetingRepository()
     with pytest.raises(ValueError, match="Meeting 999 not found"):
@@ -291,7 +293,7 @@ def test_unsummarised_contexts(db_session):
 
 class TestTaskStateRepository:
     def test_create_for_task_initialises_zero_state(self, db_session):
-        from wizard.models import Task, TaskState
+        from wizard.models import Task
         from wizard.repositories import TaskStateRepository
         task = Task(name="t")
         db_session.add(task)
@@ -372,6 +374,7 @@ class TestTaskStateRepository:
 
     def test_on_note_saved_does_not_touch_last_status_change_at(self, db_session):
         import datetime as _dt
+
         from wizard.models import Note, NoteType, Task, TaskState
         from wizard.repositories import TaskStateRepository
         task = Task(name="t")
@@ -419,6 +422,7 @@ class TestTaskStateRepository:
 
     def test_on_status_changed_sets_timestamp_and_preserves_other_fields(self, db_session):
         import datetime as _dt
+
         from wizard.models import Note, NoteType, Task, TaskState
         from wizard.repositories import TaskStateRepository
         task = Task(name="t")
@@ -470,7 +474,7 @@ class TestTaskStateRepository:
 # ---------------------------------------------------------------------------
 
 def test_build_task_context_includes_task_state_fields(db_session):
-    from wizard.models import Task, TaskState, TaskPriority, TaskCategory, TaskStatus
+    from wizard.models import Task, TaskCategory, TaskPriority, TaskState, TaskStatus
     from wizard.repositories import TaskRepository
     repo = TaskRepository()
 
@@ -523,9 +527,18 @@ def test_find_latest_session_with_notes_returns_none_when_sessions_have_no_notes
 
 
 def test_find_latest_session_with_notes_returns_most_recent_session_with_notes(db_session):
-    from wizard.models import WizardSession, Task, Note, NoteType, TaskPriority, TaskCategory, TaskStatus
-    from wizard.repositories import find_latest_session_with_notes
     import datetime
+
+    from wizard.models import (
+        Note,
+        NoteType,
+        Task,
+        TaskCategory,
+        TaskPriority,
+        TaskStatus,
+        WizardSession,
+    )
+    from wizard.repositories import find_latest_session_with_notes
 
     s1 = WizardSession(created_at=datetime.datetime(2026, 4, 1))
     s2 = WizardSession(created_at=datetime.datetime(2026, 4, 5))

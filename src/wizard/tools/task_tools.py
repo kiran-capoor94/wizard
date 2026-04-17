@@ -14,13 +14,6 @@ from ..deps import (
     get_writeback,
 )
 from ..mcp_instance import mcp
-from ..repositories import (
-    NoteRepository,
-    TaskRepository,
-    TaskStateRepository,
-)
-from ..security import SecurityService
-from ..services import WriteBackService
 from ..models import (
     MeetingTasks,
     Note,
@@ -30,6 +23,11 @@ from ..models import (
     TaskPriority,
     TaskState,
     TaskStatus,
+)
+from ..repositories import (
+    NoteRepository,
+    TaskRepository,
+    TaskStateRepository,
 )
 from ..schemas import (
     CreateTaskResponse,
@@ -45,9 +43,10 @@ from ..schemas import (
     UpdateTaskResponse,
     WriteBackStatus,
 )
-
+from ..security import SecurityService
+from ..services import WriteBackService
 from . import _helpers
-from ._helpers import _log_tool_call, _SEVERITY_ORDER
+from ._helpers import _SEVERITY_ORDER, _log_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +108,7 @@ async def save_note(
     n_repo: NoteRepository = Depends(get_note_repo),
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
 ) -> SaveNoteResponse:
-    """Scrubs and persists a note. note_type: investigation|decision|docs|learnings|session_summary."""
+    """Scrub and persist a note. Types: investigation|decision|docs|learnings|session_summary."""
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
         with _helpers.get_session() as db:
@@ -122,8 +121,8 @@ async def save_note(
             ):
                 try:
                     result = await ctx.elicit(
-                        "Optional: summarise what you now understand in 1-2 sentences (mental model). "
-                        "Press Enter to skip.",
+                        "Optional: summarise what you now understand in 1-2 sentences "
+                        "(mental model). Press Enter to skip.",
                         response_type=str,
                     )
                     if isinstance(result, AcceptedElicitation) and result.data:
@@ -155,7 +154,7 @@ async def save_note(
         raise ToolError(str(e)) from e
 
 
-async def update_task(
+async def update_task(  # noqa: C901
     ctx: Context,
     task_id: int,
     status: TaskStatus | None = None,
@@ -209,10 +208,10 @@ async def update_task(
                     due_date_dt = datetime.datetime.fromisoformat(
                         due_date.replace("Z", "+00:00")
                     )
-                except ValueError:
+                except ValueError as exc:
                     raise ToolError(
                         f"Invalid due_date format: {due_date}. Use ISO 8601."
-                    )
+                    ) from exc
                 task.due_date = due_date_dt
                 updated_fields.append("due_date")
 
@@ -241,7 +240,8 @@ async def update_task(
             if status == TaskStatus.DONE and task.notion_id:
                 try:
                     result = await ctx.elicit(
-                        "Task closed. What was the outcome? (1-2 sentences, or press Enter to skip)",
+                        "Task closed. What was the outcome? "
+                        "(1-2 sentences, or press Enter to skip)",
                         response_type=str,
                     )
                     if isinstance(result, AcceptedElicitation) and result.data:
@@ -352,7 +352,7 @@ async def rewind_task(
         notes_desc = n_repo.get_for_task(
             db, task_id=task.id, source_id=task.source_id
         )
-        # Filter persisted notes only (id is None only for unpersisted models; DB rows always have id)
+        # Filter persisted notes only (id is None for unpersisted models; DB rows always have id)
         notes_asc = [n for n in reversed(notes_desc) if n.id is not None]
 
         timeline = [
@@ -396,7 +396,7 @@ async def what_am_i_missing(
         session_id: int | None = await ctx.get_state("current_session_id")
         await _log_tool_call(db, "what_am_i_missing", session_id=session_id)
         try:
-            task = t_repo.get_by_id(db, task_id)
+            t_repo.get_by_id(db, task_id)
         except ValueError as e:
             raise ToolError(str(e)) from e
         task_state = db.get(TaskState, task_id)

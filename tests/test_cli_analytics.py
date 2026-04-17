@@ -13,8 +13,8 @@ def test_query_sessions_empty_period(db_session):
 
 def test_query_sessions_counts_tool_calls(db_session):
     import datetime as dt
-    from wizard.cli.analytics import query_sessions
 
+    from wizard.cli.analytics import query_sessions
     from wizard.models import ToolCall
     now = dt.datetime(2026, 1, 3, 10, 0, 0)
     db_session.add(ToolCall(tool_name="session_start", called_at=now, session_id=1))
@@ -30,8 +30,9 @@ def test_query_sessions_counts_tool_calls(db_session):
 
 
 def test_query_notes_empty(db_session):
-    from wizard.cli.analytics import query_notes
     import datetime
+
+    from wizard.cli.analytics import query_notes
     result = query_notes(db_session, datetime.date(2026, 1, 1), datetime.date(2026, 1, 7))
     assert result["total"] == 0
     assert result["by_type"] == {}
@@ -40,9 +41,9 @@ def test_query_notes_empty(db_session):
 
 def test_query_notes_counts_by_type(db_session):
     import datetime as dt
-    from wizard.cli.analytics import query_notes
 
-    from wizard.models import Note, NoteType, Task, TaskStatus, TaskPriority, TaskCategory
+    from wizard.cli.analytics import query_notes
+    from wizard.models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskStatus
     task = Task(
         name="T1",
         status=TaskStatus.TODO,
@@ -77,6 +78,7 @@ def test_query_notes_counts_by_type(db_session):
 
 def test_query_tasks_empty(db_session):
     import datetime
+
     from wizard.cli.analytics import query_tasks
     result = query_tasks(db_session, datetime.date(2026, 1, 1), datetime.date(2026, 1, 7))
     assert result["worked"] == 0
@@ -86,6 +88,7 @@ def test_query_tasks_empty(db_session):
 
 def test_query_compounding_no_calls(db_session):
     import datetime
+
     from wizard.cli.analytics import query_compounding
     result = query_compounding(db_session, datetime.date(2026, 1, 1), datetime.date(2026, 1, 7))
     assert result == 0.0
@@ -94,8 +97,9 @@ def test_query_compounding_no_calls(db_session):
 def test_query_compounding_no_prior_notes_returns_zero(db_session):
     """task_start exists in window and notes exist, but all notes are from this window."""
     import datetime as dt
+
     from wizard.cli.analytics import query_compounding
-    from wizard.models import Note, NoteType, Task, TaskStatus, TaskCategory, TaskPriority, ToolCall
+    from wizard.models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskStatus, ToolCall
 
     task = Task(name="T", status=TaskStatus.TODO, priority=TaskPriority.MEDIUM, category=TaskCategory.ISSUE)
     db_session.add(task)
@@ -120,8 +124,9 @@ def test_query_compounding_no_prior_notes_returns_zero(db_session):
 def test_query_compounding_prior_session_notes_returns_nonzero(db_session):
     """Notes from before the window's first session indicate prior-session context."""
     import datetime as dt
+
     from wizard.cli.analytics import query_compounding
-    from wizard.models import Note, NoteType, Task, TaskStatus, TaskCategory, TaskPriority, ToolCall
+    from wizard.models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskStatus, ToolCall
 
     task = Task(name="T", status=TaskStatus.TODO, priority=TaskPriority.MEDIUM, category=TaskCategory.ISSUE)
     db_session.add(task)
@@ -145,6 +150,7 @@ def test_query_compounding_prior_session_notes_returns_nonzero(db_session):
 def test_query_tasks_ignores_session_summary_notes(db_session):
     """Notes with task_id=None must not inflate 'tasks worked'."""
     import datetime as dt
+
     from wizard.cli.analytics import query_tasks
     from wizard.models import Note, NoteType
 
@@ -164,8 +170,9 @@ def test_query_tasks_ignores_session_summary_notes(db_session):
 def test_query_tasks_counts_only_task_notes(db_session):
     """task notes and non-task notes coexist — only task notes are counted."""
     import datetime as dt
+
     from wizard.cli.analytics import query_tasks
-    from wizard.models import Note, NoteType, Task, TaskStatus, TaskCategory, TaskPriority
+    from wizard.models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskStatus
 
     task = Task(name="T", status=TaskStatus.TODO, priority=TaskPriority.MEDIUM, category=TaskCategory.ISSUE)
     db_session.add(task)
@@ -189,6 +196,7 @@ def test_query_tasks_counts_only_task_notes(db_session):
 
 def test_format_table_renders_sections(db_session):
     import datetime
+
     from wizard.cli.analytics import format_table
     data = {
         "sessions": {"session_count": 3, "avg_duration_minutes": 42.5, "total_tool_calls": 27},
@@ -222,6 +230,7 @@ def test_analytics_cli_week_option(tmp_path, monkeypatch):
         mock_analytics.query_compounding.return_value = 0.0
         mock_analytics.format_table.return_value = "table output"
         from typer.testing import CliRunner
+
         from wizard.cli.main import app
         runner = CliRunner()
         result = runner.invoke(app, ["analytics", "--week"])
@@ -245,6 +254,7 @@ def test_analytics_cli_from_to_range(tmp_path, monkeypatch):
         mock_analytics.query_compounding.return_value = 0.0
         mock_analytics.format_table.return_value = "table output"
         from typer.testing import CliRunner
+
         from wizard.cli.main import app
         runner = CliRunner()
         result = runner.invoke(app, ["analytics", "--from", "2026-01-01", "--to", "2026-01-07"])

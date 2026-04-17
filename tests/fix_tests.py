@@ -1,5 +1,5 @@
-import re
 import ast
+import re
 
 with open("tests/test_tools.py") as f:
     content = f.read()

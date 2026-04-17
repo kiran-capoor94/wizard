@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import logging
 from collections.abc import Callable
@@ -99,10 +100,8 @@ class SyncService:
             due_date = None
             raw_due = raw.due_date
             if raw_due:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     due_date = datetime.datetime.fromisoformat(raw_due)
-                except (ValueError, TypeError):
-                    pass
 
             if existing:
                 # Upsert rule: same as Jira sync — external wins on name/priority/due_date,
@@ -193,7 +192,9 @@ class SyncService:
 
 
 class WriteBackService:
-    def __init__(self, jira: JiraClient, notion: NotionClient, security: SecurityService | None = None):
+    def __init__(
+        self, jira: JiraClient, notion: NotionClient, security: SecurityService | None = None,
+    ):
         self._jira = jira
         self._notion = notion
         self._security = security or SecurityService()
