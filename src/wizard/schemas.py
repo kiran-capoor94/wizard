@@ -177,6 +177,7 @@ class SourceSyncStatus(BaseModel):
     source: str
     ok: bool
     error: str | None = None
+    skipped: bool = False
 
 
 class WriteBackStatus(BaseModel):
