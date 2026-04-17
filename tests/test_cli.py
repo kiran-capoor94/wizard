@@ -1176,48 +1176,35 @@ def test_resolve_notion_page_id_raises_on_invalid_url():
 # --- _resolve_ds_id tests ---
 
 
-def test_resolve_ds_id_returns_first_source_id():
+def test_resolve_ds_id_returns_page_id_on_success():
     from unittest.mock import MagicMock
     from wizard.cli.main import _resolve_ds_id
     client = MagicMock()
-    client.databases.retrieve.return_value = {
-        "data_sources": [{"id": "ds-abc123"}, {"id": "ds-def456"}]
-    }
-    result = _resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")
-    assert result == "ds-abc123"
-    client.databases.retrieve.assert_called_once_with(
-        database_id="abc123de-f456-7890-1234-5678901234ab"
-    )
+    page_id = "abc123de-f456-7890-1234-5678901234ab"
+    result = _resolve_ds_id(client, page_id)
+    assert result == page_id
+    client.data_sources.retrieve.assert_called_once_with(data_source_id=page_id)
 
 
-def test_resolve_ds_id_raises_when_no_sources():
+def test_resolve_ds_id_raises_on_api_error():
     from unittest.mock import MagicMock
     from wizard.cli.main import _resolve_ds_id
     client = MagicMock()
-    client.databases.retrieve.return_value = {"data_sources": []}
-    with pytest.raises(ValueError, match="No data sources"):
+    client.data_sources.retrieve.side_effect = Exception("API error: 404 not found")
+    with pytest.raises(Exception, match="404"):
         _resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")
 
 
-def test_resolve_ds_id_raises_when_key_missing():
-    from unittest.mock import MagicMock
-    from wizard.cli.main import _resolve_ds_id
-    client = MagicMock()
-    client.databases.retrieve.return_value = {}
-    with pytest.raises(ValueError, match="No data sources"):
-        _resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")
-
-
-def test_setup_notion_retries_on_invalid_url(tmp_path):
-    """If the first URL fails resolution, setup re-prompts until a valid URL is given."""
+def test_setup_notion_retries_on_api_error(tmp_path):
+    """If data_sources.retrieve fails (bad token, 404, network), setup re-prompts."""
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
              patch("wizard.cli.main._run_notion_discovery"), \
              patch("wizard.cli.main.NotionSdkClient"), \
              patch("wizard.cli.main._resolve_ds_id", side_effect=[
-                 ValueError("No data sources found"),  # first tasks attempt fails
-                 "tasks-ds-id",                         # second tasks attempt succeeds
+                 Exception("APIResponseError: 404"),  # first tasks attempt fails
+                 "tasks-ds-id",                        # second tasks attempt succeeds
                  "meetings-ds-id",
              ]):
             mock_ar.read_registered_agents.return_value = []
@@ -1225,7 +1212,31 @@ def test_setup_notion_retries_on_invalid_url(tmp_path):
                 ctx.app, ["setup", "--agent", "claude-code"],
                 input=(
                     "1\nmy-token\n\n"
-                    "https://notion.so/workspace/Bad-abc123def456789012345678901234ab\n"
+                    "https://notion.so/workspace/Tasks-abc123def456789012345678901234ab\n"
+                    "https://notion.so/workspace/Tasks-abc123def456789012345678901234ab\n"
+                    "https://notion.so/workspace/Meetings-def456789012345678901234abcdef01\n"
+                ),
+            )
+    assert result.exit_code == 0
+    cfg = json.loads((wizard_dir / "config.json").read_text())
+    assert cfg["notion"]["tasks_ds_id"] == "tasks-ds-id"
+    assert "failed" in result.output.lower()
+
+
+def test_setup_notion_retries_on_unparseable_url(tmp_path):
+    """If URL contains no 32-char hex ID, setup re-prompts without calling the API."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery"), \
+             patch("wizard.cli.main.NotionSdkClient"), \
+             patch("wizard.cli.main._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input=(
+                    "1\nmy-token\n\n"
+                    "https://notion.so/workspace/no-id-here\n"
                     "https://notion.so/workspace/Tasks-abc123def456789012345678901234ab\n"
                     "https://notion.so/workspace/Meetings-def456789012345678901234abcdef01\n"
                 ),
