@@ -12,7 +12,7 @@ from notion_client import Client as NotionSdkClient
 
 from wizard import agent_registration, notion_discovery
 from wizard.cli import analytics as analytics_module
-from wizard.cli.doctor import doctor
+from wizard.cli.doctor import _db_is_healthy, doctor
 from wizard.database import get_session as get_db_session
 
 logger = logging.getLogger(__name__)
@@ -200,6 +200,21 @@ def setup(
 
     _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")
+
+    _wizard_db_env = os.environ.get("WIZARD_DB")
+    db_path = Path(_wizard_db_env) if _wizard_db_env else (WIZARD_HOME / "wizard.db")
+    if not _db_is_healthy(db_path):
+        typer.echo("Initialising database...")
+        repo_root = Path(__file__).resolve().parents[3]
+        alembic_args = (
+            ["uv", "run", "alembic", "upgrade", "head"]
+            if shutil.which("uv")
+            else [sys.executable, "-m", "alembic", "upgrade", "head"]
+        )
+        ok, output = _run_update_step("run migrations", alembic_args, repo_root)
+        if not ok:
+            typer.echo(output, err=True)
+            raise typer.Exit(1)
 
     if agent is None:
         typer.echo("Which agent would you like to register?")

@@ -837,3 +837,51 @@ def test_db_is_healthy_returns_true_when_all_tables_present(tmp_path):
     conn.commit()
     conn.close()
     assert _db_is_healthy(db) is True
+
+
+def test_setup_runs_migrations_when_db_missing(tmp_path):
+    """setup() should call alembic upgrade head when DB is absent."""
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._db_is_healthy", return_value=False), \
+             patch("wizard.cli.main._run_update_step", return_value=(True, "")) as mock_step:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+
+    assert result.exit_code == 0
+    calls = [call for call in mock_step.call_args_list
+              if "alembic" in str(call)]
+    assert len(calls) == 1
+
+
+def test_setup_skips_migrations_when_db_healthy(tmp_path):
+    """setup() should NOT call alembic upgrade head when DB already has all tables."""
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._db_is_healthy", return_value=True), \
+             patch("wizard.cli.main._run_update_step", return_value=(True, "")) as mock_step:
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+
+    assert result.exit_code == 0
+    alembic_calls = [call for call in mock_step.call_args_list
+                     if "alembic" in str(call)]
+    assert len(alembic_calls) == 0
+
+
+def test_setup_exits_nonzero_when_migrations_fail(tmp_path):
+    """setup() should exit with code 1 when alembic upgrade head fails."""
+    wizard_dir = tmp_path / ".wizard"
+
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._db_is_healthy", return_value=False), \
+             patch("wizard.cli.main._run_update_step", return_value=(False, "alembic error output")):
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="\n")
+
+    assert result.exit_code != 0
