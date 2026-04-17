@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -1130,3 +1131,65 @@ def test_configure_notion_prints_arrow_format(tmp_path):
     assert "→" in result.output
     assert "task_name" in result.output
     assert "Schema saved" in result.output
+
+
+# --- _resolve_notion_page_id tests ---
+
+
+def test_resolve_notion_page_id_extracts_from_workspace_url():
+    from wizard.cli.main import _resolve_notion_page_id
+    url = "https://www.notion.so/workspace/My-Tasks-abc123def456789012345678901234ab"
+    assert _resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
+
+
+def test_resolve_notion_page_id_extracts_from_short_url():
+    from wizard.cli.main import _resolve_notion_page_id
+    url = "https://www.notion.so/abc123def456789012345678901234ab"
+    assert _resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
+
+
+def test_resolve_notion_page_id_strips_query_params():
+    from wizard.cli.main import _resolve_notion_page_id
+    url = "https://www.notion.so/My-Tasks-abc123def456789012345678901234ab?v=xyz&p=foo"
+    assert _resolve_notion_page_id(url) == "abc123de-f456-7890-1234-5678901234ab"
+
+
+def test_resolve_notion_page_id_raises_on_invalid_url():
+    from wizard.cli.main import _resolve_notion_page_id
+    with pytest.raises(ValueError, match="Could not extract"):
+        _resolve_notion_page_id("https://notion.so/workspace/no-id-here")
+
+
+# --- _resolve_ds_id tests ---
+
+
+def test_resolve_ds_id_returns_first_source_id():
+    from unittest.mock import MagicMock
+    from wizard.cli.main import _resolve_ds_id
+    client = MagicMock()
+    client.databases.retrieve.return_value = {
+        "data_sources": [{"id": "ds-abc123"}, {"id": "ds-def456"}]
+    }
+    result = _resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")
+    assert result == "ds-abc123"
+    client.databases.retrieve.assert_called_once_with(
+        database_id="abc123de-f456-7890-1234-5678901234ab"
+    )
+
+
+def test_resolve_ds_id_raises_when_no_sources():
+    from unittest.mock import MagicMock
+    from wizard.cli.main import _resolve_ds_id
+    client = MagicMock()
+    client.databases.retrieve.return_value = {"data_sources": []}
+    with pytest.raises(ValueError, match="No data sources"):
+        _resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")
+
+
+def test_resolve_ds_id_raises_when_key_missing():
+    from unittest.mock import MagicMock
+    from wizard.cli.main import _resolve_ds_id
+    client = MagicMock()
+    client.databases.retrieve.return_value = {}
+    with pytest.raises(ValueError, match="No data sources"):
+        _resolve_ds_id(client, "abc123de-f456-7890-1234-5678901234ab")

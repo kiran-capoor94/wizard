@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -162,6 +163,36 @@ def _run_notion_discovery(config_path: Path) -> None:
     for k, v in schema.items():
         typer.echo(f"    {k:<20} → {v}")
     typer.echo("  Schema saved.")
+
+
+def _resolve_notion_page_id(url: str) -> str:
+    """Extract 32-char hex page ID from a Notion URL and format as UUID.
+
+    Handles:
+      https://www.notion.so/workspace/My-Tasks-abc123def456789012345678901234ab
+      https://www.notion.so/abc123def456789012345678901234ab
+      https://www.notion.so/My-Tasks-abc123def456789012345678901234ab?v=...
+    """
+    path = url.split("?")[0]
+    matches = re.findall(r"[0-9a-f]{32}", path.lower())
+    if not matches:
+        raise ValueError(f"Could not extract page ID from URL: {url}")
+    raw = matches[-1]
+    return f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
+
+
+def _resolve_ds_id(client, page_id: str) -> str:
+    """Return the data source ID for the given Notion database page ID.
+
+    Uses databases.retrieve() specifically to access the data_sources field —
+    not for schema access (which would violate the project rule against using
+    databases.retrieve for properties).
+    """
+    response = client.databases.retrieve(database_id=page_id)
+    sources = response.get("data_sources", [])
+    if not sources:
+        raise ValueError("No data sources found for this database")
+    return sources[0]["id"]
 
 
 def _notion_is_configured(cfg: dict) -> bool:
