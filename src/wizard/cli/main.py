@@ -182,17 +182,14 @@ def _resolve_notion_page_id(url: str) -> str:
 
 
 def _resolve_ds_id(client, page_id: str) -> str:
-    """Return the data source ID for the given Notion database page ID.
+    """Validate page_id as a Notion data source and return it.
 
-    Uses databases.retrieve() specifically to access the data_sources field —
-    not for schema access (which would violate the project rule against using
-    databases.retrieve for properties).
+    In notion-client v3.0, the page ID from the URL is the data source ID.
+    Calls data_sources.retrieve() to confirm the ID is valid before saving.
+    Raises on invalid ID or API error (bad token, network, etc.).
     """
-    response = client.databases.retrieve(database_id=page_id)
-    sources = response.get("data_sources", [])
-    if not sources:
-        raise ValueError("No data sources found for this database")
-    return sources[0]["id"]
+    client.data_sources.retrieve(data_source_id=page_id)
+    return page_id
 
 
 def _notion_is_configured(cfg: dict) -> bool:
@@ -222,6 +219,10 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
         tasks_url = typer.prompt("  Tasks database URL")
         try:
             pid = _resolve_notion_page_id(tasks_url)
+        except ValueError as exc:
+            typer.echo(f"  failed: {exc}")
+            continue
+        try:
             typer.echo("  → Resolving...", nl=False)
             tasks_ds_id = _resolve_ds_id(client, pid)
             typer.echo("  ok")
@@ -229,12 +230,16 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
             typer.echo("  tasks database: set")
             break
         except Exception as exc:
-            typer.echo(f"  failed: {exc}. Paste the database URL from Notion.")
+            typer.echo(f"\n  failed: {exc}")
 
     while True:
         meetings_url = typer.prompt("  Meetings database URL")
         try:
             pid = _resolve_notion_page_id(meetings_url)
+        except ValueError as exc:
+            typer.echo(f"  failed: {exc}")
+            continue
+        try:
             typer.echo("  → Resolving...", nl=False)
             meetings_ds_id = _resolve_ds_id(client, pid)
             typer.echo("  ok")
@@ -242,7 +247,7 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
             typer.echo("  meetings database: set")
             break
         except Exception as exc:
-            typer.echo(f"  failed: {exc}. Paste the database URL from Notion.")
+            typer.echo(f"\n  failed: {exc}")
 
     with open(config_path, "w") as f:
         json.dump(cfg, f, indent=2)
