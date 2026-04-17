@@ -30,7 +30,7 @@ async def test_rewind_task_empty_timeline(db_session):
     task_state_repo().create_for_task(db_session, task)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository
         result = await rewind_task(ctx, task_id=task.id, n_repo=NoteRepository())
 
@@ -77,7 +77,7 @@ async def test_what_am_i_missing_stale_2_days_fires_lost_context_not_stale(db_se
     db_session.commit()
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository
         result = await what_am_i_missing(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 
@@ -124,7 +124,7 @@ async def test_what_am_i_missing_stale_3_days_fires_stale_not_lost_context(db_se
     db_session.commit()
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.task_tools", **_patch_tools(db_session)):
         from wizard.repositories import NoteRepository, TaskRepository
         result = await what_am_i_missing(ctx, task_id=task.id, t_repo=TaskRepository(), n_repo=NoteRepository())
 

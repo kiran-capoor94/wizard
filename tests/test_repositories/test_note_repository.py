@@ -154,7 +154,7 @@ async def test_save_note_propagates_source_type_from_task(db_session):
     patches = {
         "get_session": mock_session(db_session),
     }
-    with patch.multiple("wizard.tools._helpers", **patches):  # type: ignore[arg-type]
+    with patch.multiple("wizard.tools.task_tools", **patches):  # type: ignore[arg-type]
         result = await save_note(
             ctx,
             task_id=task.id,

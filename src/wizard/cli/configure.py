@@ -11,7 +11,7 @@ from wizard import notion_discovery
 from wizard.integrations import ConfigurationError
 
 
-def _run_notion_discovery(config_path: Path) -> None:
+def run_notion_discovery(config_path: Path) -> None:
     if not config_path.exists():
         typer.echo("Config not found. Run 'wizard setup' first.", err=True)
         raise typer.Exit(1)
@@ -76,7 +76,7 @@ def _run_notion_discovery(config_path: Path) -> None:
     typer.echo("  Schema saved.")
 
 
-def _resolve_notion_page_id(url: str) -> str:
+def resolve_notion_page_id(url: str) -> str:
     """Extract 32-char hex page ID from a Notion URL and format as UUID.
 
     Handles:
@@ -95,7 +95,7 @@ def _resolve_notion_page_id(url: str) -> str:
     return f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
 
 
-def _resolve_ds_id(client, page_id: str) -> str:
+def resolve_ds_id(client, page_id: str) -> str:
     """Confirm page_id is a valid data source ID and return it unchanged.
 
     In notion-client v3.0, the 32-char page ID extracted from a Notion database
@@ -107,17 +107,17 @@ def _resolve_ds_id(client, page_id: str) -> str:
     return page_id
 
 
-def _notion_is_configured(cfg: dict) -> bool:
+def notion_is_configured(cfg: dict) -> bool:
     n = cfg.get("notion", {})
     return bool(n.get("token") and n.get("tasks_ds_id") and n.get("meetings_ds_id"))
 
 
-def _jira_is_configured(cfg: dict) -> bool:
+def jira_is_configured(cfg: dict) -> bool:
     j = cfg.get("jira", {})
     return bool(j.get("token") and j.get("base_url") and j.get("project_key") and j.get("email"))
 
 
-def _configure_notion(cfg: dict, config_path: Path) -> None:
+def configure_notion(cfg: dict, config_path: Path) -> None:
     """Prompt for all Notion credentials, save to config, run schema discovery."""
     typer.echo("\nNotion integration")
     token = typer.prompt(
@@ -135,13 +135,13 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
     while True:
         tasks_url = typer.prompt("  Tasks database URL")
         try:
-            pid = _resolve_notion_page_id(tasks_url)
+            pid = resolve_notion_page_id(tasks_url)
         except ValueError as exc:
             typer.echo(f"  failed: {exc}")
             continue
         try:
             typer.echo("  → Resolving...", nl=False)
-            tasks_ds_id = _resolve_ds_id(client, pid)
+            tasks_ds_id = resolve_ds_id(client, pid)
             typer.echo("  ok")
             cfg["notion"]["tasks_ds_id"] = tasks_ds_id
             typer.echo("  tasks database: set")
@@ -152,13 +152,13 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
     while True:
         meetings_url = typer.prompt("  Meetings database URL")
         try:
-            pid = _resolve_notion_page_id(meetings_url)
+            pid = resolve_notion_page_id(meetings_url)
         except ValueError as exc:
             typer.echo(f"  failed: {exc}")
             continue
         try:
             typer.echo("  → Resolving...", nl=False)
-            meetings_ds_id = _resolve_ds_id(client, pid)
+            meetings_ds_id = resolve_ds_id(client, pid)
             typer.echo("  ok")
             cfg["notion"]["meetings_ds_id"] = meetings_ds_id
             typer.echo("  meetings database: set")
@@ -169,10 +169,10 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
     with open(config_path, "w") as f:
         json.dump(cfg, f, indent=2)
 
-    _run_notion_discovery(config_path)
+    run_notion_discovery(config_path)
 
 
-def _configure_jira(cfg: dict, config_path: Path) -> None:
+def configure_jira(cfg: dict, config_path: Path) -> None:
     """Prompt for all Jira credentials and save to config."""
     # Re-read to pick up any changes written by prior steps (e.g. notion_schema from discovery)
     if config_path.exists():
@@ -201,10 +201,10 @@ def _configure_jira(cfg: dict, config_path: Path) -> None:
         json.dump(cfg, f, indent=2)
 
 
-def _run_jira_configure(config_path: Path) -> None:
+def run_jira_configure(config_path: Path) -> None:
     if not config_path.exists():
         typer.echo("Config not found. Run 'wizard setup' first.", err=True)
         raise typer.Exit(1)
     with open(config_path) as f:
         cfg = json.load(f)
-    _configure_jira(cfg, config_path)
+    configure_jira(cfg, config_path)

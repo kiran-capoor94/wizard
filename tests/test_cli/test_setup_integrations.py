@@ -33,9 +33,9 @@ def test_setup_notion_collects_token_and_ids(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery"), \
+             patch("wizard.cli.configure.run_notion_discovery"), \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
@@ -54,9 +54,9 @@ def test_setup_notion_runs_discovery(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery") as mock_disc, \
+             patch("wizard.cli.configure.run_notion_discovery") as mock_disc, \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
@@ -70,9 +70,9 @@ def test_setup_notion_optional_daily_page_id_can_be_skipped(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery"), \
+             patch("wizard.cli.configure.run_notion_discovery"), \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
@@ -105,9 +105,9 @@ def test_setup_both_configures_notion_and_jira(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery"), \
+             patch("wizard.cli.configure.run_notion_discovery"), \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
@@ -137,7 +137,7 @@ def test_setup_skips_notion_when_already_configured(tmp_path):
 
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery") as mock_disc:
+             patch("wizard.cli.configure.run_notion_discovery") as mock_disc:
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="1\n")
 
@@ -178,9 +178,9 @@ def test_setup_final_summary_shows_configured_integrations(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery"), \
+             patch("wizard.cli.configure.run_notion_discovery"), \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
@@ -206,9 +206,9 @@ def test_setup_both_does_not_clobber_notion_schema(tmp_path):
 
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery", side_effect=fake_discovery), \
+             patch("wizard.cli.configure.run_notion_discovery", side_effect=fake_discovery), \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
@@ -226,9 +226,9 @@ def test_setup_notion_configuration_error_exits_cleanly(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery", side_effect=ConfigurationError("task_name required")), \
+             patch("wizard.cli.configure.run_notion_discovery", side_effect=ConfigurationError("task_name required")), \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],
@@ -243,9 +243,9 @@ def test_setup_notion_retries_on_api_error(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery"), \
+             patch("wizard.cli.configure.run_notion_discovery"), \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=[
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=[
                  httpx.HTTPError("404 Not Found"),  # first tasks attempt fails
                  "tasks-ds-id",                        # second tasks attempt succeeds
                  "meetings-ds-id",
@@ -271,9 +271,9 @@ def test_setup_notion_retries_on_unparseable_url(tmp_path):
     wizard_dir = tmp_path / ".wizard"
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.configure._run_notion_discovery"), \
+             patch("wizard.cli.configure.run_notion_discovery"), \
              patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure._resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
+             patch("wizard.cli.configure.resolve_ds_id", side_effect=["tasks-ds-id", "meetings-ds-id"]):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(
                 ctx.app, ["setup", "--agent", "claude-code"],

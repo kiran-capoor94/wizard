@@ -6,6 +6,7 @@ from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
 
+from ..database import get_session
 from ..deps import (
     get_note_repo,
     get_security,
@@ -45,8 +46,8 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import WriteBackService
-from . import _helpers
-from ._helpers import _SEVERITY_ORDER
+
+SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def task_start(
     """
     logger.info("task_start task_id=%d", task_id)
     try:
-        with _helpers.get_session() as db:
+        with get_session() as db:
             task = t_repo.get_by_id(db, task_id)
             task_ctx = t_repo.get_task_context(db, task)
 
@@ -109,7 +110,7 @@ async def save_note(
     """Scrub and persist a note. Types: investigation|decision|docs|learnings|session_summary."""
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
-        with _helpers.get_session() as db:
+        with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             task = t_repo.get_by_id(db, task_id)
             if (
@@ -250,7 +251,7 @@ async def update_task(
         raise ToolError("At least one field must be provided to update_task")
 
     try:
-        with _helpers.get_session() as db:
+        with get_session() as db:
             task = t_repo.get_by_id(db, task_id)
 
             updated_fields = _apply_task_fields(
@@ -318,7 +319,7 @@ async def create_task(
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
-    with _helpers.get_session() as db:
+    with get_session() as db:
         clean_name = sec.scrub(name).clean
         task = Task(
             name=clean_name,
@@ -357,7 +358,7 @@ async def rewind_task(
 ) -> RewindResponse:
     """Reconstruct the full note timeline for a task, oldest first."""
     logger.info("rewind_task task_id=%d", task_id)
-    with _helpers.get_session() as db:
+    with get_session() as db:
         task = db.get(Task, task_id)
         if task is None:
             raise ToolError(f"Task {task_id} not found")
@@ -409,7 +410,7 @@ async def what_am_i_missing(
 ) -> MissingResponse:
     """Surface cognitive gaps for a task using seven diagnostic rules."""
     logger.info("what_am_i_missing task_id=%d", task_id)
-    with _helpers.get_session() as db:
+    with get_session() as db:
         try:
             t_repo.get_by_id(db, task_id)
         except ValueError as e:
@@ -466,7 +467,7 @@ async def what_am_i_missing(
                 message="No mental model captured — understanding may be shallow",
             ))
 
-        signals.sort(key=lambda s: _SEVERITY_ORDER[s.severity])
+        signals.sort(key=lambda s: SEVERITY_ORDER[s.severity])
         return MissingResponse(signals=signals)
 
 
