@@ -57,7 +57,7 @@ async def get_meeting(
                 raise ToolError("Internal error: meeting was not assigned an id after flush")
 
             linked_tasks = [
-                t_repo.build_task_context(db, t)
+                t_repo.get_task_context(db, t)
                 for t in meeting.tasks
                 if t.status
                 in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)

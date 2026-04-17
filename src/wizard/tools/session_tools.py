@@ -43,7 +43,6 @@ from ..schemas import (
     SessionEndResponse,
     SessionStartResponse,
     SessionState,
-    SourceSyncStatus,
     TaskContext,
 )
 from ..security import SecurityService
@@ -87,23 +86,8 @@ async def session_start(
     with _helpers.get_session() as db:
         session, daily_page = _init_session(db, notion)
 
-        sync_results: list[SourceSyncStatus] = []
-        sync_steps = [
-            ("jira", sync_svc.sync_jira, "Syncing Jira..."),
-            ("notion_tasks", sync_svc.sync_notion_tasks, "Syncing Notion tasks..."),
-            ("notion_meetings", sync_svc.sync_notion_meetings, "Syncing Notion meetings..."),
-        ]
-        for i, (source, fn, label) in enumerate(sync_steps):
-            await ctx.report_progress(i, 3, label)
-            try:
-                fn(db)
-                sync_results.append(SourceSyncStatus(source=source, ok=True))
-            except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
-                logger.warning("Sync failed for %s: %s", source, e)
-                sync_results.append(
-                    SourceSyncStatus(source=source, ok=False, error=str(e))
-                )
-        await ctx.report_progress(3, 3, "Sync complete.")
+        sync_results = sync_svc.sync_all(db)
+        await ctx.report_progress(1, 1, "Sync complete.")
 
         await ctx.set_state("current_session_id", session.id)
         await ctx.info(f"Session {session.id} started.")
@@ -240,10 +224,24 @@ def _group_prior_notes(db: Session, session_id: int) -> list[ResumedTaskNotes]:
         if n.task_id is not None:
             by_task.setdefault(n.task_id, []).append(n)
 
+    task_ids = list(by_task.keys())
+    tasks_map: dict[int, Task] = {}
+    states_map: dict[int, TaskState] = {}
+    if task_ids:
+        for t in db.execute(
+            select(Task).where(col(Task.id).in_(task_ids))
+        ).scalars().all():
+            if t.id is not None:
+                tasks_map[t.id] = t
+        for ts in db.execute(
+            select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+        ).scalars().all():
+            states_map[ts.task_id] = ts
+
     result: list[ResumedTaskNotes] = []
     for tid, notes in by_task.items():
-        t = db.get(Task, tid)
-        ts = db.get(TaskState, tid)
+        t = tasks_map.get(tid)
+        ts = states_map.get(tid)
         if t is not None:
             latest_mm = next(
                 (
