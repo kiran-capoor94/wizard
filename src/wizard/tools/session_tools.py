@@ -51,9 +51,7 @@ from ..skills import load_skill
 logger = logging.getLogger(__name__)
 
 
-def _init_session(
-    db: Session, notion: NotionClient
-) -> "tuple[WizardSession, object]":
+def _init_session(db: Session, notion: NotionClient) -> "tuple[WizardSession, object]":
     """Create a new WizardSession and attach the daily page if available."""
     session = WizardSession()
     db.add(session)
@@ -217,20 +215,14 @@ def _group_prior_notes(
 
     # Build a TaskContext lookup for all referenced tasks
     task_ids = list(by_task.keys())
-    task_contexts = {
-        tc.id: tc for tc in t_repo.get_task_contexts_by_ids(db, task_ids)
-    }
+    task_contexts = {tc.id: tc for tc in t_repo.get_task_contexts_by_ids(db, task_ids)}
 
     result: list[ResumedTaskNotes] = []
     for tid, notes in by_task.items():
         tc = task_contexts.get(tid)
         if tc is not None:
             latest_mm = next(
-                (
-                    n.mental_model
-                    for n in reversed(notes)
-                    if n.mental_model is not None
-                ),
+                (n.mental_model for n in reversed(notes) if n.mental_model is not None),
                 None,
             )
             result.append(

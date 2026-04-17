@@ -211,9 +211,7 @@ class TaskContext(BaseModel):
         latest_note: Note | None = None,
     ) -> "TaskContext":
         if task.id is None:
-            raise ValueError(
-                "Cannot build TaskContext from an unpersisted Task (id is None)"
-            )
+            raise ValueError("Cannot build TaskContext from an unpersisted Task (id is None)")
         return cls(
             id=task.id,
             name=task.name,
@@ -274,9 +272,7 @@ class NoteDetail(BaseModel):
     @classmethod
     def from_model(cls, note) -> "NoteDetail":
         if note.id is None:
-            raise ValueError(
-                "Cannot build NoteDetail from an unpersisted Note (id is None)"
-            )
+            raise ValueError("Cannot build NoteDetail from an unpersisted Note (id is None)")
         return cls(
             id=note.id,
             note_type=note.note_type,
