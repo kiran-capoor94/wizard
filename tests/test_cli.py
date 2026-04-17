@@ -809,3 +809,31 @@ def test_check_notion_schema_uses_schema_meeting_category_field(tmp_path, monkey
         ok, msg = _check_notion_schema()
 
     assert ok is True, f"Expected pass but got: {msg}"
+
+
+def test_db_is_healthy_returns_false_when_file_missing(tmp_path):
+    from wizard.cli.doctor import _db_is_healthy
+    assert _db_is_healthy(tmp_path / "no_such.db") is False
+
+
+def test_db_is_healthy_returns_false_when_tables_missing(tmp_path):
+    import sqlite3
+    from wizard.cli.doctor import _db_is_healthy
+    db = tmp_path / "wizard.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE task (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+    assert _db_is_healthy(db) is False
+
+
+def test_db_is_healthy_returns_true_when_all_tables_present(tmp_path):
+    import sqlite3
+    from wizard.cli.doctor import _db_is_healthy
+    db = tmp_path / "wizard.db"
+    conn = sqlite3.connect(str(db))
+    for t in ["task", "note", "meeting", "wizardsession", "toolcall", "task_state"]:
+        conn.execute(f"CREATE TABLE {t} (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+    assert _db_is_healthy(db) is True

@@ -2,6 +2,26 @@ from pathlib import Path
 
 import typer
 
+REQUIRED_TABLES = {"task", "note", "meeting", "wizardsession", "toolcall", "task_state"}
+
+
+def _db_is_healthy(db_path: Path) -> bool:
+    """Return True if db_path exists and contains all required tables."""
+    if not db_path.exists():
+        return False
+    try:
+        import sqlite3
+        with sqlite3.connect(str(db_path)) as conn:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        return REQUIRED_TABLES.issubset(tables)
+    except Exception:
+        return False
+
 
 def _check_db_file() -> tuple[bool, str]:
     import os
@@ -34,7 +54,7 @@ def _check_db_tables() -> tuple[bool, str]:
             ).fetchall()
         }
         conn.close()
-        required = {"task", "note", "meeting", "wizardsession", "toolcall", "task_state"}
+        required = REQUIRED_TABLES
         missing = required - tables
         if missing:
             return False, f"Missing tables: {missing}"
