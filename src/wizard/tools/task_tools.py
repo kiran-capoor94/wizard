@@ -154,7 +154,73 @@ async def save_note(
         raise ToolError(str(e)) from e
 
 
-async def update_task(  # noqa: C901
+def _apply_task_fields(
+    task: Task,
+    sec: SecurityService,
+    *,
+    status: TaskStatus | None,
+    priority: TaskPriority | None,
+    due_date: str | None,
+    notion_id: str | None,
+    name: str | None,
+    source_url: str | None,
+) -> list[str]:
+    """Apply non-None field values to a Task model. Returns list of updated field names."""
+    updated: list[str] = []
+    if status is not None:
+        task.status = status
+        updated.append("status")
+    if priority is not None:
+        task.priority = priority
+        updated.append("priority")
+    if due_date is not None:
+        try:
+            due_date_dt = datetime.datetime.fromisoformat(
+                due_date.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ToolError(
+                f"Invalid due_date format: {due_date}. Use ISO 8601."
+            ) from exc
+        task.due_date = due_date_dt
+        updated.append("due_date")
+    if notion_id is not None:
+        task.notion_id = notion_id
+        updated.append("notion_id")
+    if name is not None:
+        task.name = sec.scrub(name).clean
+        updated.append("name")
+    if source_url is not None:
+        task.source_url = source_url
+        updated.append("source_url")
+    return updated
+
+
+def _dispatch_writebacks(
+    task: Task,
+    updated_fields: list[str],
+    wb: WriteBackService,
+) -> tuple[WriteBackStatus | None, WriteBackStatus | None, WriteBackStatus | None]:
+    """Push changed fields to Jira/Notion. Returns (status_wb, due_date_wb, priority_wb)."""
+    status_writeback = None
+    due_date_writeback = None
+    priority_writeback = None
+    if "status" in updated_fields:
+        jira_wb = wb.push_task_status(task)
+        notion_wb = wb.push_task_status_to_notion(task)
+        status_writeback = WriteBackStatus(
+            ok=jira_wb.ok and notion_wb.ok,
+            error=", ".join(filter(None, [jira_wb.error, notion_wb.error])),
+            page_id=task.notion_id,
+        )
+    if "due_date" in updated_fields:
+        due_date_writeback = wb.push_task_due_date(task)
+    if "priority" in updated_fields:
+        priority_writeback = wb.push_task_priority(task)
+    return status_writeback, due_date_writeback, priority_writeback
+
+
+async def update_task(
     ctx: Context,
     task_id: int,
     status: TaskStatus | None = None,
@@ -193,39 +259,16 @@ async def update_task(  # noqa: C901
 
             task = t_repo.get_by_id(db, task_id)
 
-            updated_fields: list[str] = []
-
-            if status is not None:
-                task.status = status
-                updated_fields.append("status")
-
-            if priority is not None:
-                task.priority = priority
-                updated_fields.append("priority")
-
-            if due_date is not None:
-                try:
-                    due_date_dt = datetime.datetime.fromisoformat(
-                        due_date.replace("Z", "+00:00")
-                    )
-                except ValueError as exc:
-                    raise ToolError(
-                        f"Invalid due_date format: {due_date}. Use ISO 8601."
-                    ) from exc
-                task.due_date = due_date_dt
-                updated_fields.append("due_date")
-
-            if notion_id is not None:
-                task.notion_id = notion_id
-                updated_fields.append("notion_id")
-
-            if name is not None:
-                task.name = sec.scrub(name).clean
-                updated_fields.append("name")
-
-            if source_url is not None:
-                task.source_url = source_url
-                updated_fields.append("source_url")
+            updated_fields = _apply_task_fields(
+                task,
+                sec,
+                status=status,
+                priority=priority,
+                due_date=due_date,
+                notion_id=notion_id,
+                name=name,
+                source_url=source_url,
+            )
 
             db.add(task)
             db.flush()
@@ -250,24 +293,9 @@ async def update_task(  # noqa: C901
                 except (NotImplementedError, AttributeError) as e:
                     logger.debug("ctx.elicit unavailable for task outcome: %s", e)
 
-            status_writeback = None
-            due_date_writeback = None
-            priority_writeback = None
-
-            if "status" in updated_fields:
-                jira_wb = wb.push_task_status(task)
-                notion_wb = wb.push_task_status_to_notion(task)
-                status_writeback = WriteBackStatus(
-                    ok=jira_wb.ok and notion_wb.ok,
-                    error=", ".join(filter(None, [jira_wb.error, notion_wb.error])),
-                    page_id=task.notion_id,
-                )
-
-            if "due_date" in updated_fields:
-                due_date_writeback = wb.push_task_due_date(task)
-
-            if "priority" in updated_fields:
-                priority_writeback = wb.push_task_priority(task)
+            status_writeback, due_date_writeback, priority_writeback = (
+                _dispatch_writebacks(task, updated_fields, wb)
+            )
 
             return UpdateTaskResponse(
                 task_id=task.id,
@@ -408,69 +436,38 @@ async def what_am_i_missing(
         dc = task_state.decision_count
         sd = task_state.stale_days
 
-        # Rule 1: no notes at all
         if nc == 0:
-            signals.append(
-                Signal(
-                    type="no_context",
-                    severity="high",
-                    message="No notes recorded for this task",
-                )
-            )
-        # Rule 2: stale
+            signals.append(Signal(
+                type="no_context", severity="high", message="No notes recorded for this task"
+            ))
         if sd >= 3:
-            signals.append(
-                Signal(
-                    type="stale",
-                    severity="medium",
-                    message=f"No activity for {sd} days",
-                )
-            )
-        # Rule 3: very few notes
+            signals.append(Signal(
+                type="stale", severity="medium", message=f"No activity for {sd} days"
+            ))
         if 0 < nc <= 2:
-            signals.append(
-                Signal(
-                    type="low_context",
-                    severity="medium",
-                    message="Very few notes — context may be shallow",
-                )
-            )
-        # Rule 4: notes exist but no decisions
+            signals.append(Signal(
+                type="low_context", severity="medium",
+                message="Very few notes — context may be shallow",
+            ))
         if dc == 0 and nc > 0:
-            signals.append(
-                Signal(
-                    type="no_decisions",
-                    severity="medium",
-                    message="No decisions recorded",
-                )
-            )
-        # Rule 5: many investigations, no decisions
+            signals.append(Signal(
+                type="no_decisions", severity="medium", message="No decisions recorded"
+            ))
         if n_repo.count_investigations(db, task_id) > 3 and dc == 0:
-            signals.append(
-                Signal(
-                    type="analysis_loop",
-                    severity="high",
-                    message="Multiple investigations without a decision",
-                )
-            )
-        # Rule 6: has notes and stale 2-3 days (rule 2 covers >= 3 days; avoid double-signal)
+            signals.append(Signal(
+                type="analysis_loop", severity="high",
+                message="Multiple investigations without a decision",
+            ))
         if task_state.last_note_at is not None and 2 <= sd < 3:
-            signals.append(
-                Signal(
-                    type="lost_context",
-                    severity="medium",
-                    message="Context may be degrading due to inactivity",
-                )
-            )
-        # Rule 7: no mental model captured
+            signals.append(Signal(
+                type="lost_context", severity="medium",
+                message="Context may be degrading due to inactivity",
+            ))
         if nc >= 2 and not n_repo.has_mental_model(db, task_id):
-            signals.append(
-                Signal(
-                    type="no_model",
-                    severity="medium",
-                    message="No mental model captured — understanding may be shallow",
-                )
-            )
+            signals.append(Signal(
+                type="no_model", severity="medium",
+                message="No mental model captured — understanding may be shallow",
+            ))
 
         signals.sort(key=lambda s: _SEVERITY_ORDER[s.severity])
         return MissingResponse(signals=signals)
