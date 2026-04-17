@@ -872,3 +872,51 @@ def test_setup_exits_nonzero_when_migrations_fail(tmp_path):
             result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
 
     assert result.exit_code != 0
+
+
+def test_setup_notion_collects_token_and_ids(tmp_path):
+    """Selecting Notion (1) prompts for token, daily page ID, tasks ID, meetings ID."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery"):
+            mock_ar.read_registered_agents.return_value = []
+            result = runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input="1\nmy-token\nmy-page-id\nmy-tasks-id\nmy-meetings-id\n",
+            )
+    assert result.exit_code == 0
+    cfg = json.loads((wizard_dir / "config.json").read_text())
+    assert cfg["notion"]["token"] == "my-token"
+    assert cfg["notion"]["daily_page_parent_id"] == "my-page-id"
+    assert cfg["notion"]["tasks_ds_id"] == "my-tasks-id"
+    assert cfg["notion"]["meetings_ds_id"] == "my-meetings-id"
+
+
+def test_setup_notion_runs_discovery(tmp_path):
+    """After collecting Notion credentials, setup calls _run_notion_discovery."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery") as mock_disc:
+            mock_ar.read_registered_agents.return_value = []
+            runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input="1\nmy-token\n\nmy-tasks-id\nmy-meetings-id\n",
+            )
+    mock_disc.assert_called_once()
+
+
+def test_setup_notion_optional_daily_page_id_can_be_skipped(tmp_path):
+    """Pressing Enter on daily page ID prompt skips it (leaves field empty)."""
+    wizard_dir = tmp_path / ".wizard"
+    with _fresh_app(wizard_dir) as ctx:
+        with patch("wizard.cli.main.agent_registration") as mock_ar, \
+             patch("wizard.cli.main._run_notion_discovery"):
+            mock_ar.read_registered_agents.return_value = []
+            runner.invoke(
+                ctx.app, ["setup", "--agent", "claude-code"],
+                input="1\nmy-token\n\nmy-tasks-id\nmy-meetings-id\n",
+            )
+    cfg = json.loads((wizard_dir / "config.json").read_text())
+    assert cfg["notion"]["daily_page_parent_id"] == ""
