@@ -31,15 +31,59 @@ class SecurityService:
         self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
         self._enabled = enabled
 
+    def scrub(self, content: str) -> ScrubResult:
+        if not self._enabled:
+            return ScrubResult(clean=content, original_to_stub={}, was_modified=False)
+        clean = content
+        original_to_stub: dict[str, str] = {}
+        counters: dict[str, int] = {}
+
+        # 1. International phone scrubbing (numbers starting with +)
+        # This prevents fixed-format patterns from consuming parts of an international number.
+        clean = self._scrub_phones(clean, original_to_stub, counters, regions=[None])
+
+        # 2. Fixed-format patterns (NHS_ID, NI_NUMBER, EMAIL, etc.)
+        for _name, pattern, prefix in self.PATTERNS:
+
+            def replace(m: re.Match, _prefix: str = prefix) -> str:
+                matched = m.group(0)
+                if any(p.search(matched) for p in self._allowlist_patterns):
+                    return matched
+                if matched in original_to_stub:
+                    return original_to_stub[matched]
+                counters[_prefix] = counters.get(_prefix, 0) + 1
+                stub = f"[{_prefix}_{counters[_prefix]}]"
+                original_to_stub[matched] = stub
+                return stub
+
+            clean = re.sub(pattern, replace, clean)
+
+        # 3. Local phone scrubbing (common regions)
+        # This catches local-format numbers that didn't match step 1 or 2.
+        # NHS_ID (VULN-003 fallback) is protected by step 2 running first.
+        clean = self._scrub_phones(
+            clean, original_to_stub, counters, regions=["GB", "US", "AU", "DE", "FR"]
+        )
+
+        if original_to_stub:
+            logger.info(
+                "PII scrubbed: %d substitution(s) across patterns",
+                len(original_to_stub),
+            )
+        return ScrubResult(
+            clean=clean,
+            original_to_stub=original_to_stub,
+            was_modified=clean != content,
+        )
+
     def _scrub_phones(
         self,
         text: str,
         original_to_stub: dict[str, str],
         counters: dict[str, int],
+        regions: list[str | None],
     ) -> str:
         replacements: list[tuple[str, str]] = []
-        # Match international numbers (with +) and common local regions
-        regions = [None, "GB", "US", "AU", "DE", "FR"]
         for region in regions:
             try:
                 for match in phonenumbers.PhoneNumberMatcher(text, region):
@@ -61,40 +105,3 @@ class SecurityService:
         ):
             text = text.replace(original, stub)
         return text
-
-    def scrub(self, content: str) -> ScrubResult:
-        if not self._enabled:
-            return ScrubResult(clean=content, original_to_stub={}, was_modified=False)
-        clean = content
-        original_to_stub: dict[str, str] = {}
-        counters: dict[str, int] = {}
-
-        # Phone scrubbing runs first so full numbers are captured before
-        # digit-based patterns (e.g. NHS_ID) can consume substrings.
-        clean = self._scrub_phones(clean, original_to_stub, counters)
-
-        for _name, pattern, prefix in self.PATTERNS:
-
-            def replace(m: re.Match, _prefix: str = prefix) -> str:
-                matched = m.group(0)
-                if any(p.search(matched) for p in self._allowlist_patterns):
-                    return matched
-                if matched in original_to_stub:
-                    return original_to_stub[matched]
-                counters[_prefix] = counters.get(_prefix, 0) + 1
-                stub = f"[{_prefix}_{counters[_prefix]}]"
-                original_to_stub[matched] = stub
-                return stub
-
-            clean = re.sub(pattern, replace, clean)
-
-        if original_to_stub:
-            logger.info(
-                "PII scrubbed: %d substitution(s) across patterns",
-                len(original_to_stub),
-            )
-        return ScrubResult(
-            clean=clean,
-            original_to_stub=original_to_stub,
-            was_modified=clean != content,
-        )
