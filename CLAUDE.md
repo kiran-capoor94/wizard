@@ -119,9 +119,11 @@ Wizard uses **notion-client v3.0** which exposes both the legacy
 | Query rows | `client.data_sources.query(data_source_id=ds_id, ...)` |
 | Create page in DB | `client.pages.create(parent={"data_source_id": ds_id}, ...)` |
 
-**Never use:**
+**Never use for schema or data access:**
 - `client.databases.retrieve()` — returns empty `properties` for
-  multi-source databases (the new default in Notion)
+  multi-source databases (the new default in Notion). **Exception:** use it
+  at setup time to resolve a page ID to a data source ID by reading the
+  `data_sources` field — this is the only endpoint that provides that mapping.
 - `client.databases.query()` — removed in notion-client v3.0
 - `parent={"database_id": ...}` in `pages.create` — rejects data source
   IDs with 404
@@ -300,5 +302,8 @@ External sources (Jira/Notion) win on metadata; local wins on status:
 - `update_task_status` is deprecated; always use `update_task`.
 - `tasks_ds_id` / `meetings_ds_id` are data source IDs. Never store page
   IDs in those fields or the Notion API calls will 404.
-- Never call `databases.retrieve` or `databases.query` — these are legacy
-  endpoints that don't work with multi-source Notion databases.
+- Never call `databases.retrieve` for schema or data access — it returns
+  empty `properties` for multi-source databases. The one allowed use is
+  `_resolve_ds_id` in `cli/main.py`, which calls it solely to read the
+  `data_sources` field during setup.
+- Never call `databases.query` — removed in notion-client v3.0.
