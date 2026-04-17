@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class JsonConfigSettingsSource(PydanticBaseSettingsSource):
 class JiraSettings(BaseModel):
     base_url: str = ""
     project_key: str = ""
-    token: str = ""
+    token: SecretStr = SecretStr("")
     email: str = ""
 
 
@@ -58,7 +58,7 @@ class NotionSettings(BaseModel):
     daily_page_parent_id: str = ""
     tasks_ds_id: str = ""
     meetings_ds_id: str = ""
-    token: str = ""
+    token: SecretStr = SecretStr("")
     notion_schema: NotionSchemaSettings = Field(default_factory=NotionSchemaSettings)
 
 

@@ -80,7 +80,7 @@ def _check_notion_token() -> tuple[bool, str]:
     from wizard.config import Settings
 
     s = Settings()
-    if s.notion.token:
+    if s.notion.token.get_secret_value():
         return True, "Notion token configured"
     return False, "Notion token not set (notion.token)"
 
@@ -89,7 +89,7 @@ def _check_jira_token() -> tuple[bool, str]:
     from wizard.config import Settings
 
     s = Settings()
-    if s.jira.token:
+    if s.jira.token.get_secret_value():
         return True, "Jira token configured"
     return False, "Jira token not set (jira.token) — Jira sync disabled"
 
@@ -163,10 +163,10 @@ def _check_notion_schema() -> tuple[bool, str]:
     notion = s.notion
     schema = notion.notion_schema
 
-    if not notion.token or not notion.tasks_ds_id or not notion.meetings_ds_id:
+    if not notion.token.get_secret_value() or not notion.tasks_ds_id or not notion.meetings_ds_id:
         return False, "Notion not configured — run 'wizard configure --notion'"
 
-    client = NotionSdkClient(auth=notion.token)
+    client = NotionSdkClient(auth=notion.token.get_secret_value())
     tasks_props = notion_discovery.fetch_db_properties(client, notion.tasks_ds_id)
     meetings_props = notion_discovery.fetch_db_properties(client, notion.meetings_ds_id)
 

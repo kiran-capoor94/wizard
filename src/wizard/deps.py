@@ -25,7 +25,7 @@ def get_jira_client() -> JiraClient:
     logger.debug("Creating JiraClient")
     return JiraClient(
         base_url=settings.jira.base_url,
-        token=settings.jira.token,
+        token=settings.jira.token.get_secret_value(),
         project_key=settings.jira.project_key,
         email=settings.jira.email,
     )
@@ -34,7 +34,7 @@ def get_jira_client() -> JiraClient:
 def get_notion_client() -> NotionClient:
     logger.debug("Creating NotionClient")
     return NotionClient(
-        token=settings.notion.token,
+        token=settings.notion.token.get_secret_value(),
         daily_page_parent_id=settings.notion.daily_page_parent_id,
         tasks_ds_id=settings.notion.tasks_ds_id,
         meetings_ds_id=settings.notion.meetings_ds_id,

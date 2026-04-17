@@ -114,8 +114,8 @@ def wizard_config():
         contents=[
             ResourceContent(
                 content=ConfigResource(
-                    jira_enabled=bool(settings.jira.token),
-                    notion_enabled=bool(settings.notion.token),
+                    jira_enabled=bool(settings.jira.token.get_secret_value()),
+                    notion_enabled=bool(settings.notion.token.get_secret_value()),
                     scrubbing_enabled=settings.scrubbing.enabled,
                     database_path=settings.db,
                 ).model_dump_json(),

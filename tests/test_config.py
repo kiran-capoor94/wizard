@@ -11,7 +11,7 @@ def test_jira_settings_defaults(tmp_path, monkeypatch):
     from wizard.config import settings
 
     assert settings.jira.base_url == ""
-    assert settings.jira.token == ""
+    assert settings.jira.token.get_secret_value() == ""
     assert settings.jira.project_key == ""
 
 
@@ -42,7 +42,7 @@ def test_nested_config_from_json(tmp_path, monkeypatch):
     from wizard.config import settings
 
     assert settings.jira.base_url == "https://jira.example.com"
-    assert settings.jira.token == "tok"
+    assert settings.jira.token.get_secret_value() == "tok"
     assert settings.scrubbing.allowlist == ["SISU", "AUTH-\\d+"]
 
 
@@ -107,3 +107,15 @@ def test_notion_schema_has_meeting_category_field():
     schema = NotionSchemaSettings()
     assert hasattr(schema, "meeting_category")
     assert schema.meeting_category == "Category"
+
+
+def test_token_is_secret_str():
+    from pydantic import SecretStr
+    from wizard.config import JiraSettings, NotionSettings
+
+    j = JiraSettings()
+    n = NotionSettings()
+    assert isinstance(j.token, SecretStr)
+    assert isinstance(n.token, SecretStr)
+    assert j.token.get_secret_value() == ""
+    assert n.token.get_secret_value() == ""
