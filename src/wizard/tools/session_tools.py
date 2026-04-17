@@ -199,10 +199,23 @@ def _deserialise_session_state(
         return None, []
     try:
         state = SessionState.model_validate_json(prior.session_state)
+        task_ids = list(state.working_set)
+        tasks_map: dict[int, Task] = {}
+        states_map: dict[int, TaskState] = {}
+        if task_ids:
+            for t in db.execute(
+                select(Task).where(col(Task.id).in_(task_ids))
+            ).scalars().all():
+                if t.id is not None:
+                    tasks_map[t.id] = t
+            for ts in db.execute(
+                select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+            ).scalars().all():
+                states_map[ts.task_id] = ts
         working_set: list[TaskContext] = []
         for tid in state.working_set:
-            t = db.get(Task, tid)
-            ts = db.get(TaskState, tid)
+            t = tasks_map.get(tid)
+            ts = states_map.get(tid)
             if t is not None:
                 working_set.append(TaskContext.from_model(t, ts))
         return state, working_set

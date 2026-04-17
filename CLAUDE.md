@@ -34,7 +34,6 @@ src/wizard/
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
   tools/                       # MCP tools package (split by domain)
     __init__.py                # Re-exports all tool functions
-    _helpers.py                # Shared helpers (_log_tool_call, _SEVERITY_ORDER)
     session_tools.py           # session_start, session_end, resume_session
     task_tools.py              # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
     meeting_tools.py           # get_meeting, save_meeting_summary, ingest_meeting
@@ -308,7 +307,7 @@ External sources (Jira/Notion) win on metadata; local wins on status:
   IDs in those fields or the Notion API calls will 404.
 - Never call `databases.retrieve` for schema or data access — it returns
   empty `properties` for multi-source databases. The one allowed use is
-  `_resolve_ds_id` in `cli/main.py`, which calls it solely to read the
+  `resolve_ds_id` in `cli/configure.py`, which calls it solely to read the
   `data_sources` field during setup.
 - Never call `databases.query` — removed in notion-client v3.0.
 
