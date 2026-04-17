@@ -24,18 +24,19 @@ def _patch_tools(db_session):
 
 
 async def test_session_start_surfaces_sync_errors(db_session):
-    import httpx
-
     from wizard.repositories import MeetingRepository, TaskRepository, TaskStateRepository
+    from wizard.schemas import SourceSyncStatus
     from wizard.tools import session_start
 
     ctx = MockContext()
     sync_mock = MagicMock()
-    sync_mock.sync_jira = MagicMock(side_effect=httpx.HTTPError("Jira token not configured"))
-    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
-    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
+    sync_mock.sync_all.return_value = [
+        SourceSyncStatus(source="jira", ok=False, error="Jira token not configured"),
+        SourceSyncStatus(source="notion_tasks", ok=True),
+        SourceSyncStatus(source="notion_meetings", ok=True),
+    ]
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         result = await session_start(
             ctx,
             sync_svc=sync_mock,
@@ -71,7 +72,7 @@ async def test_session_start_resolves_daily_page(db_session):
     sync_mock.sync_notion_tasks = MagicMock(return_value=None)
     sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         result = await session_start(
             ctx,
             sync_svc=sync_mock,
@@ -103,7 +104,7 @@ async def test_session_start_daily_page_failure_is_non_fatal(db_session):
     sync_mock.sync_notion_tasks = MagicMock(return_value=None)
     sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         result = await session_start(
             ctx,
             sync_svc=sync_mock,
@@ -128,7 +129,7 @@ async def test_session_start_refreshes_stale_days(db_session):
     sync_mock.sync_notion_meetings = MagicMock(return_value=None)
     task_state_mock = MagicMock()
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         await session_start(
             ctx,
             sync_svc=sync_mock,
@@ -155,7 +156,7 @@ async def test_session_start_refresh_stale_days_failure_is_non_fatal(db_session)
     task_state_mock = MagicMock()
     task_state_mock.refresh_stale_days.side_effect = sqlalchemy.exc.OperationalError("db error", None, None)
 
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         result = await session_start(
             ctx,
             sync_svc=sync_mock,
@@ -181,7 +182,7 @@ async def test_session_start_sets_current_session_id_in_ctx_state(db_session):
     sync_mock.sync_notion_meetings = MagicMock(return_value=None)
 
     ctx = MockContext()
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         result = await session_start(
             ctx,
             sync_svc=sync_mock,
@@ -199,16 +200,19 @@ async def test_session_start_sets_current_session_id_in_ctx_state(db_session):
 
 async def test_session_start_reports_progress(db_session):
     from wizard.repositories import MeetingRepository, TaskRepository, TaskStateRepository
+    from wizard.schemas import SourceSyncStatus
     from wizard.tools import session_start
 
     sync_mock = MagicMock()
-    sync_mock.sync_jira = MagicMock(return_value=None)
-    sync_mock.sync_notion_tasks = MagicMock(return_value=None)
-    sync_mock.sync_notion_meetings = MagicMock(return_value=None)
+    sync_mock.sync_all.return_value = [
+        SourceSyncStatus(source="jira", ok=True),
+        SourceSyncStatus(source="notion_tasks", ok=True),
+        SourceSyncStatus(source="notion_meetings", ok=True),
+    ]
 
     impl = _MockContextImpl()
     ctx = mock_ctx(impl)
-    with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
+    with patch.multiple("wizard.tools.session_tools", **_patch_tools(db_session)):
         await session_start(
             ctx,
             sync_svc=sync_mock,
@@ -218,8 +222,5 @@ async def test_session_start_reports_progress(db_session):
             m_repo=MeetingRepository(),
         )
 
-    assert len(impl.progress_calls) == 4
-    assert impl.progress_calls[0] == (0, 3, "Syncing Jira...")
-    assert impl.progress_calls[1] == (1, 3, "Syncing Notion tasks...")
-    assert impl.progress_calls[2] == (2, 3, "Syncing Notion meetings...")
-    assert impl.progress_calls[3] == (3, 3, "Sync complete.")
+    assert len(impl.progress_calls) == 1
+    assert impl.progress_calls[0] == (1, 1, "Sync complete.")
