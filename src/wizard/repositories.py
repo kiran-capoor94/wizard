@@ -55,6 +55,49 @@ def _task_context_from_row(
     return TaskContext.from_model(task, task_state, latest_note)
 
 
+def _batch_load_latest_notes(
+    db: Session, tasks: list[Task]
+) -> dict[int, Note]:
+    """Batch-load the latest note per task, including Jira source_id fallback.
+
+    Returns {task_id: latest_note}. Direct task_id matches take precedence
+    over source_id matches.
+    """
+    task_ids = [t.id for t in tasks if t.id is not None]
+    jira_source_ids = [t.source_id for t in tasks if t.source_id is not None]
+    source_id_to_task_id: dict[str, int] = {
+        t.source_id: t.id
+        for t in tasks
+        if t.source_id is not None and t.id is not None
+    }
+
+    note_conditions: list = []
+    if task_ids:
+        note_conditions.append(col(Note.task_id).in_(task_ids))
+    if jira_source_ids:
+        note_conditions.append(
+            and_(col(Note.source_id).in_(jira_source_ids), Note.source_type == "JIRA")
+        )
+
+    latest: dict[int, Note] = {}
+    if not note_conditions:
+        return latest
+
+    for n in db.execute(
+        select(Note)
+        .where(or_(*note_conditions))
+        .order_by(col(Note.created_at).desc())
+    ).scalars().all():
+        if n.task_id is not None:
+            if n.task_id not in latest:
+                latest[n.task_id] = n
+        elif n.source_id is not None and n.source_type == "JIRA":
+            tid = source_id_to_task_id.get(n.source_id)
+            if tid is not None and tid not in latest:
+                latest[tid] = n
+    return latest
+
+
 # ---------------------------------------------------------------------------
 # TaskRepository
 # ---------------------------------------------------------------------------
@@ -81,7 +124,7 @@ class TaskRepository:
         """Blocked tasks sorted by priority then last-worked desc."""
         return self._query_task_contexts(db, Task.status == TaskStatus.BLOCKED)
 
-    def _query_task_contexts(self, db: Session, *where) -> list[TaskContext]:  # noqa: C901
+    def _query_task_contexts(self, db: Session, *where) -> list[TaskContext]:
         last_worked = _latest_note_subquery()
         stmt = (
             select(Task, last_worked)
@@ -104,33 +147,7 @@ class TaskRepository:
                 task_states[ts.task_id] = ts
 
         # Batch load latest note per task — one query replaces N _latest_note_for calls
-        jira_source_ids = [t.source_id for t in tasks if t.source_id is not None]
-        source_id_to_task_id: dict[str, int] = {
-            t.source_id: t.id
-            for t in tasks
-            if t.source_id is not None and t.id is not None
-        }
-        note_conditions: list = []
-        if task_ids:
-            note_conditions.append(col(Note.task_id).in_(task_ids))
-        if jira_source_ids:
-            note_conditions.append(
-                and_(col(Note.source_id).in_(jira_source_ids), Note.source_type == "JIRA")
-            )
-        latest_notes: dict[int, Note] = {}
-        if note_conditions:
-            for n in db.execute(
-                select(Note)
-                .where(or_(*note_conditions))
-                .order_by(col(Note.created_at).desc())
-            ).scalars().all():
-                if n.task_id is not None:
-                    if n.task_id not in latest_notes:
-                        latest_notes[n.task_id] = n
-                elif n.source_id is not None and n.source_type == "JIRA":
-                    tid = source_id_to_task_id.get(n.source_id)
-                    if tid is not None and tid not in latest_notes:
-                        latest_notes[tid] = n
+        latest_notes = _batch_load_latest_notes(db, tasks)
 
         results: list[TaskContext] = []
         for task in tasks:

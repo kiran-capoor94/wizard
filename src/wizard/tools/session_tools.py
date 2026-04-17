@@ -205,7 +205,68 @@ async def session_end(
         raise ToolError(str(e)) from e
 
 
-async def resume_session(  # noqa: C901
+def _deserialise_session_state(
+    db: Session, prior: WizardSession
+) -> tuple[SessionState | None, list[TaskContext]]:
+    """Deserialise prior session_state JSON and rebuild working set task contexts."""
+    if prior.session_state is None:
+        logger.warning(
+            "Session %d was not cleanly closed — no structured state available. "
+            "Falling back to note history.",
+            prior.id,
+        )
+        return None, []
+    try:
+        state = SessionState.model_validate_json(prior.session_state)
+        working_set: list[TaskContext] = []
+        for tid in state.working_set:
+            t = db.get(Task, tid)
+            ts = db.get(TaskState, tid)
+            if t is not None:
+                working_set.append(TaskContext.from_model(t, ts))
+        return state, working_set
+    except (ValueError, ValidationError) as e:
+        logger.warning("Failed to deserialise session_state: %s", e)
+        return None, []
+
+
+def _group_prior_notes(db: Session, session_id: int) -> list[ResumedTaskNotes]:
+    """Query notes for a session and group by task with latest mental model."""
+    note_stmt = (
+        select(Note)
+        .where(Note.session_id == session_id)
+        .order_by(col(Note.created_at).asc())
+    )
+    all_notes = list(db.execute(note_stmt).scalars().all())
+    by_task: dict[int, list[Note]] = {}
+    for n in all_notes:
+        if n.task_id is not None:
+            by_task.setdefault(n.task_id, []).append(n)
+
+    result: list[ResumedTaskNotes] = []
+    for tid, notes in by_task.items():
+        t = db.get(Task, tid)
+        ts = db.get(TaskState, tid)
+        if t is not None:
+            latest_mm = next(
+                (
+                    n.mental_model
+                    for n in reversed(notes)
+                    if n.mental_model is not None
+                ),
+                None,
+            )
+            result.append(
+                ResumedTaskNotes(
+                    task=TaskContext.from_model(t, ts),
+                    notes=[NoteDetail.from_model(n) for n in notes],
+                    latest_mental_model=latest_mm,
+                )
+            )
+    return result
+
+
+async def resume_session(
     ctx: Context,
     session_id: int | None = None,
     sync_svc: SyncService = Depends(get_sync_service),
@@ -235,59 +296,9 @@ async def resume_session(  # noqa: C901
         # Sync
         sync_results = sync_svc.sync_all(db)
 
-        # Deserialise prior session_state
-        session_state: SessionState | None = None
-        working_set_tasks: list[TaskContext] = []
-        if prior.session_state is not None:
-            try:
-                session_state = SessionState.model_validate_json(prior.session_state)
-                for tid in session_state.working_set:
-                    t = db.get(Task, tid)
-                    ts = db.get(TaskState, tid)
-                    if t is not None:
-                        working_set_tasks.append(TaskContext.from_model(t, ts))
-            except (ValueError, ValidationError) as e:
-                logger.warning("Failed to deserialise session_state: %s", e)
-                session_state = None
-        else:
-            logger.warning(
-                "Session %d was not cleanly closed — no structured state available. "
-                "Falling back to note history.",
-                prior.id,
-            )
+        session_state, working_set_tasks = _deserialise_session_state(db, prior)
 
-        # Fetch prior notes grouped by task
-        note_stmt = (
-            select(Note)
-            .where(Note.session_id == prior.id)
-            .order_by(col(Note.created_at).asc())
-        )
-        all_prior_notes = list(db.execute(note_stmt).scalars().all())
-        by_task: dict[int, list[Note]] = {}
-        for n in all_prior_notes:
-            if n.task_id is not None:
-                by_task.setdefault(n.task_id, []).append(n)
-
-        prior_notes: list[ResumedTaskNotes] = []
-        for tid, notes in by_task.items():
-            t = db.get(Task, tid)
-            ts = db.get(TaskState, tid)
-            if t is not None:
-                latest_mm = next(
-                    (
-                        n.mental_model
-                        for n in reversed(notes)
-                        if n.mental_model is not None
-                    ),
-                    None,
-                )
-                prior_notes.append(
-                    ResumedTaskNotes(
-                        task=TaskContext.from_model(t, ts),
-                        notes=[NoteDetail.from_model(n) for n in notes],
-                        latest_mental_model=latest_mm,
-                    )
-                )
+        prior_notes = _group_prior_notes(db, prior.id)
 
         return ResumeSessionResponse(
             session_id=new_session.id,
