@@ -1,6 +1,7 @@
 from fastmcp.prompts import Message
 
 from .mcp_instance import mcp
+from .skills import load_skill
 
 
 def session_triage(session_data: str) -> list[Message]:
@@ -126,6 +127,74 @@ def user_elicitation() -> list[Message]:
     ]
 
 
+def architecture_debate(task_id: int) -> list[Message]:
+    """Facilitate a design or architecture decision with full wizard context.
+
+    Use when choosing between approaches, the engineer says "should we do X or Y",
+    or a task requires a structural choice before implementation.
+    Call task_start first to load prior notes and decisions.
+    """
+    skill_content = load_skill("architecture-debate") or (
+        "Architecture debate skill not found. "
+        "Load task context with task_start, present 2-3 options with trade-offs, "
+        "get the engineer's decision, then save it as a decision note."
+    )
+    return [
+        Message(
+            role="user",
+            content=(
+                f"You are facilitating an architecture decision for task {task_id}. "
+                "Follow the skill instructions below.\n\n"
+                f"{skill_content}"
+            ),
+        ),
+    ]
+
+
+def code_review(task_id: int) -> list[Message]:
+    """Context-aware code review using wizard's investigation and decision history.
+
+    Use when reviewing code changes, PRs, or diffs — especially when prior wizard
+    context exists that should inform the review.
+    Call task_start first to load prior notes and decisions.
+    """
+    skill_content = load_skill("code-review") or (
+        "Code review skill not found. "
+        "Load task context with task_start, review changes against prior decisions, "
+        "check for invariant violations, then save findings as an investigation note."
+    )
+    return [
+        Message(
+            role="user",
+            content=(
+                f"You are performing a context-aware code review for task {task_id}. "
+                "Follow the skill instructions below.\n\n"
+                f"{skill_content}"
+            ),
+        ),
+    ]
+
+
+def note_guidance() -> list[Message]:
+    """Full guide for when and how to save notes with wizard.
+
+    Use when you need guidance on note types, templates, mental models,
+    or when to capture findings.
+    """
+    skill_content = load_skill("note") or (
+        "Note skill not found. "
+        "Save notes with save_note(task_id, note_type, content, mental_model). "
+        "Types: investigation, decision, docs, learnings. "
+        "Include file paths, function names, and concrete findings."
+    )
+    return [
+        Message(
+            role="user",
+            content=skill_content,
+        ),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Register prompts with MCP
 # ---------------------------------------------------------------------------
@@ -135,3 +204,6 @@ mcp.prompt()(task_investigation)
 mcp.prompt()(meeting_summarisation)
 mcp.prompt()(session_wrapup)
 mcp.prompt()(user_elicitation)
+mcp.prompt()(architecture_debate)
+mcp.prompt()(code_review)
+mcp.prompt()(note_guidance)
