@@ -32,7 +32,12 @@ src/wizard/
     doctor.py                # 10-point health checks (wizard doctor)
     analytics.py             # Session/note/task usage stats (wizard analytics)
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
-  tools.py                   # 13 MCP tools (all async, all return Pydantic schemas)
+  tools/                       # MCP tools package (split by domain)
+    __init__.py                # Re-exports all tool functions
+    _helpers.py                # Shared helpers (_log_tool_call, _SEVERITY_ORDER)
+    session_tools.py           # session_start, session_end, resume_session
+    task_tools.py              # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
+    meeting_tools.py           # get_meeting, save_meeting_summary, ingest_meeting
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
@@ -269,8 +274,6 @@ file. Supported agents and their config locations:
 | `get_meeting` | meeting_id | title, content, open_tasks, already_summarised |
 | `save_meeting_summary` | meeting_id, summary, task_ids? | note_id, tasks_linked, notion_write_back |
 | `ingest_meeting` | title, content, source_url?, category? | meeting_id, already_existed, notion_write_back |
-| `update_task_status` | task_id, new_status | _(deprecated — use update_task)_ |
-
 ## PII Scrubbing
 
 `SecurityService` scrubs content before it touches SQLite. Six patterns:
@@ -307,3 +310,51 @@ External sources (Jira/Notion) win on metadata; local wins on status:
   `_resolve_ds_id` in `cli/main.py`, which calls it solely to read the
   `data_sources` field during setup.
 - Never call `databases.query` — removed in notion-client v3.0.
+
+## Coding Principles
+
+Five rules that keep the codebase maintainable for a solo engineer:
+
+1. **SLAP (Single Layer of Abstraction)** — each function operates at one
+   level. Tool functions orchestrate; they don't build SQL or format API
+   payloads.
+2. **Unidirectional dependencies** — `tools → services → integrations`
+   and `tools → repositories`. Never backwards, never sideways.
+3. **Single responsibility (file-scoped)** — each file has one axis of
+   change. If you're editing `repositories.py` to fix a Notion API issue,
+   something is in the wrong place.
+4. **No business logic in integrations** — integration clients are thin
+   wrappers (HTTP call, return data, raise on error). Mapping, filtering,
+   and scrubbing happen in services or repositories.
+5. **DRY at the third occurrence** — don't abstract after two uses. Wait
+   for three to confirm it's a real pattern.
+
+## File Size & Structural Thresholds
+
+Hard caps enforced by `scripts/pre-commit`:
+
+| Scope | Cap | Enforcement |
+|-------|-----|-------------|
+| Any `src/wizard/**/*.py` | 500 lines | Pre-commit hook blocks commit |
+| Any `tests/**/*.py` | 500 lines | Pre-commit hook blocks commit |
+| Tools per file | 10 | Split trigger (manual) |
+
+Structural split triggers:
+
+| Trigger | Action |
+|---------|--------|
+| `integrations.py` adds a 3rd client | Split into `integrations/` package |
+| `repositories.py` adds a 5th repo | Split into `repositories/` package |
+| Any test file exceeds 500 lines | Split into `tests/test_<module>/` |
+
+## Pre-Commit Hook
+
+`scripts/pre-commit` runs three checks:
+
+1. **Line count** — blocks files over 500 lines in `src/wizard/` and
+   `tests/`.
+2. **Import boundaries** — blocks cross-layer imports (repos importing
+   integrations, integrations importing tools, etc.).
+3. **Ruff** — runs `ruff check` on staged files.
+
+Install: `ln -sf ../../scripts/pre-commit .git/hooks/pre-commit`

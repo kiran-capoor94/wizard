@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# --- Line count check ---
+MAX_LINES=500
+FAIL=0
+
+for file in $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$'); do
+    # Only check src/wizard/ and tests/ files
+    case "$file" in
+        src/wizard/*.py|src/wizard/**/*.py|tests/*.py|tests/**/*.py) ;;
+        *) continue ;;
+    esac
+
+    lines=$(wc -l < "$file")
+    if [ "$lines" -gt "$MAX_LINES" ]; then
+        echo "FAIL: $file has $lines lines (max $MAX_LINES)"
+        FAIL=1
+    fi
+done
+
+if [ "$FAIL" -eq 1 ]; then
+    echo ""
+    echo "Files exceed the $MAX_LINES-line cap. Split or refactor before committing."
+    exit 1
+fi
+
+# --- Import boundary check ---
+BOUNDARY_FAIL=0
+
+for file in $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$'); do
+    case "$file" in
+        src/wizard/repositories/*.py|src/wizard/repositories.py)
+            if grep -qE 'from (wizard\.integrations|wizard\.services|\.integrations|\.services) ' "$file" 2>/dev/null; then
+                echo "FAIL: $file imports from integrations or services (layer violation)"
+                BOUNDARY_FAIL=1
+            fi
+            ;;
+        src/wizard/integrations/*.py|src/wizard/integrations.py)
+            if grep -qE 'from (wizard\.repositories|wizard\.services|wizard\.tools|\.repositories|\.services|\.tools) ' "$file" 2>/dev/null; then
+                echo "FAIL: $file imports from repos, services, or tools (layer violation)"
+                BOUNDARY_FAIL=1
+            fi
+            ;;
+        src/wizard/services/*.py|src/wizard/services.py)
+            if grep -qE 'from (wizard\.tools|\.tools) ' "$file" 2>/dev/null; then
+                echo "FAIL: $file imports from tools (layer violation)"
+                BOUNDARY_FAIL=1
+            fi
+            ;;
+    esac
+done
+
+if [ "$BOUNDARY_FAIL" -eq 1 ]; then
+    echo ""
+    echo "Import boundary violations detected. See CLAUDE.md for dependency rules."
+    exit 1
+fi
+
+# --- Ruff check ---
+if command -v uv &>/dev/null; then
+    uv run ruff check src/wizard/ tests/ || {
+        echo ""
+        echo "Ruff lint check failed. Run 'uv run ruff check --fix' to auto-fix."
+        exit 1
+    }
+fi
+
+echo "Pre-commit checks passed."
