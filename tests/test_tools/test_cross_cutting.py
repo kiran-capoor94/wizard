@@ -5,10 +5,11 @@ from tests.helpers import MockContext, mock_session
 
 def _make_notion_mock(notion=None):
     """Build a notion_client mock. Default: ensure_daily_page raises (non-fatal path)."""
+    import httpx
     if notion is not None:
         return notion
     mock = MagicMock()
-    mock.ensure_daily_page.side_effect = Exception("notion not configured in tests")
+    mock.ensure_daily_page.side_effect = httpx.HTTPError("notion not configured in tests")
     return mock
 
 

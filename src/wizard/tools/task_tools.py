@@ -127,7 +127,7 @@ async def save_note(
                     )
                     if isinstance(result, AcceptedElicitation) and result.data:
                         mental_model = sec.scrub(result.data).clean
-                except Exception as e:
+                except (NotImplementedError, AttributeError) as e:
                     logger.debug("ctx.elicit unavailable for mental_model: %s", e)
             clean = sec.scrub(content).clean
             if mental_model is not None:
@@ -247,7 +247,7 @@ async def update_task(  # noqa: C901
                     if isinstance(result, AcceptedElicitation) and result.data:
                         scrubbed_outcome = sec.scrub(result.data).clean
                         wb.append_task_outcome(task, scrubbed_outcome)
-                except Exception as e:
+                except (NotImplementedError, AttributeError) as e:
                     logger.debug("ctx.elicit unavailable for task outcome: %s", e)
 
             status_writeback = None

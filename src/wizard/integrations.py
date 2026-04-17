@@ -210,7 +210,7 @@ class NotionClient:
                 if block.get("child_page", {}).get("title") == title:
                     return block["id"]
             return None
-        except Exception as e:
+        except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
             logger.warning("Notion find_daily_page failed: %s", e)
             return None
 
@@ -308,7 +308,7 @@ class NotionClient:
                 )
                 tasks.append(task)
             return tasks
-        except Exception as e:
+        except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
             logger.warning("Notion fetch_tasks failed: %s - %s", type(e).__name__, e)
             return []
 
@@ -344,7 +344,7 @@ class NotionClient:
                 )
                 meetings.append(meeting)
             return meetings
-        except Exception as e:
+        except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
             logger.warning("Notion fetch_meetings failed: %s - %s", type(e).__name__, e)
             return []
 
@@ -476,7 +476,7 @@ class NotionClient:
                 ],
             )
             return True
-        except Exception as e:
+        except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
             logger.warning("Notion append_paragraph_to_page failed: %s", e)
             return False
 

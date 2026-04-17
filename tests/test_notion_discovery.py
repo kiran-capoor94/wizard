@@ -21,7 +21,8 @@ def test_fetch_db_properties_returns_empty_on_error():
     from wizard.notion_discovery import fetch_db_properties
 
     mock_client = MagicMock()
-    mock_client.data_sources.retrieve.side_effect = Exception("API error")
+    import httpx
+    mock_client.data_sources.retrieve.side_effect = httpx.HTTPError("API error")
     result = fetch_db_properties(mock_client, "ds-123")
     assert result == {}
 

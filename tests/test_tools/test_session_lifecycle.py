@@ -7,10 +7,11 @@ from tests.helpers import MockContext, _MockContextImpl, mock_ctx, mock_session
 
 def _make_notion_mock(notion=None):
     """Build a notion_client mock. Default: ensure_daily_page raises (non-fatal path)."""
+    import httpx
     if notion is not None:
         return notion
     mock = MagicMock()
-    mock.ensure_daily_page.side_effect = Exception("notion not configured in tests")
+    mock.ensure_daily_page.side_effect = httpx.HTTPError("notion not configured in tests")
     return mock
 
 
@@ -128,7 +129,7 @@ async def test_session_end_session_state_saved_false_when_write_fails(db_session
     with patch.multiple("wizard.tools._helpers", **_patch_tools(db_session)):
         with _patch(
             "wizard.schemas.SessionState.model_dump_json",
-            side_effect=RuntimeError("disk full"),
+            side_effect=ValueError("serialization failed"),
         ):
             result = await session_end(
                 ctx,

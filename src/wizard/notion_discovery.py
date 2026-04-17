@@ -1,5 +1,8 @@
 import logging
 
+import httpx
+from notion_client.errors import APIResponseError
+
 logger = logging.getLogger(__name__)
 
 # Pass 1: exact names to wizard field mapping (lowercase)
@@ -43,7 +46,7 @@ def fetch_db_properties(notion_client, db_id: str) -> dict[str, str]:
             name: prop["type"]
             for name, prop in response.get("properties", {}).items()
         }
-    except Exception as exc:
+    except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as exc:
         logger.warning("notion_discovery fetch_db_properties failed for %s: %s", db_id, exc)
         return {}
 
