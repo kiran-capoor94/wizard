@@ -1,7 +1,7 @@
 from fastmcp.prompts import Message
 
 from .mcp_instance import mcp
-from .skills import load_skill
+from .skills import SKILL_ARCHITECTURE_DEBATE, SKILL_CODE_REVIEW, SKILL_NOTE, load_skill
 
 
 def session_triage(session_data: str) -> list[Message]:
@@ -134,7 +134,7 @@ def architecture_debate(task_id: int) -> list[Message]:
     or a task requires a structural choice before implementation.
     Call task_start first to load prior notes and decisions.
     """
-    skill_content = load_skill("architecture-debate") or (
+    skill_content = load_skill(SKILL_ARCHITECTURE_DEBATE) or (
         "Architecture debate skill not found. "
         "Load task context with task_start, present 2-3 options with trade-offs, "
         "get the engineer's decision, then save it as a decision note."
@@ -158,7 +158,7 @@ def code_review(task_id: int) -> list[Message]:
     context exists that should inform the review.
     Call task_start first to load prior notes and decisions.
     """
-    skill_content = load_skill("code-review") or (
+    skill_content = load_skill(SKILL_CODE_REVIEW) or (
         "Code review skill not found. "
         "Load task context with task_start, review changes against prior decisions, "
         "check for invariant violations, then save findings as an investigation note."
@@ -181,7 +181,7 @@ def note_guidance() -> list[Message]:
     Use when you need guidance on note types, templates, mental models,
     or when to capture findings.
     """
-    skill_content = load_skill("note") or (
+    skill_content = load_skill(SKILL_NOTE) or (
         "Note skill not found. "
         "Save notes with save_note(task_id, note_type, content, mental_model). "
         "Types: investigation, decision, docs, learnings. "

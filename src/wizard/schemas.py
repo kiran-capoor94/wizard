@@ -174,6 +174,13 @@ class ConfigResource(BaseModel):
 
 
 class SourceSyncStatus(BaseModel):
+    """Per-source sync result.
+
+    Semantics: ok=True means sync succeeded. skipped=True means the source
+    was not configured and was intentionally skipped (not a failure).
+    Consumers should check ``skipped`` before ``ok``.
+    """
+
     source: str
     ok: bool
     error: str | None = None
