@@ -244,7 +244,7 @@ def test_setup_runs_migrations_when_db_missing(tmp_path):
 
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._db_is_healthy", return_value=False), \
+             patch("wizard.cli.main.db_is_healthy", return_value=False), \
              patch("wizard.cli.main._run_update_step", return_value=(True, "")) as mock_step:
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
@@ -261,7 +261,7 @@ def test_setup_skips_migrations_when_db_healthy(tmp_path):
 
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._db_is_healthy", return_value=True), \
+             patch("wizard.cli.main.db_is_healthy", return_value=True), \
              patch("wizard.cli.main._run_update_step", return_value=(True, "")) as mock_step:
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
@@ -278,7 +278,7 @@ def test_setup_exits_nonzero_when_migrations_fail(tmp_path):
 
     with _fresh_app(wizard_dir) as ctx:
         with patch("wizard.cli.main.agent_registration") as mock_ar, \
-             patch("wizard.cli.main._db_is_healthy", return_value=False), \
+             patch("wizard.cli.main.db_is_healthy", return_value=False), \
              patch("wizard.cli.main._run_update_step", return_value=(False, "alembic error output")):
             mock_ar.read_registered_agents.return_value = []
             result = runner.invoke(ctx.app, ["setup", "--agent", "claude-code"], input="4\n")
