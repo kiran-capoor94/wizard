@@ -34,6 +34,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import WriteBackService
+from ..skills import load_skill
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ async def get_meeting(
                 already_summarised=meeting.summary is not None,
                 existing_summary=meeting.summary,
                 open_tasks=linked_tasks,
+                skill_instructions=load_skill("meeting"),
             )
     except ValueError as e:
         logger.warning("get_meeting failed: %s", e)
