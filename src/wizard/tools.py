@@ -726,15 +726,21 @@ async def rewind_task(
         return RewindResponse(task=task_ctx, timeline=timeline, summary=summary)
 
 
-async def what_am_i_missing(ctx: Context, task_id: int) -> MissingResponse:
+async def what_am_i_missing(
+    ctx: Context,
+    task_id: int,
+    t_repo: TaskRepository = Depends(get_task_repo),
+    n_repo: NoteRepository = Depends(get_note_repo),
+) -> MissingResponse:
     """Surface cognitive gaps for a task using seven diagnostic rules."""
     logger.info("what_am_i_missing task_id=%d", task_id)
     with get_session() as db:
         session_id: int | None = await ctx.get_state("current_session_id")
         await _log_tool_call(db, "what_am_i_missing", session_id=session_id)
-        task = db.get(Task, task_id)
-        if task is None:
-            raise ToolError(f"Task {task_id} not found")
+        try:
+            task = t_repo.get_by_id(db, task_id)
+        except ValueError as e:
+            raise ToolError(str(e)) from e
         task_state = db.get(TaskState, task_id)
         if task_state is None:
             raise ToolError(f"TaskState missing for task {task_id}")
@@ -780,14 +786,8 @@ async def what_am_i_missing(ctx: Context, task_id: int) -> MissingResponse:
                     message="No decisions recorded",
                 )
             )
-        # Rule 5: many investigations, no decisions (inline count query)
-        inv_stmt = (
-            select(Note)
-            .where(Note.task_id == task_id)
-            .where(Note.note_type == NoteType.INVESTIGATION)
-        )
-        inv_notes = list(db.execute(inv_stmt).scalars().all())
-        if len(inv_notes) > 3 and dc == 0:
+        # Rule 5: many investigations, no decisions
+        if n_repo.count_investigations(db, task_id) > 3 and dc == 0:
             signals.append(
                 Signal(
                     type="analysis_loop",
@@ -804,15 +804,8 @@ async def what_am_i_missing(ctx: Context, task_id: int) -> MissingResponse:
                     message="Context may be degrading due to inactivity",
                 )
             )
-        # Rule 7: no mental model captured (inline existence query)
-        model_stmt = (
-            select(Note)
-            .where(Note.task_id == task_id)
-            .where(Note.mental_model.is_not(None))  # type: ignore[union-attr]
-            .limit(1)
-        )
-        has_model = db.execute(model_stmt).scalars().first() is not None
-        if nc >= 2 and not has_model:
+        # Rule 7: no mental model captured
+        if nc >= 2 and not n_repo.has_mental_model(db, task_id):
             signals.append(
                 Signal(
                     type="no_model",
