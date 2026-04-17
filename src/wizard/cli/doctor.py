@@ -47,13 +47,15 @@ def _check_db_tables() -> tuple[bool, str]:
         return False, "Database file missing — cannot check tables"
     try:
         conn = sqlite3.connect(str(db_path))
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        conn.close()
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
         required = REQUIRED_TABLES
         missing = required - tables
         if missing:
