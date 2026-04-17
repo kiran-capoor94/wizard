@@ -53,6 +53,7 @@ class TaskRepository:
             .scalar_subquery()
             .label("last_worked_at")
         )
+
     def get_by_id(self, db: Session, task_id: int) -> Task:
         task = db.get(Task, task_id)
         if task is None:
