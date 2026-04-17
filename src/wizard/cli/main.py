@@ -216,13 +216,33 @@ def _configure_notion(cfg: dict, config_path: Path) -> None:
     cfg["notion"]["daily_page_parent_id"] = page_id
     typer.echo(f"  daily page ID: {'set' if page_id else 'skipped'}")
 
-    tasks_id = typer.prompt("  Tasks data source ID (not the URL page ID — use the data_sources API field)")
-    cfg["notion"]["tasks_ds_id"] = tasks_id
-    typer.echo("  tasks database: set")
+    client = NotionSdkClient(auth=token)
 
-    meetings_id = typer.prompt("  Meetings data source ID (not the URL page ID — use the data_sources API field)")
-    cfg["notion"]["meetings_ds_id"] = meetings_id
-    typer.echo("  meetings database: set")
+    while True:
+        tasks_url = typer.prompt("  Tasks database URL")
+        try:
+            pid = _resolve_notion_page_id(tasks_url)
+            typer.echo("  → Resolving...", nl=False)
+            tasks_ds_id = _resolve_ds_id(client, pid)
+            typer.echo("  ok")
+            cfg["notion"]["tasks_ds_id"] = tasks_ds_id
+            typer.echo("  tasks database: set")
+            break
+        except Exception as exc:
+            typer.echo(f"  failed: {exc}. Paste the database URL from Notion.")
+
+    while True:
+        meetings_url = typer.prompt("  Meetings database URL")
+        try:
+            pid = _resolve_notion_page_id(meetings_url)
+            typer.echo("  → Resolving...", nl=False)
+            meetings_ds_id = _resolve_ds_id(client, pid)
+            typer.echo("  ok")
+            cfg["notion"]["meetings_ds_id"] = meetings_ds_id
+            typer.echo("  meetings database: set")
+            break
+        except Exception as exc:
+            typer.echo(f"  failed: {exc}. Paste the database URL from Notion.")
 
     with open(config_path, "w") as f:
         json.dump(cfg, f, indent=2)
