@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from sqlmodel import select
 
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
@@ -19,12 +20,12 @@ from wizard.cli.configure import (
     jira_is_configured,
     notion_is_configured,
     run_jira_configure,
-    run_notion_discovery,
 )
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
 from wizard.deps import get_sync_service
+from wizard.models import WizardSession
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,8 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
     for aid in agents_to_register:
         try:
             agent_registration.register(aid)
-            typer.echo(f"  Registered {aid}")
+            hook_ok = agent_registration.register_hook(aid)
+            typer.echo(f"  Registered {aid}" + (" + hook" if hook_ok else ""))
         except Exception as exc:
             typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
 
@@ -238,27 +240,30 @@ def setup(
 
     typer.echo("\n" + "─" * 45)
     typer.echo("Setup complete.")
-    typer.echo(f"  Notion  {notion_status}" + (
-        "" if notion_status != "skipped" else " (run 'wizard configure --notion' to add)"
-    ))
-    typer.echo(f"  Jira    {jira_status}" + (
-        "" if jira_status != "skipped" else " (run 'wizard configure --jira' to add)"
-    ))
-    agent_label = ", ".join(agents_to_register)
-    typer.echo(f"  Agent   {agent_label}")
+    ns = "" if notion_status != "skipped" else " (run 'wizard configure --notion')"
+    js = "" if jira_status != "skipped" else " (run 'wizard configure --jira')"
+    typer.echo(f"  Notion {notion_status}{ns}")
+    typer.echo(f"  Jira   {jira_status}{js}")
+    typer.echo(f"  Agent  {', '.join(agents_to_register)}")
 
 
 @app.command()
 def configure(
-    notion: bool = typer.Option(False, "--notion", help="Re-run Notion schema discovery"),
+    notion: bool = typer.Option(False, "--notion", help="Re-configure Notion integration"),
     jira: bool = typer.Option(False, "--jira", help="Re-configure Jira credentials"),
 ) -> None:
     """Configure Wizard integrations."""
+    config_path = WIZARD_HOME / "config.json"
     if notion:
-        run_notion_discovery(WIZARD_HOME / "config.json")
+        if not config_path.exists():
+            typer.echo("Config not found. Run 'wizard setup' first.", err=True)
+            raise typer.Exit(1)
+        with open(config_path) as f:
+            cfg = json.load(f)
+        configure_notion(cfg, config_path)
         return
     if jira:
-        run_jira_configure(WIZARD_HOME / "config.json")
+        run_jira_configure(config_path)
         return
     typer.echo("Available flags: --notion, --jira")
 
@@ -305,7 +310,8 @@ def _deregister_agents(registered: list[str]) -> None:
     for aid in registered:
         try:
             agent_registration.deregister(aid)
-            typer.echo(f"  Removed wizard MCP from {aid}")
+            agent_registration.deregister_hook(aid)
+            typer.echo(f"  Removed wizard from {aid}")
         except Exception as exc:
             typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
 
@@ -449,8 +455,46 @@ def update() -> None:
     for aid in registered:
         try:
             agent_registration.register(aid)
-            typer.echo(f"  Re-registered {aid}")
+            hook_ok = agent_registration.register_hook(aid)
+            typer.echo(f"  Re-registered {aid}" + (" + hook" if hook_ok else ""))
         except Exception as exc:
             typer.echo(f"  Warning: could not re-register {aid}: {exc}", err=True)
 
     typer.echo("Wizard updated.")
+
+
+@app.command()
+def capture(
+    close: bool = typer.Option(False, "--close", help="Mark session as closed by hook"),
+    transcript: str = typer.Option("", "--transcript", help="Path to transcript file"),
+    agent: str = typer.Option("", "--agent", help="Agent name"),
+    session_id: int | None = typer.Option(None, "--session-id", help="Wizard session ID"),
+) -> None:
+    """Capture agent session data for later synthesis."""
+    if not close:
+        typer.echo("Only --close mode is supported.")
+        raise typer.Exit(0)
+
+    with get_db_session() as db:
+        if session_id is not None:
+            session = db.get(WizardSession, session_id)
+        else:
+            session = db.exec(
+                select(WizardSession)
+                .where(WizardSession.closed_by == None)  # noqa: E711
+                .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
+                .limit(1)
+            ).first()
+
+        if session is None:
+            typer.echo("No open session found.")
+            raise typer.Exit(0)
+
+        if transcript:
+            session.transcript_path = transcript
+        if agent:
+            session.agent = agent
+        session.closed_by = "hook"
+        db.add(session)
+        db.flush()
+        typer.echo(f"Session {session.id} marked for synthesis.")

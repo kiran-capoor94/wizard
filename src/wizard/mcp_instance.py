@@ -4,7 +4,7 @@ from fastmcp import FastMCP
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
 from .config import settings
-from .middleware import ToolLoggingMiddleware
+from .middleware import SessionStateMiddleware, ToolLoggingMiddleware
 
 mcp = FastMCP(
     name=settings.name,
@@ -35,3 +35,4 @@ if _roots:
     mcp.add_provider(SkillsDirectoryProvider(roots=_roots))
 
 mcp.add_middleware(ToolLoggingMiddleware())
+mcp.add_middleware(SessionStateMiddleware())
