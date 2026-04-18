@@ -9,7 +9,7 @@ from wizard.tools.task_tools import create_task
 
 
 @pytest.mark.asyncio
-async def test_create_task_dedup_by_source_id(db_session, fake_ctx, fake_writeback):
+async def test_create_task_dedup_by_source_id(db_session, fake_ctx):
     """Second create_task with same source_id updates and returns already_existed=True."""
     t_repo = TaskRepository()
     ts_repo = TaskStateRepository()
@@ -24,7 +24,6 @@ async def test_create_task_dedup_by_source_id(db_session, fake_ctx, fake_writeba
         t_repo=t_repo,
         sec=security,
         t_state_repo=ts_repo,
-        wb=fake_writeback,
     )
     second = await create_task(
         ctx=fake_ctx,
@@ -35,7 +34,6 @@ async def test_create_task_dedup_by_source_id(db_session, fake_ctx, fake_writeba
         t_repo=t_repo,
         sec=security,
         t_state_repo=ts_repo,
-        wb=fake_writeback,
     )
 
     assert first.task_id == second.task_id
@@ -45,7 +43,7 @@ async def test_create_task_dedup_by_source_id(db_session, fake_ctx, fake_writeba
 
 
 @pytest.mark.asyncio
-async def test_create_task_no_source_id_always_creates(db_session, fake_ctx, fake_writeback):
+async def test_create_task_no_source_id_always_creates(db_session, fake_ctx):
     """Tasks without source_id always create new records."""
     t_repo = TaskRepository()
     ts_repo = TaskStateRepository()
@@ -59,7 +57,6 @@ async def test_create_task_no_source_id_always_creates(db_session, fake_ctx, fak
         t_repo=t_repo,
         sec=security,
         t_state_repo=ts_repo,
-        wb=fake_writeback,
     )
     second = await create_task(
         ctx=fake_ctx,
@@ -69,7 +66,6 @@ async def test_create_task_no_source_id_always_creates(db_session, fake_ctx, fak
         t_repo=t_repo,
         sec=security,
         t_state_repo=ts_repo,
-        wb=fake_writeback,
     )
 
     assert first.task_id != second.task_id
@@ -77,7 +73,7 @@ async def test_create_task_no_source_id_always_creates(db_session, fake_ctx, fak
 
 
 @pytest.mark.asyncio
-async def test_create_task_rejects_unknown_status(db_session, fake_ctx, fake_writeback):
+async def test_create_task_rejects_unknown_status(db_session, fake_ctx):
     """create_task raises ValueError for unknown status values."""
     t_repo = TaskRepository()
     ts_repo = TaskStateRepository()
@@ -93,5 +89,4 @@ async def test_create_task_rejects_unknown_status(db_session, fake_ctx, fake_wri
             t_repo=t_repo,
             sec=security,
             t_state_repo=ts_repo,
-            wb=fake_writeback,
         )

@@ -11,7 +11,6 @@ from ..deps import (
     get_security,
     get_task_repo,
     get_task_state_repo,
-    get_writeback,
 )
 from ..mcp_instance import mcp
 from ..models import (
@@ -43,9 +42,8 @@ from ..schemas import (
     UpdateTaskResponse,
 )
 from ..security import SecurityService
-from ..services import WriteBackService
 from ..skills import SKILL_TASK_START, load_skill
-from .task_helpers import apply_task_fields, dispatch_writebacks
+from .task_helpers import apply_task_fields
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 _VALID_STATUSES = {"todo", "in_progress", "blocked", "done", "archived"}
@@ -166,18 +164,10 @@ async def update_task(
     t_repo: TaskRepository = Depends(get_task_repo),
     sec: SecurityService = Depends(get_security),
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
-    wb: WriteBackService = Depends(get_writeback),
 ) -> UpdateTaskResponse:
     """Atomically update task fields. Only provided (non-None) fields are updated.
 
     Raises ToolError if no fields are provided or task not found.
-
-    Writebacks:
-    - status: Jira + Notion
-    - due_date: Notion only
-    - priority: Notion only
-    - name: local only (no external writeback)
-    - source_url: local only (no external writeback)
     """
     logger.info("update_task task_id=%d", task_id)
 
@@ -208,29 +198,9 @@ async def update_task(
                 t_state_repo.on_status_changed(db, task.id)
                 task_state_updated = True
 
-            if status == TaskStatus.DONE:
-                try:
-                    result = await ctx.elicit(
-                        "Task closed. What was the outcome? "
-                        "(1-2 sentences, or press Enter to skip)",
-                        response_type=str,
-                    )
-                    if isinstance(result, AcceptedElicitation) and result.data:
-                        scrubbed_outcome = sec.scrub(result.data).clean
-                        wb.append_task_outcome(task, scrubbed_outcome)
-                except (NotImplementedError, AttributeError) as e:
-                    logger.debug("ctx.elicit unavailable for task outcome: %s", e)
-
-            status_writeback, due_date_writeback, priority_writeback = dispatch_writebacks(
-                task, updated_fields, wb
-            )
-
             return UpdateTaskResponse(
                 task_id=task.id,
                 updated_fields=updated_fields,
-                status_writeback=status_writeback,
-                due_date_writeback=due_date_writeback,
-                priority_writeback=priority_writeback,
                 task_state_updated=task_state_updated,
             )
     except ValueError as e:
@@ -251,7 +221,6 @@ async def create_task(
     t_repo: TaskRepository = Depends(get_task_repo),
     sec: SecurityService = Depends(get_security),
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
-    wb: WriteBackService = Depends(get_writeback),
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
@@ -297,8 +266,6 @@ async def create_task(
 
         if meeting_id:
             db.add(MeetingTasks(meeting_id=meeting_id, task_id=task.id))
-
-        wb.push_task_to_notion(task)
 
         return CreateTaskResponse(
             task_id=task.id,

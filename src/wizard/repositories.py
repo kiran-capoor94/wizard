@@ -167,6 +167,9 @@ class TaskRepository:
 
 
 class MeetingRepository:
+    def get_by_source_id(self, db: Session, source_id: str) -> Meeting | None:
+        return db.exec(select(Meeting).where(Meeting.source_id == source_id)).first()
+
     def get_by_id(self, db: Session, meeting_id: int) -> Meeting:
         meeting = db.get(Meeting, meeting_id)
         if meeting is None:

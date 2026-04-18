@@ -8,7 +8,7 @@ from wizard.tools.session_tools import session_start
 
 @pytest.mark.asyncio
 async def test_meeting_ingestion(
-    db_session, fake_ctx, fake_writeback,
+    db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     session_closer, capture_synthesiser,
 ):
@@ -29,8 +29,8 @@ async def test_meeting_ingestion(
         content="Discussed Q3 priorities and assignments",
         source_id="krisp-abc123",
         source_url="https://krisp.ai/meetings/abc123",
+        m_repo=meeting_repo,
         sec=security,
-        wb=fake_writeback,
     )
     meeting_id = ingest_resp.meeting_id
     assert meeting_id is not None
@@ -49,7 +49,7 @@ async def test_meeting_ingestion(
         ctx=fake_ctx,
         meeting_id=meeting_id,
         summary="Agreed on Q3 priorities",
-        m_repo=meeting_repo, sec=security, n_repo=note_repo, wb=fake_writeback,
+        m_repo=meeting_repo, sec=security, n_repo=note_repo,
     )
     assert summary_resp.note_id is not None
 
@@ -66,8 +66,8 @@ async def test_meeting_ingestion(
         title="Sprint Planning (updated)",
         content="Updated content",
         source_id="krisp-abc123",
+        m_repo=meeting_repo,
         sec=security,
-        wb=fake_writeback,
     )
     assert ingest_resp2.already_existed is True
     assert ingest_resp2.meeting_id == meeting_id
