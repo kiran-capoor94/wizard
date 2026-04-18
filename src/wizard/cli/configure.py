@@ -2,42 +2,29 @@ import json
 import re
 from pathlib import Path
 
-import httpx
 import typer
 from notion_client import Client as NotionSdkClient
-from notion_client.errors import APIResponseError
 
 from wizard import notion_discovery
 
 
 def discover_data_sources(
     client: NotionSdkClient,
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str, str]]:
     """Enumerate all data sources visible to the integration.
 
-    Calls search() to find all databases, then databases.retrieve() on each
-    to read the data_sources array. Returns a flat list of
-    (ds_id, ds_name, db_title) tuples.
-
-    Skips databases that fail to retrieve (permissions, deleted, etc).
+    Uses the v3 search API with filter value "data_source" to get all
+    data sources directly. Returns a flat list of (ds_id, ds_name) tuples.
     """
     response = client.search(
-        filter={"property": "object", "value": "database"},
+        filter={"property": "object", "value": "data_source"},
     )
-    databases = response.get("results", [])
+    results = response.get("results", [])
 
-    result: list[tuple[str, str, str]] = []
-    for db in databases:
-        db_id = db["id"]
-        db_title = db.get("title", [{}])[0].get("plain_text", "(untitled)")
-        try:
-            detail = client.databases.retrieve(database_id=db_id)
-        except (APIResponseError, httpx.HTTPError):
-            continue
-        for ds in detail.get("data_sources", []):
-            result.append((ds["id"], ds["name"], db_title))
-
-    return result
+    return [
+        (ds["id"], ds.get("title", [{}])[0].get("plain_text", "(untitled)"))
+        for ds in results
+    ]
 
 
 def run_notion_discovery(config_path: Path) -> None:
@@ -172,8 +159,7 @@ def configure_notion(cfg: dict, config_path: Path) -> None:  # noqa: C901
         typer.echo("  No data sources found — check integration has access to a database.")
         raise typer.Exit(1)
 
-    db_count = len({db_title for _, _, db_title in all_ds})
-    typer.echo(f"  Found {len(all_ds)} data sources across {db_count} databases.")
+    typer.echo(f"  Found {len(all_ds)} data sources.")
 
     slots = [
         ("tasks", "tasks_ds_id", "task"),
@@ -181,7 +167,7 @@ def configure_notion(cfg: dict, config_path: Path) -> None:  # noqa: C901
     ]
 
     for label, config_key, search_term in slots:
-        matches = [(ds_id, ds_name, db_title) for ds_id, ds_name, db_title in all_ds
+        matches = [(ds_id, ds_name) for ds_id, ds_name in all_ds
                     if search_term in ds_name.lower()]
 
         if matches:
@@ -193,8 +179,8 @@ def configure_notion(cfg: dict, config_path: Path) -> None:  # noqa: C901
             typer.echo("  Found 0 matches — showing all:")
             options = all_ds
 
-        for i, (_ds_id, ds_name, db_title) in enumerate(options, 1):
-            typer.echo(f"    {i}. {ds_name} (in \"{db_title}\" database)")
+        for i, (_ds_id, ds_name) in enumerate(options, 1):
+            typer.echo(f"    {i}. {ds_name}")
 
         while True:
             choice = typer.prompt("  Which one?", default="1")
@@ -204,9 +190,9 @@ def configure_notion(cfg: dict, config_path: Path) -> None:  # noqa: C901
                     break
             except ValueError:
                 pass
-            typer.echo(f"  Invalid selection — enter a number between 1 and {len(options)}")
+            typer.echo(f"  Invalid selection — enter 1-{len(options)}")
 
-        chosen_ds_id, chosen_name, _ = options[idx]
+        chosen_ds_id, chosen_name = options[idx]
         cfg["notion"][config_key] = chosen_ds_id
         typer.echo(f"  {label} data source: set ({chosen_name})")
 

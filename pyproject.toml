@@ -38,6 +38,8 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not integration'"
+markers = ["integration: live API tests (require real credentials)"]
 
 [tool.ruff]
 target-version = "py314"
