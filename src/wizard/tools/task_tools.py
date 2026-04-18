@@ -161,7 +161,6 @@ async def update_task(
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
     due_date: str | None = None,
-    notion_id: str | None = None,
     name: str | None = None,
     source_url: str | None = None,
     t_repo: TaskRepository = Depends(get_task_repo),
@@ -182,7 +181,7 @@ async def update_task(
     """
     logger.info("update_task task_id=%d", task_id)
 
-    if all(v is None for v in [status, priority, due_date, notion_id, name, source_url]):
+    if all(v is None for v in [status, priority, due_date, name, source_url]):
         raise ToolError("At least one field must be provided to update_task")
 
     try:
@@ -195,7 +194,6 @@ async def update_task(
                 status=status,
                 priority=priority,
                 due_date=due_date,
-                notion_id=notion_id,
                 name=name,
                 source_url=source_url,
             )
@@ -210,7 +208,7 @@ async def update_task(
                 t_state_repo.on_status_changed(db, task.id)
                 task_state_updated = True
 
-            if status == TaskStatus.DONE and task.notion_id:
+            if status == TaskStatus.DONE:
                 try:
                     result = await ctx.elicit(
                         "Task closed. What was the outcome? "

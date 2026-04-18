@@ -14,15 +14,19 @@ from wizard.tools.task_tools import (
 
 @pytest.mark.asyncio
 async def test_task_creation_flow(
-    db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
+    db_session, fake_ctx, fake_writeback,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     session_closer, capture_synthesiser,
 ):
     # Start session
     await session_start(
-        ctx=fake_ctx, sync_svc=fake_sync, notion=fake_notion,
-        t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
-        closer=session_closer, synthesiser=capture_synthesiser,
+        ctx=fake_ctx,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+        capture_synthesiser=capture_synthesiser,
     )
 
     # 1. create_task

@@ -95,7 +95,6 @@ class TaskContext(BaseModel):
     last_note_type: NoteType | None  # most recent note type, or None
     last_note_preview: str | None  # first 300 chars of most recent note
     last_worked_at: UTCDateTime | None  # created_at of most recent note
-    notion_id: str | None = None
     stale_days: int = 0
     note_count: int = 0
     decision_count: int = 0
@@ -118,7 +117,6 @@ class TaskContext(BaseModel):
             due_date=task.due_date,
             source_id=task.source_id,
             source_url=task.source_url,
-            notion_id=task.notion_id,
             last_note_type=latest_note.note_type if latest_note else None,
             last_note_preview=latest_note.content[:300] if latest_note else None,
             last_worked_at=task_state.last_note_at if task_state else None,
@@ -163,7 +161,6 @@ class NoteDetail(BaseModel):
     note_type: NoteType
     content: str
     created_at: UTCDateTime
-    source_id: str | None
     mental_model: str | None = None
 
     @classmethod
@@ -175,7 +172,6 @@ class NoteDetail(BaseModel):
             note_type=note.note_type,
             content=note.content,
             created_at=note.created_at,
-            source_id=note.source_id,
             mental_model=note.mental_model,
         )
 
