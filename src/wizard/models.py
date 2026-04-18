@@ -132,6 +132,14 @@ class WizardSession(TimestampMixin, table=True):
             "Read by resume_session (M3)."
         ),
     )
+    last_active_at: datetime.datetime | None = Field(default=None)
+    closed_by: str | None = Field(
+        default=None,
+        description=(
+            "Who closed this session: 'user' (session_end), "
+            "'auto' (SessionCloser), or None (still open/abandoned)"
+        ),
+    )
     notes: list["Note"] = Relationship(back_populates="session")
 
 
