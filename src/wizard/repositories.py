@@ -46,12 +46,31 @@ class TaskRepository:
             .label("last_worked_at")
         )
 
+    def get(self, db: Session, task_id: int) -> Task | None:
+        return db.get(Task, task_id)
+
     def get_by_id(self, db: Session, task_id: int) -> Task:
         task = db.get(Task, task_id)
         if task is None:
             logger.warning("Task %d not found", task_id)
             raise ValueError(f"Task {task_id} not found")
         return task
+
+    def list_paginated(
+        self,
+        db: Session,
+        status_filter: list[str] | None = None,
+        source_type_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Task]:
+        stmt = select(Task)
+        if status_filter:
+            stmt = stmt.where(Task.status.in_(status_filter))
+        if source_type_filter:
+            stmt = stmt.where(Task.source_type == source_type_filter)
+        stmt = stmt.order_by(Task.id.desc()).offset(offset).limit(limit)
+        return list(db.exec(stmt).all())
 
     def get_by_source_id(self, db: Session, source_id: str) -> Task | None:
         return db.exec(select(Task).where(Task.source_id == source_id)).first()
@@ -260,6 +279,21 @@ class NoteRepository:
         )
         return db.exec(stmt).first() is not None
 
+    def list_for_task(self, db: Session, task_id: int) -> list[Note]:
+        stmt = select(Note).where(Note.task_id == task_id).order_by(col(Note.created_at).asc())
+        return list(db.exec(stmt).all())
+
+    def list_for_session(self, db: Session, session_id: int) -> list[Note]:
+        stmt = (
+            select(Note).where(Note.session_id == session_id).order_by(col(Note.created_at).asc())
+        )
+        return list(db.exec(stmt).all())
+
+    def count_for_session(self, db: Session, session_id: int) -> int:
+        return db.exec(
+            select(func.count()).select_from(Note).where(Note.session_id == session_id)
+        ).one()
+
 
 # ---------------------------------------------------------------------------
 # TaskStateRepository
@@ -344,6 +378,12 @@ class TaskStateRepository:
             state.stale_days = (now - state.last_touched_at).days
         db.flush()
 
+    def get_for_tasks(self, db: Session, task_ids: list[int]) -> list[TaskState]:
+        if not task_ids:
+            return []
+        stmt = select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+        return list(db.exec(stmt).all())
+
     def _get_or_create(self, db: Session, task: Task) -> TaskState:
         """Defensive helper: returns the TaskState for `task`, creating one
         with zero counts if missing. Used internally by on_note_saved and
@@ -361,6 +401,35 @@ class TaskStateRepository:
             task.id,
         )
         return self.create_for_task(db, task)
+
+
+# ---------------------------------------------------------------------------
+# SessionRepository
+# ---------------------------------------------------------------------------
+
+
+class SessionRepository:
+    def list_paginated(
+        self,
+        db: Session,
+        closure_status_filter: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[WizardSession]:
+        stmt = select(WizardSession)
+        if closure_status_filter:
+            stmt = stmt.where(WizardSession.closed_by == closure_status_filter)
+        stmt = stmt.order_by(col(WizardSession.created_at).desc()).offset(offset).limit(limit)
+        return list(db.exec(stmt).all())
+
+    def count(self, db: Session, closure_status_filter: str | None = None) -> int:
+        stmt = select(func.count()).select_from(WizardSession)
+        if closure_status_filter:
+            stmt = stmt.where(WizardSession.closed_by == closure_status_filter)
+        return db.exec(stmt).one()
+
+    def get(self, db: Session, session_id: int) -> WizardSession | None:
+        return db.exec(select(WizardSession).where(WizardSession.id == session_id)).first()
 
 
 # ---------------------------------------------------------------------------
