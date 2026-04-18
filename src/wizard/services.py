@@ -5,14 +5,21 @@ from collections.abc import Callable
 from typing import Any
 
 import httpx
+from fastmcp import Context
 from notion_client.errors import APIResponseError
 from sqlmodel import Session, select
 
 from .integrations import JiraClient, NotionClient, extract_krisp_id
 from .mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
-from .models import Meeting, MeetingCategory, Task, WizardSession
-from .repositories import TaskStateRepository
-from .schemas import SourceSyncStatus, WriteBackStatus
+from .models import Meeting, MeetingCategory, Note, NoteType, Task, WizardSession
+from .repositories import NoteRepository, TaskStateRepository
+from .schemas import (
+    AutoCloseSummary,
+    ClosedSessionSummary,
+    SessionState,
+    SourceSyncStatus,
+    WriteBackStatus,
+)
 from .security import SecurityService
 
 logger = logging.getLogger(__name__)
@@ -356,3 +363,127 @@ class WriteBackService:
             lambda: self._notion.update_daily_page(page_id, summary),
             "WriteBack push_session_summary",
         )
+
+
+class SessionCloser:
+    """Auto-closes abandoned sessions with a three-tier fallback chain:
+    1. LLM sampling via ctx.sample()
+    2. Synthetic summary from DB data
+    3. Minimal warn fallback
+    """
+
+    def __init__(self, note_repo: NoteRepository | None = None):
+        self._note_repo = note_repo or NoteRepository()
+
+    async def close_abandoned(
+        self, db: Session, ctx: Context, current_session_id: int,
+    ) -> list[ClosedSessionSummary]:
+        abandoned = self._find_abandoned(db, current_session_id)
+        return [await self._close_one(db, ctx, s) for s in abandoned]
+
+    def _find_abandoned(self, db: Session, current_session_id: int) -> list[WizardSession]:
+        stmt = (
+            select(WizardSession)
+            .where(
+                WizardSession.summary == None,  # noqa: E711
+                WizardSession.closed_by == None,  # noqa: E711
+                WizardSession.id != current_session_id,
+            )
+            .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
+        )
+        return list(db.exec(stmt).all())
+
+    async def _close_one(
+        self, db: Session, ctx: Context, session: WizardSession,
+    ) -> ClosedSessionSummary:
+        session_id = session.id
+        assert session_id is not None
+        notes = self._get_session_notes(db, session_id)
+        task_ids = list({n.task_id for n in notes if n.task_id is not None})
+        note_count = len(notes)
+        state = SessionState(
+            intent="", working_set=task_ids, state_delta="",
+            open_loops=[], next_actions=[], closure_status="interrupted",
+        )
+        # Tier 1: try LLM sampling
+        summary_text, closed_via = await self._try_sampling(ctx, notes)
+        # Tier 2: synthetic fallback
+        if summary_text is None:
+            summary_text, closed_via = self._synthetic_summary(session, notes, task_ids)
+        # Tier 3: warn fallback
+        if summary_text is None:
+            summary_text = "Auto-closed: no summary available"
+            closed_via = "fallback"
+        session.summary = summary_text
+        session.session_state = state.model_dump_json()
+        session.closed_by = "auto"
+        db.add(session)
+        db.flush()
+        note = Note(
+            note_type=NoteType.SESSION_SUMMARY, content=summary_text,
+            session_id=session_id,
+        )
+        self._note_repo.save(db, note)
+        return ClosedSessionSummary(
+            session_id=session_id, summary=summary_text,
+            closed_via=closed_via, task_ids=task_ids, note_count=note_count,
+        )
+
+    def _get_session_notes(self, db: Session, session_id: int) -> list[Note]:
+        stmt = (
+            select(Note)
+            .where(Note.session_id == session_id)
+            .order_by(Note.created_at.asc())  # type: ignore[union-attr]
+        )
+        return list(db.exec(stmt).all())
+
+    async def _try_sampling(
+        self, ctx: Context, notes: list[Note]
+    ) -> tuple[str | None, str]:
+        if not notes:
+            return None, ""
+        prompt = self._build_sampling_prompt(notes)
+        try:
+            result = await ctx.sample(
+                messages=prompt,
+                system_prompt=(
+                    "You are summarising an abandoned coding session. "
+                    "Be concise. Focus on what was accomplished and what remains."
+                ),
+                result_type=AutoCloseSummary,
+                max_tokens=500,
+                temperature=0.3,
+            )
+            auto_summary: AutoCloseSummary = result.result
+            return auto_summary.summary, "sampling"
+        except Exception as e:
+            logger.warning("SessionCloser sampling failed: %s", e)
+            return None, ""
+
+    def _build_sampling_prompt(self, notes: list[Note]) -> str:
+        lines = ["The following notes were saved during an abandoned session:\n"]
+        for n in notes:
+            lines.append(f"- [{n.note_type.value}] {n.content[:300]}")
+        lines.append(
+            "\nSummarise what was accomplished, the likely intent, "
+            "and any open loops."
+        )
+        return "\n".join(lines)
+
+    def _synthetic_summary(
+        self,
+        session: WizardSession,
+        notes: list[Note],
+        task_ids: list[int],
+    ) -> tuple[str | None, str]:
+        try:
+            note_count = len(notes)
+            task_count = len(task_ids)
+            last_activity = session.last_active_at or session.updated_at
+            return (
+                f"Auto-closed: {note_count} note(s) across {task_count} task(s). "
+                f"Last activity: {last_activity}."
+            ), "synthetic"
+        except Exception as e:
+            logger.warning("SessionCloser synthetic summary failed: %s", e)
+            return None, ""
