@@ -1,6 +1,6 @@
 [project]
 name = "wizard"
-version = "2.0.8"
+version = "2.0.9"
 description = "Local memory layer MCP server — syncs Jira and Notion, scrubs PII, surfaces structured context across sessions"
 license = "MIT"
 readme = "README.md"
