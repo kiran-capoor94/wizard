@@ -10,13 +10,14 @@ from wizard.tools.session_tools import session_start
 async def test_auto_close_empty_session(
     db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    session_closer,
+    session_closer, capture_synthesiser,
 ):
     # Session 1: start with NO notes (empty session)
     start1 = await session_start(
         ctx=fake_ctx, sync_svc=fake_sync, notion=fake_notion,
         t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
         closer=session_closer,
+        synthesiser=capture_synthesiser,
     )
     sid1 = start1.session_id
 
@@ -28,6 +29,7 @@ async def test_auto_close_empty_session(
         ctx=fresh_ctx, sync_svc=fake_sync, notion=fake_notion,
         t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
         closer=session_closer,
+        synthesiser=capture_synthesiser,
     )
 
     assert len(start2.closed_sessions) == 1

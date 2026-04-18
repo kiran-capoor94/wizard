@@ -11,7 +11,7 @@ from wizard.tools.task_tools import save_note, task_start, what_am_i_missing
 async def test_session_lifecycle(
     db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer,
+    seed_task, session_closer, capture_synthesiser,
 ):
     # Pre-seed a task so session_start has something to show
     task = seed_task(name="Fix auth bug", status="todo")
@@ -25,6 +25,7 @@ async def test_session_lifecycle(
         t_repo=task_repo,
         m_repo=meeting_repo,
         closer=session_closer,
+        synthesiser=capture_synthesiser,
     )
     assert start_resp.session_id is not None
     assert isinstance(start_resp.open_tasks, list)
@@ -87,6 +88,7 @@ async def test_session_lifecycle(
         sec=security,
         n_repo=note_repo,
         wb=fake_writeback,
+        synthesiser=capture_synthesiser,
     )
     assert end_resp.note_id is not None
     assert end_resp.session_state_saved is True

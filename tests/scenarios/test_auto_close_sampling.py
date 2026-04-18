@@ -15,7 +15,7 @@ from wizard.tools.task_tools import save_note
 async def test_auto_close_via_sampling(
     db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer,
+    seed_task, session_closer, capture_synthesiser,
 ):
     task = seed_task(name="Debug memory leak")
 
@@ -24,6 +24,7 @@ async def test_auto_close_via_sampling(
         ctx=fake_ctx, sync_svc=fake_sync, notion=fake_notion,
         t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
         closer=session_closer,
+        synthesiser=capture_synthesiser,
     )
     sid1 = start1.session_id
 
@@ -49,6 +50,7 @@ async def test_auto_close_via_sampling(
         ctx=fresh_ctx, sync_svc=fake_sync, notion=fake_notion,
         t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
         closer=session_closer,
+        synthesiser=capture_synthesiser,
     )
     assert start2.session_id != sid1
 
