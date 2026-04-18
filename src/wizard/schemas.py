@@ -413,3 +413,20 @@ class ResumeSessionResponse(BaseModel):
     sync_results: list[SourceSyncStatus]
     daily_page: DailyPageResult | None
     skill_instructions: str | None = None
+
+
+class SynthesisNote(BaseModel):
+    """One note produced by transcript synthesis."""
+
+    task_id: int | None = None
+    note_type: str  # "investigation" | "decision" | "docs" | "learnings"
+    content: str
+    mental_model: str | None = None
+
+
+class SynthesisResult(BaseModel):
+    """Result of synthesising a transcript into notes."""
+
+    notes_created: int
+    task_ids_touched: list[int] = Field(default_factory=list)
+    synthesised_via: str  # "sampling" | "synthetic" | "fallback"
