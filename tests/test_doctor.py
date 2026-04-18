@@ -1,9 +1,12 @@
+import json
 from unittest.mock import MagicMock, patch
 
 import httpx
 from notion_client.errors import APIResponseError
+from typer.testing import CliRunner
 
 from wizard.cli.doctor import _check_jira_token, _check_notion_token
+from wizard.cli.main import app
 
 
 class TestCheckNotionToken:
@@ -112,3 +115,15 @@ class TestCheckJiraToken:
             passed, message = _check_jira_token()
             assert not passed
             assert "not set" in message or "not configured" in message
+
+
+class TestConfigureNotion:
+    def test_configure_notion_calls_full_flow(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({"notion": {"token": ""}}))
+
+        with patch("wizard.cli.main.WIZARD_HOME", tmp_path), \
+             patch("wizard.cli.main.configure_notion") as mock_configure:
+            runner = CliRunner()
+            runner.invoke(app, ["configure", "--notion"])
+            mock_configure.assert_called_once()

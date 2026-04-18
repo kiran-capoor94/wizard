@@ -19,7 +19,6 @@ from wizard.cli.configure import (
     jira_is_configured,
     notion_is_configured,
     run_jira_configure,
-    run_notion_discovery,
 )
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.config import settings
@@ -250,15 +249,21 @@ def setup(
 
 @app.command()
 def configure(
-    notion: bool = typer.Option(False, "--notion", help="Re-run Notion schema discovery"),
+    notion: bool = typer.Option(False, "--notion", help="Re-configure Notion integration"),
     jira: bool = typer.Option(False, "--jira", help="Re-configure Jira credentials"),
 ) -> None:
     """Configure Wizard integrations."""
+    config_path = WIZARD_HOME / "config.json"
     if notion:
-        run_notion_discovery(WIZARD_HOME / "config.json")
+        if not config_path.exists():
+            typer.echo("Config not found. Run 'wizard setup' first.", err=True)
+            raise typer.Exit(1)
+        with open(config_path) as f:
+            cfg = json.load(f)
+        configure_notion(cfg, config_path)
         return
     if jira:
-        run_jira_configure(WIZARD_HOME / "config.json")
+        run_jira_configure(config_path)
         return
     typer.echo("Available flags: --notion, --jira")
 
