@@ -1,4 +1,3 @@
-import datetime
 import logging
 
 from fastmcp import Context
@@ -44,10 +43,12 @@ from ..schemas import (
     UpdateTaskResponse,
 )
 from ..security import SecurityService
-from ..services import WriteBackService, WriteBackStatus
+from ..services import WriteBackService
 from ..skills import SKILL_TASK_START, load_skill
+from .task_helpers import apply_task_fields, dispatch_writebacks
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+_VALID_STATUSES = {"todo", "in_progress", "blocked", "done", "archived"}
 
 logger = logging.getLogger(__name__)
 
@@ -148,66 +149,10 @@ async def save_note(
         raise ToolError(str(e)) from e
 
 
-def _apply_task_fields(
-    task: Task,
-    sec: SecurityService,
-    *,
-    status: TaskStatus | None,
-    priority: TaskPriority | None,
-    due_date: str | None,
-    notion_id: str | None,
-    name: str | None,
-    source_url: str | None,
-) -> list[str]:
-    """Apply non-None field values to a Task model. Returns list of updated field names."""
-    updated: list[str] = []
-    if status is not None:
-        task.status = status
-        updated.append("status")
-    if priority is not None:
-        task.priority = priority
-        updated.append("priority")
-    if due_date is not None:
-        try:
-            due_date_dt = datetime.datetime.fromisoformat(due_date.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise ToolError(f"Invalid due_date format: {due_date}. Use ISO 8601.") from exc
-        task.due_date = due_date_dt
-        updated.append("due_date")
-    if notion_id is not None:
-        task.notion_id = notion_id
-        updated.append("notion_id")
-    if name is not None:
-        task.name = sec.scrub(name).clean
-        updated.append("name")
-    if source_url is not None:
-        task.source_url = source_url
-        updated.append("source_url")
-    return updated
 
 
-def _dispatch_writebacks(
-    task: Task,
-    updated_fields: list[str],
-    wb: WriteBackService,
-) -> tuple[WriteBackStatus | None, WriteBackStatus | None, WriteBackStatus | None]:
-    """Push changed fields to Jira/Notion. Returns (status_wb, due_date_wb, priority_wb)."""
-    status_writeback = None
-    due_date_writeback = None
-    priority_writeback = None
-    if "status" in updated_fields:
-        jira_wb = wb.push_task_status(task)
-        notion_wb = wb.push_task_status_to_notion(task)
-        status_writeback = WriteBackStatus(
-            ok=jira_wb.ok and notion_wb.ok,
-            error=", ".join(filter(None, [jira_wb.error, notion_wb.error])),
-            page_id=task.notion_id,
-        )
-    if "due_date" in updated_fields:
-        due_date_writeback = wb.push_task_due_date(task)
-    if "priority" in updated_fields:
-        priority_writeback = wb.push_task_priority(task)
-    return status_writeback, due_date_writeback, priority_writeback
+
+
 
 
 async def update_task(
@@ -244,7 +189,7 @@ async def update_task(
         with get_session() as db:
             task = t_repo.get_by_id(db, task_id)
 
-            updated_fields = _apply_task_fields(
+            updated_fields = apply_task_fields(
                 task,
                 sec,
                 status=status,
@@ -278,7 +223,7 @@ async def update_task(
                 except (NotImplementedError, AttributeError) as e:
                     logger.debug("ctx.elicit unavailable for task outcome: %s", e)
 
-            status_writeback, due_date_writeback, priority_writeback = _dispatch_writebacks(
+            status_writeback, due_date_writeback, priority_writeback = dispatch_writebacks(
                 task, updated_fields, wb
             )
 
@@ -301,22 +246,47 @@ async def create_task(
     priority: TaskPriority = TaskPriority.MEDIUM,
     category: TaskCategory = TaskCategory.ISSUE,
     source_id: str | None = None,
+    source_type: str | None = None,
     source_url: str | None = None,
+    status: str = "todo",
     meeting_id: int | None = None,
+    t_repo: TaskRepository = Depends(get_task_repo),
     sec: SecurityService = Depends(get_security),
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
     wb: WriteBackService = Depends(get_writeback),
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
+
+    # Validate status
+    if status not in _VALID_STATUSES:
+        raise ValueError(
+            f"Invalid status {status!r}. Valid values: {sorted(_VALID_STATUSES)}"
+        )
+
     with get_session() as db:
+        # Dedup by source_id
+        if source_id:
+            existing = t_repo.get_by_source_id(db, source_id)
+            if existing:
+                scrubbed_name = sec.scrub(name).clean
+                existing.name = scrubbed_name
+                existing.priority = priority
+                if source_url and not existing.source_url:
+                    existing.source_url = source_url
+                db.add(existing)
+                db.flush()
+                return CreateTaskResponse(task_id=existing.id, already_existed=True)
+
         clean_name = sec.scrub(name).clean
+        task_status = TaskStatus(status)
         task = Task(
             name=clean_name,
             priority=priority,
             category=category,
-            status=TaskStatus.TODO,
+            status=task_status,
             source_id=source_id,
+            source_type=source_type,
             source_url=source_url,
         )
         db.add(task)
@@ -330,14 +300,11 @@ async def create_task(
         if meeting_id:
             db.add(MeetingTasks(meeting_id=meeting_id, task_id=task.id))
 
-        wb_result = wb.push_task_to_notion(task)
-        if wb_result.page_id:
-            task.notion_id = wb_result.page_id
-            db.flush()
+        wb.push_task_to_notion(task)
 
         return CreateTaskResponse(
             task_id=task.id,
-            notion_write_back=wb_result,
+            already_existed=False,
         )
 
 
