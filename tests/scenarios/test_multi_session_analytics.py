@@ -12,7 +12,7 @@ from wizard.tools.task_tools import save_note
 async def test_multi_session_analytics(
     db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task,
+    seed_task, session_closer,
 ):
     task1 = seed_task(name="Task A")
     task2 = seed_task(name="Task B", source_id="unique-b")
@@ -25,6 +25,7 @@ async def test_multi_session_analytics(
         start = await session_start(
             ctx=ctx, sync_svc=fake_sync, notion=fake_notion,
             t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
+            closer=session_closer,
         )
         session_ids.append(start.session_id)
 

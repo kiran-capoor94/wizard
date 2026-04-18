@@ -16,6 +16,7 @@ from ..deps import (
     get_note_repo,
     get_notion_client,
     get_security,
+    get_session_closer,
     get_sync_service,
     get_task_repo,
     get_task_state_repo,
@@ -45,7 +46,7 @@ from ..schemas import (
     TaskContext,
 )
 from ..security import SecurityService
-from ..services import SyncService, WriteBackService
+from ..services import SessionCloser, SyncService, WriteBackService
 from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_START, load_skill
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ async def session_start(
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
     t_repo: TaskRepository = Depends(get_task_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
+    closer: SessionCloser = Depends(get_session_closer),
 ) -> SessionStartResponse:
     """Create a session, sync Jira/Notion, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start")
@@ -88,6 +90,8 @@ async def session_start(
 
         await ctx.set_state("current_session_id", session.id)
         await ctx.info(f"Session {session.id} started.")
+
+        closed_sessions = await closer.close_abandoned(db, ctx, session.id)
 
         try:
             t_state_repo.refresh_stale_days(db)
@@ -102,6 +106,7 @@ async def session_start(
             sync_results=sync_results,
             daily_page=daily_page,
             skill_instructions=load_skill(SKILL_SESSION_START),
+            closed_sessions=closed_sessions,
         )
 
 
@@ -146,6 +151,7 @@ async def session_end(
                 logger.warning("session_end: failed to serialise session_state: %s", e)
 
             clean_summary = sec.scrub(summary).clean
+            session.closed_by = "user"
             session.summary = clean_summary
             db.add(session)
             db.flush()

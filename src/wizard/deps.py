@@ -16,7 +16,7 @@ from .repositories import (
     TaskStateRepository,
 )
 from .security import SecurityService
-from .services import SyncService, WriteBackService
+from .services import SessionCloser, SyncService, WriteBackService
 
 logger = logging.getLogger(__name__)
 
@@ -82,3 +82,7 @@ def get_note_repo() -> NoteRepository:
 
 def get_task_state_repo() -> TaskStateRepository:
     return TaskStateRepository()
+
+
+def get_session_closer() -> SessionCloser:
+    return SessionCloser()
