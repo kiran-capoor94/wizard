@@ -7,12 +7,13 @@ import httpx
 import typer
 from alembic.runtime.migration import MigrationContext
 from httpx import HTTPError, HTTPStatusError
+from notion_client import Client as NotionSdkClient
 from notion_client.errors import APIResponseError
 from sqlalchemy import create_engine
 
-from wizard import agent_registration, notion_discovery
+from wizard import agent_registration
+from wizard.cli.configure import fetch_db_properties
 from wizard.config import Settings, settings
-from wizard.integrations import NotionSdkClient
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +178,8 @@ def _check_notion_schema() -> tuple[bool, str]:
         return False, "Notion not configured — run 'wizard configure --notion'"
 
     client = NotionSdkClient(auth=notion.token.get_secret_value())
-    tasks_props = notion_discovery.fetch_db_properties(client, notion.tasks_ds_id)
-    meetings_props = notion_discovery.fetch_db_properties(client, notion.meetings_ds_id)
+    tasks_props = fetch_db_properties(client, notion.tasks_ds_id)
+    meetings_props = fetch_db_properties(client, notion.meetings_ds_id)
 
     if not tasks_props and not meetings_props:
         return False, "Could not reach Notion API — check token and network"
