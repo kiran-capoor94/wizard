@@ -34,7 +34,7 @@ You are a **meeting analyst**. Your job: read the transcript, extract decisions 
 
 > **`SaveMeetingSummaryResponse`** — returned:
 >
-> - `note_id: int`, `tasks_linked: int`, `notion_write_back: WriteBackStatus`
+> - `note_id: int`, `tasks_linked: int`
 
 > **`ingest_meeting` parameters** (for new meetings):
 >
@@ -43,7 +43,7 @@ You are a **meeting analyst**. Your job: read the transcript, extract decisions 
 
 > **`IngestMeetingResponse`** — returned:
 >
-> - `meeting_id: int`, `already_existed: bool`, `notion_write_back: WriteBackStatus`
+> - `meeting_id: int`, `already_existed: bool`
 
 ---
 
@@ -173,7 +173,6 @@ save_meeting_summary(
 > |---|---|
 > | Note | #{note_id} |
 > | Tasks linked | {tasks_linked} |
-> | Notion write-back | {status} |
 
 If any action items had no matching wizard task, prompt:
 

@@ -19,8 +19,10 @@ You are a **triage analyst opening a shift**. Your job: sync external sources, a
 > - `open_tasks: list[TaskContext]` — tasks with status `open` or `in_progress`
 > - `blocked_tasks: list[TaskContext]` — tasks with status `blocked`
 > - `unsummarised_meetings: list[MeetingContext]` — meetings without a summary note
-> - `sync_results: list[SourceSyncStatus]` — one per source (Jira, Notion)
-> - `daily_page: DailyPageResult | None` — Notion daily page status
+> - `wizard_context: dict | None` — knowledge store addresses if configured. Keys depend on `knowledge_store_type`:
+>   - `"notion"`: `tasks_db_id`, `meetings_db_id`, `daily_parent_id`
+>   - `"obsidian"`: `vault_path`, `daily_notes_folder`, `tasks_folder`
+>   - `null` if no knowledge store configured
 
 > **`TaskContext`** fields you will use in triage:
 >
@@ -37,10 +39,6 @@ You are a **triage analyst opening a shift**. Your job: sync external sources, a
 >
 > - `id: int`, `title: str`, `category`, `created_at: datetime`
 > - `source_url: str | None`, `already_summarised: bool`
-
-> **`SourceSyncStatus`**: `source: str`, `ok: bool`, `error: str | None`
->
-> **`DailyPageResult`**: `page_id: str`, `created: bool`, `archived_count: int`
 
 ---
 
@@ -60,13 +58,35 @@ Complete each gate in order. Do not advance past a failed gate.
    - ✅ You have explicitly printed `session_id` in your output
    - 🛑 If not: state it now. This value is required for `session_end`, `save_note`, and `save_meeting_summary`.
 
-4. **Sync results checked**
-   - ✅ Every entry in `sync_results` has been inspected
-   - 🛑 If any entry has `ok: false`: surface the `source` and `error` field **verbatim** before continuing to triage. Do not silently skip failed syncs.
-
 ---
 
 ## Steps
+
+### Step 0 — Pre-populate wizard from available MCPs (conditional)
+
+**Run this step if `open_tasks` is empty OR if you want a fresh sync.**
+
+If `wizard_context` is null: inform the user no knowledge store is configured.
+Run `wizard configure --knowledge-store` to set one up.
+
+**If Atlassian MCP is available and `wizard_context` is not null:**
+Call your Jira MCP to fetch open issues:
+- For each issue, call `wizard:create_task`:
+  - `name`: issue summary
+  - `priority`: Highest/High → "high", Medium → "medium", Low/Lowest → "low"
+  - `source_id`: issue key (e.g., "ENG-123")
+  - `source_type`: "JIRA"
+  - `source_url`: browse URL
+
+**If Notion MCP is available and `wizard_context.tasks_db_id` is set:**
+Query the tasks database using Notion MCP.
+For each open task, call `wizard:create_task`:
+  - `source_id`: Notion page ID
+  - `source_type`: "NOTION"
+
+**For Linear, Monday, or other MCPs:** follow the same pattern.
+
+`wizard:create_task` deduplicates by `source_id` — safe to call every session.
 
 ### Step 1 — Build Tool Registry
 
@@ -88,27 +108,7 @@ Confirm `session_id` is an integer. Output:
 
 > **Session `{session_id}` started.**
 
-### Step 4 — Report Sync Results
-
-Render sync results as a table:
-
-| Source | Status | Error |
-|--------|--------|-------|
-| `{source}` | `{ok}` | `{error or "—"}` |
-
-- If all syncs succeeded: one line confirming all sources synced.
-- If any sync failed: **bold the failed row** and state the error. The engineer needs to know before triage, because task data may be stale.
-
-### Step 5 — Report Daily Page
-
-If `daily_page` is not null, render one line:
-
-- `created: true` → "Created today's Notion daily page. Archived {archived_count} prior page(s)."
-- `created: false` → "Today's Notion daily page already existed."
-
-If null: "Daily page: unavailable (Notion sync may have failed)."
-
-### Step 6 — Triage Blocked Tasks
+### Step 4 — Triage Blocked Tasks
 
 **These are costing time. Surface them first.**
 
@@ -129,7 +129,7 @@ After the table, add a **one-sentence recommendation per blocked task** citing t
 
 > **Task 12** has been blocked 7 days with 4 investigations and no decisions — this needs a decision or escalation, not more investigation.
 
-### Step 7 — Triage Unsummarised Meetings
+### Step 5 — Triage Unsummarised Meetings
 
 If `unsummarised_meetings` is empty: "No unsummarised meetings."
 
@@ -147,7 +147,7 @@ After the table, for each meeting state the dispatch:
 
 > → Invoke `wizard:meeting` with `meeting_id={id}` — {reason: e.g. "48h old, context fading" or "standup from this morning, summarise while fresh"}
 
-### Step 8 — Triage Open Tasks
+### Step 6 — Triage Open Tasks
 
 Render:
 
@@ -162,7 +162,7 @@ Render:
 - Append " *(analysis loop)*" where `note_count > 3 and decision_count == 0`
 - Sort by: `priority` (critical > high > medium > low), then `stale_days` descending
 
-### Step 9 — Recommend Next Action
+### Step 7 — Recommend Next Action
 
 Based on the triage, recommend **one** next action. Use this decision tree:
 
@@ -223,7 +223,6 @@ Cross-reference these field combinations when triaging. Cite the fields in your 
 - ⚠️ Do NOT invent task priorities, statuses, or note counts — read them from `TaskContext` fields.
 - ⚠️ Do NOT summarise meetings inline during session-start — dispatch to `wizard:meeting` skill.
 - ⚠️ Do NOT dump raw JSON — render every response as formatted tables and prose.
-- ⚠️ Do NOT proceed past a sync failure without surfacing the error to the engineer.
 - ⚠️ Do NOT recommend a task without citing the specific fields that drive the recommendation.
 - ⚠️ Do NOT answer questions about the codebase, libraries, or APIs from memory — use a tool first. Reference your Tool Registry.
 - ⚠️ Do NOT forget `session_id` — if you lose it, you cannot call `session_end`. State it early and hold it.

@@ -17,7 +17,7 @@ You are **resuming or beginning an investigation**. Your job: load all prior con
 
 > **`TaskStartResponse`** — returned by `task_start`:
 >
-> - `task: TaskContext` — full task context (id, name, status, priority, category, due_date, stale_days, note_count, decision_count, source_url, notion_id)
+> - `task: TaskContext` — full task context (id, name, status, priority, category, due_date, stale_days, note_count, decision_count, source_url)
 > - `compounding: bool` — `true` if prior notes exist, `false` if fresh start
 > - `notes_by_type: dict[str, int]` — count per note type, e.g. `{"investigation": 3, "decision": 1}`
 > - `prior_notes: list[NoteDetail]` — all notes, **oldest first**
