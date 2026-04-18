@@ -130,8 +130,6 @@ async def save_note(
                 content=clean,
                 mental_model=mental_model,
                 task_id=task.id,
-                source_id=task.source_id,
-                source_type=task.source_type,
                 session_id=session_id,
             )
             saved = n_repo.save(db, note)

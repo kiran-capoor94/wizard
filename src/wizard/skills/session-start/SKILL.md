@@ -100,7 +100,7 @@ Before calling any tool:
 
 ### Step 2 — Call `session_start`
 
-Call `session_start` with no parameters. It syncs Jira and Notion, creates a session, and returns triage data.
+Call `session_start` with no parameters. It creates a session and returns triage data.
 
 ### Step 3 — Verify and State Session ID
 

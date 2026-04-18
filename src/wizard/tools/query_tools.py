@@ -8,7 +8,7 @@ import logging
 from fastmcp.dependencies import Depends
 from sqlmodel import Session
 
-from ..database import get_session
+from ..database import get_session as _get_db_session
 from ..deps import get_note_repo, get_session_repo, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
 from ..repositories import NoteRepository, SessionRepository, TaskRepository, TaskStateRepository
@@ -45,7 +45,7 @@ async def get_tasks(
     cursor: str | None = None,
     t_repo: TaskRepository = Depends(get_task_repo),
     ts_repo: TaskStateRepository = Depends(get_task_state_repo),
-    db: Session = Depends(get_session),
+    db: Session = Depends(_get_db_session),
 ) -> GetTasksResponse:
     """List tasks with optional status and source_type filters. Paginated."""
     offset = _decode_cursor(cursor) if cursor else 0
@@ -90,7 +90,7 @@ async def get_task(
     task_id: int,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
-    db: Session = Depends(get_session),
+    db: Session = Depends(_get_db_session),
 ) -> TaskDetailResponse:
     """Get a single task with all its notes. Read-only — does not log access."""
     task = t_repo.get(db, task_id)
@@ -129,7 +129,7 @@ async def get_sessions(
     cursor: str | None = None,
     s_repo: SessionRepository = Depends(get_session_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
-    db: Session = Depends(get_session),
+    db: Session = Depends(_get_db_session),
 ) -> GetSessionsResponse:
     """List sessions, newest first. Paginated."""
     offset = _decode_cursor(cursor) if cursor else 0
@@ -162,7 +162,7 @@ async def get_session(
     session_id: int,
     s_repo: SessionRepository = Depends(get_session_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
-    db: Session = Depends(get_session),
+    db: Session = Depends(_get_db_session),
 ) -> SessionDetailResponse:
     """Get a single session with its notes and state."""
     session = s_repo.get(db, session_id)

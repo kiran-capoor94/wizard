@@ -77,8 +77,7 @@ class BlockedTasksResource(BaseModel):
 
 
 class ConfigResource(BaseModel):
-    jira_enabled: bool
-    notion_enabled: bool
+    knowledge_store_type: str
     scrubbing_enabled: bool
     database_path: str
 
