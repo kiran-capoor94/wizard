@@ -84,7 +84,6 @@ class Task(TimestampMixin, table=True):
     priority: TaskPriority = TaskPriority.MEDIUM
     category: TaskCategory = TaskCategory.ISSUE
     status: TaskStatus = TaskStatus.TODO
-    notion_id: str | None = Field(default=None, index=True)
     meetings: list["Meeting"] = Relationship(
         back_populates="tasks", link_model=MeetingTasks
     )
@@ -102,7 +101,6 @@ class Meeting(TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str
     content: str
-    notion_id: str | None = Field(default=None, index=True)
     category: MeetingCategory = MeetingCategory.GENERAL
     summary: str | None = None
     tasks: list[Task] = Relationship(back_populates="meetings", link_model=MeetingTasks)
@@ -123,7 +121,6 @@ class WizardSession(TimestampMixin, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     summary: str | None = None
-    daily_page_id: str | None = None
     session_state: str | None = Field(
         default=None,
         description=(
@@ -164,14 +161,7 @@ class Note(TimestampMixin, table=True):
             "Soft cap 1500 chars at the application display layer."
         ),
     )
-    source_id: str | None = Field(
-        default=None,
-        index=True,
-        description="identifier of the external entity this note is about",
-    )
-    source_type: str | None = Field(default=None, index=True)
     session_id: int | None = Field(default=None, foreign_key="wizardsession.id")
-    source_url: str | None = Field(default=None)
     task_id: int | None = Field(default=None, foreign_key="task.id")
     meeting_id: int | None = Field(default=None, foreign_key="meeting.id")
     session: WizardSession | None = Relationship(back_populates="notes")
