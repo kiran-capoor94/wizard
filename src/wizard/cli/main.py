@@ -455,7 +455,8 @@ def update() -> None:
     for aid in registered:
         try:
             agent_registration.register(aid)
-            typer.echo(f"  Re-registered {aid}")
+            hook_ok = agent_registration.register_hook(aid)
+            typer.echo(f"  Re-registered {aid}" + (" + hook" if hook_ok else ""))
         except Exception as exc:
             typer.echo(f"  Warning: could not re-register {aid}: {exc}", err=True)
 
