@@ -69,7 +69,7 @@ class ScrubbingSettings(BaseModel):
 
 class Settings(BaseSettings):
     name: str = "wizard"
-    version: str = "2.0.8"
+    version: str = "2.0.9"
     db: str = str(Path.home() / ".wizard" / "wizard.db")
     jira: JiraSettings = Field(default_factory=JiraSettings)
     notion: NotionSettings = Field(default_factory=NotionSettings)
