@@ -10,7 +10,7 @@ from wizard.tools.task_tools import create_task, update_task
 
 @pytest.mark.asyncio
 async def test_meeting_to_task_linkage(
-    db_session, fake_ctx, fake_writeback,
+    db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     session_closer, capture_synthesiser,
 ):
@@ -28,7 +28,7 @@ async def test_meeting_to_task_linkage(
     ingest_resp = await ingest_meeting(
         ctx=fake_ctx, title="Sprint Planning",
         content="Need to fix auth flow",
-        sec=security, wb=fake_writeback,
+        m_repo=meeting_repo, sec=security,
     )
     meeting_id = ingest_resp.meeting_id
 
@@ -38,7 +38,7 @@ async def test_meeting_to_task_linkage(
         priority=TaskPriority.HIGH,
         category=TaskCategory.BUG,
         meeting_id=meeting_id,
-        sec=security, t_state_repo=task_state_repo, wb=fake_writeback,
+        sec=security, t_state_repo=task_state_repo,
     )
     task_id = create_resp.task_id
 
@@ -53,7 +53,7 @@ async def test_meeting_to_task_linkage(
     await update_task(
         ctx=fake_ctx, task_id=task_id, status=TaskStatus.DONE,
         t_repo=task_repo, sec=security,
-        t_state_repo=task_state_repo, wb=fake_writeback,
+        t_state_repo=task_state_repo,
     )
     get_resp2 = await get_meeting(
         ctx=fake_ctx, meeting_id=meeting_id,

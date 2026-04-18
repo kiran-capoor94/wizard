@@ -14,7 +14,7 @@ from wizard.tools.task_tools import (
 
 @pytest.mark.asyncio
 async def test_task_creation_flow(
-    db_session, fake_ctx, fake_writeback,
+    db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     session_closer, capture_synthesiser,
 ):
@@ -37,7 +37,6 @@ async def test_task_creation_flow(
         category=TaskCategory.BUG,
         sec=security,
         t_state_repo=task_state_repo,
-        wb=fake_writeback,
     )
     task_id = create_resp.task_id
     assert task_id is not None
@@ -50,7 +49,6 @@ async def test_task_creation_flow(
         t_repo=task_repo,
         sec=security,
         t_state_repo=task_state_repo,
-        wb=fake_writeback,
     )
     assert "status" in update_resp.updated_fields
 
@@ -70,7 +68,6 @@ async def test_task_creation_flow(
         t_repo=task_repo,
         sec=security,
         t_state_repo=task_state_repo,
-        wb=fake_writeback,
     )
     assert "status" in done_resp.updated_fields
 

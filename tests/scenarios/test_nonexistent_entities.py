@@ -35,13 +35,13 @@ async def test_save_note_nonexistent(
 
 @pytest.mark.asyncio
 async def test_update_task_nonexistent(
-    db_session, fake_ctx, task_repo, task_state_repo, security, fake_writeback,
+    db_session, fake_ctx, task_repo, task_state_repo, security,
 ):
     with pytest.raises(ToolError):
         await update_task(
             ctx=fake_ctx, task_id=9999, status=TaskStatus.DONE,
             t_repo=task_repo, sec=security,
-            t_state_repo=task_state_repo, wb=fake_writeback,
+            t_state_repo=task_state_repo,
         )
 
 
@@ -81,11 +81,11 @@ async def test_get_meeting_nonexistent(db_session, fake_ctx, meeting_repo, task_
 
 @pytest.mark.asyncio
 async def test_save_meeting_summary_nonexistent(
-    db_session, fake_ctx, meeting_repo, note_repo, security, fake_writeback,
+    db_session, fake_ctx, meeting_repo, note_repo, security,
 ):
     with pytest.raises(ToolError):
         await save_meeting_summary(
             ctx=fake_ctx, meeting_id=9999, summary="test",
             m_repo=meeting_repo, sec=security,
-            n_repo=note_repo, wb=fake_writeback,
+            n_repo=note_repo,
         )

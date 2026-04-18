@@ -11,7 +11,6 @@ from ..deps import (
     get_note_repo,
     get_security,
     get_task_repo,
-    get_writeback,
 )
 from ..mcp_instance import mcp
 from ..models import (
@@ -33,7 +32,6 @@ from ..schemas import (
     SaveMeetingSummaryResponse,
 )
 from ..security import SecurityService
-from ..services import WriteBackService
 from ..skills import SKILL_MEETING, load_skill
 
 logger = logging.getLogger(__name__)
@@ -88,9 +86,8 @@ async def save_meeting_summary(
     m_repo: MeetingRepository = Depends(get_meeting_repo),
     sec: SecurityService = Depends(get_security),
     n_repo: NoteRepository = Depends(get_note_repo),
-    wb: WriteBackService = Depends(get_writeback),
 ) -> SaveMeetingSummaryResponse:
-    """Scrubs and persists the LLM-generated meeting summary. Attempts Notion write-back."""
+    """Scrubs and persists the LLM-generated meeting summary."""
     logger.info("save_meeting_summary meeting_id=%d", meeting_id)
     try:
         with get_session() as db:
@@ -128,14 +125,11 @@ async def save_meeting_summary(
                         db.add(MeetingTasks(meeting_id=meeting.id, task_id=tid))
 
             db.flush()
-            wb_result = wb.push_meeting_summary(meeting)
-
             linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
             return SaveMeetingSummaryResponse(
                 note_id=saved.id,
                 tasks_linked=len(linked_ids),
-                notion_write_back=wb_result,
             )
     except ValueError as e:
         logger.warning("save_meeting_summary failed: %s", e)
@@ -147,12 +141,13 @@ async def ingest_meeting(
     title: str,
     content: str,
     source_id: str | None = None,
+    source_type: str | None = None,
     source_url: str | None = None,
     category: MeetingCategory = MeetingCategory.GENERAL,
+    m_repo: MeetingRepository = Depends(get_meeting_repo),
     sec: SecurityService = Depends(get_security),
-    wb: WriteBackService = Depends(get_writeback),
 ) -> IngestMeetingResponse:
-    """Accepts meeting data (e.g. from Krisp MCP), scrubs, stores, writes to Notion."""
+    """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
     logger.info("ingest_meeting source_id=%s", source_id)
     with get_session() as db:
         clean_title = sec.scrub(title).clean
@@ -161,7 +156,7 @@ async def ingest_meeting(
         meeting: Meeting | None = None
         already_existed = False
         if source_id:
-            meeting = db.exec(select(Meeting).where(Meeting.source_id == source_id)).first()
+            meeting = m_repo.get_by_source_id(db, source_id)
         if meeting:
             already_existed = True
             meeting.title = clean_title
@@ -172,7 +167,7 @@ async def ingest_meeting(
                 title=clean_title,
                 content=clean_content,
                 source_id=source_id,
-                source_type="TRANSCRIPT" if source_id else None,
+                source_type=source_type,
                 source_url=source_url,
                 category=category,
             )
@@ -183,12 +178,9 @@ async def ingest_meeting(
         if meeting.id is None:
             raise ToolError("Internal error: meeting was not assigned an id after flush")
 
-        wb_result = wb.push_meeting_to_notion(meeting)
-
         return IngestMeetingResponse(
             meeting_id=meeting.id,
             already_existed=already_existed,
-            notion_write_back=wb_result,
         )
 
 
