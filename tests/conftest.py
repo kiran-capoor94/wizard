@@ -21,6 +21,7 @@ from wizard.repositories import (
     TaskStateRepository,
 )
 from wizard.security import SecurityService
+from wizard.services import SessionCloser
 
 
 @pytest.fixture(scope="session")
@@ -96,6 +97,11 @@ def note_repo():
 @pytest.fixture
 def meeting_repo():
     return MeetingRepository()
+
+
+@pytest.fixture
+def session_closer():
+    return SessionCloser()
 
 
 @pytest.fixture
