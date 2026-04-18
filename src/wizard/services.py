@@ -415,10 +415,6 @@ class SessionCloser:
         # Tier 2: synthetic fallback
         if summary_text is None:
             summary_text, closed_via = self._synthetic_summary(session, notes, task_ids)
-        # Tier 3: warn fallback
-        if summary_text is None:
-            summary_text = "Auto-closed: no summary available"
-            closed_via = "fallback"
         clean_summary = self._security.scrub(summary_text).clean
         session.summary = clean_summary
         session.session_state = state.model_dump_json()
@@ -481,15 +477,11 @@ class SessionCloser:
         session: WizardSession,
         notes: list[Note],
         task_ids: list[int],
-    ) -> tuple[str | None, str]:
-        try:
-            note_count = len(notes)
-            task_count = len(task_ids)
-            last_activity = session.last_active_at or session.updated_at
-            return (
-                f"Auto-closed: {note_count} note(s) across {task_count} task(s). "
-                f"Last activity: {last_activity}."
-            ), "synthetic"
-        except Exception as e:
-            logger.warning("SessionCloser synthetic summary failed: %s", e)
-            return None, ""
+    ) -> tuple[str, str]:
+        note_count = len(notes)
+        task_count = len(task_ids)
+        last_activity = session.last_active_at or session.updated_at
+        return (
+            f"Auto-closed: {note_count} note(s) across {task_count} task(s). "
+            f"Last activity: {last_activity}."
+        ), "synthetic"
