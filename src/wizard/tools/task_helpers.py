@@ -6,7 +6,6 @@ from fastmcp.exceptions import ToolError
 
 from ..models import Task, TaskPriority, TaskStatus
 from ..security import SecurityService
-from ..services import WriteBackService, WriteBackStatus
 
 logger = logging.getLogger(__name__)
 
@@ -47,25 +46,3 @@ def apply_task_fields(
     return updated
 
 
-def dispatch_writebacks(
-    task: Task,
-    updated_fields: list[str],
-    wb: WriteBackService,
-) -> tuple[WriteBackStatus | None, WriteBackStatus | None, WriteBackStatus | None]:
-    """Push changed fields to Jira/Notion. Returns (status_wb, due_date_wb, priority_wb)."""
-    status_writeback = None
-    due_date_writeback = None
-    priority_writeback = None
-    if "status" in updated_fields:
-        jira_wb = wb.push_task_status(task)
-        notion_wb = wb.push_task_status_to_notion(task)
-        status_writeback = WriteBackStatus(
-            ok=jira_wb.ok and notion_wb.ok,
-            error=", ".join(filter(None, [jira_wb.error, notion_wb.error])),
-            page_id=None,
-        )
-    if "due_date" in updated_fields:
-        due_date_writeback = wb.push_task_due_date(task)
-    if "priority" in updated_fields:
-        priority_writeback = wb.push_task_priority(task)
-    return status_writeback, due_date_writeback, priority_writeback

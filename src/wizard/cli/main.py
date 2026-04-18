@@ -24,7 +24,6 @@ from wizard.cli.configure import (
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
-from wizard.deps import get_sync_service
 from wizard.models import WizardSession
 
 logger = logging.getLogger(__name__)
@@ -270,21 +269,8 @@ def configure(
 
 @app.command()
 def sync() -> None:
-    """Run Jira and Notion sync manually (outside a session)."""
-    svc = get_sync_service()
-    with get_db_session() as session:
-        results = svc.sync_all(session)
-
-    for r in results:
-        if r.skipped:
-            status = "skipped (not configured)"
-        elif r.ok:
-            status = "ok"
-        else:
-            status = f"FAILED: {r.error}"
-        typer.echo(f"  {r.source}: {status}")
-
-    typer.echo("Sync complete.")
+    """[Deprecated] External sync has been removed."""
+    typer.echo("wizard sync is no longer available. External Jira/Notion sync has been removed.")
 
 
 def _confirm_uninstall(
