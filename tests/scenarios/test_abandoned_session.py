@@ -2,7 +2,7 @@
 
 import pytest
 
-from wizard.models import NoteType
+from wizard.models import NoteType, WizardSession
 from wizard.tools.session_tools import session_start
 from wizard.tools.task_tools import save_note, task_start
 
@@ -32,6 +32,7 @@ async def test_abandoned_session(
 
     # Session 2: start fresh without ending session 1
     fresh_ctx = type(fake_ctx)()
+    fresh_ctx.sample_error = RuntimeError("No sampling in tests")
     start_resp2 = await session_start(
         ctx=fresh_ctx, sync_svc=fake_sync, notion=fake_notion,
         t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
@@ -39,6 +40,16 @@ async def test_abandoned_session(
     )
     assert start_resp2.session_id is not None
     assert start_resp2.session_id != session_1_id
+
+    # Session 1 was auto-closed
+    assert len(start_resp2.closed_sessions) == 1
+    assert start_resp2.closed_sessions[0].session_id == session_1_id
+    assert start_resp2.closed_sessions[0].closed_via == "synthetic"
+
+    # Session 1 DB state reflects closure
+    s1 = db_session.get(WizardSession, session_1_id)
+    assert s1.closed_by == "auto"
+    assert s1.summary is not None
 
     # Notes from session 1 are still there
     ts_resp = await task_start(
