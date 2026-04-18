@@ -150,8 +150,8 @@ def jira_is_configured(cfg: dict) -> bool:
     return bool(j.get("token") and j.get("base_url") and j.get("project_key") and j.get("email"))
 
 
-def configure_notion(cfg: dict, config_path: Path) -> None:
-    """Prompt for all Notion credentials, save to config, run schema discovery."""
+def configure_notion(cfg: dict, config_path: Path) -> None:  # noqa: C901
+    """Prompt for Notion token, discover data sources, let user pick, run schema discovery."""
     typer.echo("\nNotion integration")
     token = typer.prompt(
         "  Notion integration token (notion.so/profile/integrations)", hide_input=True,
@@ -165,39 +165,50 @@ def configure_notion(cfg: dict, config_path: Path) -> None:
 
     client = NotionSdkClient(auth=token)
 
-    while True:
-        tasks_url = typer.prompt("  Tasks database URL")
-        try:
-            pid = resolve_notion_page_id(tasks_url)
-        except ValueError as exc:
-            typer.echo(f"  failed: {exc}")
-            continue
-        try:
-            typer.echo("  → Resolving...", nl=False)
-            tasks_ds_id = resolve_ds_id(client, pid)
-            typer.echo("  ok")
-            cfg["notion"]["tasks_ds_id"] = tasks_ds_id
-            typer.echo("  tasks database: set")
-            break
-        except (APIResponseError, httpx.HTTPError) as exc:
-            typer.echo(f"\n  failed: {exc}")
+    typer.echo("\n  Looking up data sources in Notion...")
+    all_ds = discover_data_sources(client)
 
-    while True:
-        meetings_url = typer.prompt("  Meetings database URL")
-        try:
-            pid = resolve_notion_page_id(meetings_url)
-        except ValueError as exc:
-            typer.echo(f"  failed: {exc}")
-            continue
-        try:
-            typer.echo("  → Resolving...", nl=False)
-            meetings_ds_id = resolve_ds_id(client, pid)
-            typer.echo("  ok")
-            cfg["notion"]["meetings_ds_id"] = meetings_ds_id
-            typer.echo("  meetings database: set")
-            break
-        except (APIResponseError, httpx.HTTPError) as exc:
-            typer.echo(f"\n  failed: {exc}")
+    if not all_ds:
+        typer.echo("  No data sources found — check integration has access to a database.")
+        raise typer.Exit(1)
+
+    db_count = len({db_title for _, _, db_title in all_ds})
+    typer.echo(f"  Found {len(all_ds)} data sources across {db_count} databases.")
+
+    slots = [
+        ("tasks", "tasks_ds_id", "task"),
+        ("meetings", "meetings_ds_id", "meeting"),
+    ]
+
+    for label, config_key, search_term in slots:
+        matches = [(ds_id, ds_name, db_title) for ds_id, ds_name, db_title in all_ds
+                    if search_term in ds_name.lower()]
+
+        if matches:
+            typer.echo(f"\n  Finding data sources for {label} (matching \"{search_term}\")...")
+            typer.echo(f"  Found {len(matches)} match{'es' if len(matches) != 1 else ''}:")
+            options = matches
+        else:
+            typer.echo(f"\n  Finding data sources for {label} (matching \"{search_term}\")...")
+            typer.echo("  Found 0 matches — showing all:")
+            options = all_ds
+
+        for i, (_ds_id, ds_name, db_title) in enumerate(options, 1):
+            typer.echo(f"    {i}. {ds_name} (in \"{db_title}\" database)")
+
+        while True:
+            choice = typer.prompt("  Which one?", default="1")
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(options):
+                    break
+            except ValueError:
+                pass
+            typer.echo(f"  Invalid selection — enter a number between 1 and {len(options)}")
+
+        chosen_ds_id, chosen_name, _ = options[idx]
+        cfg["notion"][config_key] = chosen_ds_id
+        typer.echo(f"  {label} data source: set ({chosen_name})")
 
     with open(config_path, "w") as f:
         json.dump(cfg, f, indent=2)
