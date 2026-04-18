@@ -140,6 +140,16 @@ class WizardSession(TimestampMixin, table=True):
             "'auto' (SessionCloser), or None (still open/abandoned)"
         ),
     )
+    transcript_path: str | None = Field(
+        default=None,
+        description="Absolute path to the agent's conversation transcript file.",
+    )
+    agent: str | None = Field(
+        default=None,
+        description=(
+            "Agent that produced this session: 'claude-code', 'codex', 'gemini', 'opencode'."
+        ),
+    )
     notes: list["Note"] = Relationship(back_populates="session")
 
 
