@@ -7,21 +7,9 @@ import httpx
 from notion_client import Client as NotionSdkClient
 from notion_client.errors import APIResponseError
 from notion_client.helpers import collect_paginated_api
+from pydantic import BaseModel
 
 from .config import NotionSchemaSettings
-from .schemas import (
-    DailyPageResult,
-    JiraTaskData,
-    NotionDate,
-    NotionMeetingData,
-    NotionMultiSelect,
-    NotionRichText,
-    NotionSelect,
-    NotionStatus,
-    NotionTaskData,
-    NotionTitle,
-    NotionUrl,
-)
 
 HTTPX_TIMEOUT = httpx.Timeout(10.0)
 
@@ -30,6 +18,73 @@ logger = logging.getLogger(__name__)
 
 class ConfigurationError(Exception):
     pass
+
+
+class JiraTaskData(BaseModel):
+    key: str
+    summary: str
+    status: str
+    priority: str
+    issue_type: str
+    url: str = ""
+
+
+class NotionTaskData(BaseModel):
+    notion_id: str
+    name: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    due_date: str | None = None
+    jira_url: str | None = None
+    jira_key: str | None = None
+
+
+class NotionMeetingData(BaseModel):
+    notion_id: str
+    title: str | None = None
+    categories: list[str] = []
+    summary: str | None = None
+    krisp_url: str | None = None
+    date: str | None = None
+
+
+class DailyPageResult(BaseModel):
+    page_id: str
+    created: bool
+    archived_count: int
+
+
+def _notion_title(prop: dict) -> str | None:
+    items = prop.get("title", [])
+    return items[0].get("plain_text") if items else None
+
+
+def _notion_rich_text(prop: dict) -> str | None:
+    items = prop.get("rich_text", [])
+    return items[0].get("plain_text") if items else None
+
+
+def _notion_select(prop: dict) -> str | None:
+    sel = prop.get("select")
+    return sel.get("name") if sel else None
+
+
+def _notion_multi_select(prop: dict) -> list[str]:
+    return [item["name"] for item in prop.get("multi_select", []) if "name" in item]
+
+
+def _notion_url(prop: dict) -> str | None:
+    return prop.get("url")
+
+
+def _notion_date(prop: dict) -> str | None:
+    d = prop.get("date")
+    return d.get("start") if d else None
+
+
+def _notion_status(prop: dict) -> str | None:
+    s = prop.get("status")
+    return s.get("name") if s else None
 
 
 class JiraClient:
@@ -137,7 +192,6 @@ class JiraClient:
 
 
 def _extract_jira_key(url: str | None) -> str | None:
-    """Extract Jira issue key from URL like https://org.atlassian.net/browse/ENG-123"""
     if not url:
         return None
     match = re.search(r"/browse/([A-Z]+-\d+)", url)
@@ -145,13 +199,11 @@ def _extract_jira_key(url: str | None) -> str | None:
 
 
 def _today_title() -> str:
-    """Build today's daily page title, e.g. 'Friday 11 April 2026'."""
     today = datetime.date.today()
     return f"{today:%A} {today.day} {today:%B %Y}"
 
 
 def extract_krisp_id(url: str | None) -> str | None:
-    """Extract meeting ID from last path segment of a Krisp URL."""
     if not url:
         return None
     segment = url.rstrip("/").split("/")[-1].split("?")[0].strip()
@@ -159,7 +211,6 @@ def extract_krisp_id(url: str | None) -> str | None:
 
 
 def _is_daily_page_title(title: str) -> bool:
-    """Return True if title matches the daily-page format, e.g. 'Wednesday 9 April 2026'."""
     try:
         datetime.datetime.strptime(title, "%A %d %B %Y")
         return True
@@ -288,19 +339,13 @@ class NotionClient:
                 page_id = page.get("id")
                 props = page.get("properties", {})
 
-                jira_url = NotionUrl.model_validate(props.get(self._schema.task_jira_key, {})).url
+                jira_url = _notion_url(props.get(self._schema.task_jira_key, {}))
                 task = NotionTaskData(
                     notion_id=page_id,
-                    name=NotionTitle.model_validate(props.get(self._schema.task_name, {})).text,
-                    status=NotionStatus.model_validate(
-                        props.get(self._schema.task_status, {})
-                    ).name,
-                    priority=NotionSelect.model_validate(
-                        props.get(self._schema.task_priority, {})
-                    ).name,
-                    due_date=NotionDate.model_validate(
-                        props.get(self._schema.task_due_date, {})
-                    ).start,
+                    name=_notion_title(props.get(self._schema.task_name, {})),
+                    status=_notion_status(props.get(self._schema.task_status, {})),
+                    priority=_notion_select(props.get(self._schema.task_priority, {})),
+                    due_date=_notion_date(props.get(self._schema.task_due_date, {})),
                     jira_url=jira_url,
                     jira_key=_extract_jira_key(jira_url),
                 )
@@ -322,17 +367,11 @@ class NotionClient:
 
                 meeting = NotionMeetingData(
                     notion_id=page_id,
-                    title=NotionTitle.model_validate(
-                        props.get(self._schema.meeting_title, {})
-                    ).text,
-                    categories=NotionMultiSelect.model_validate(
-                        props.get(self._schema.meeting_category, {})
-                    ).names,
-                    summary=NotionRichText.model_validate(
-                        props.get(self._schema.meeting_summary, {})
-                    ).text,
-                    krisp_url=NotionUrl.model_validate(props.get(self._schema.meeting_url, {})).url,
-                    date=NotionDate.model_validate(props.get(self._schema.meeting_date, {})).start,
+                    title=_notion_title(props.get(self._schema.meeting_title, {})),
+                    categories=_notion_multi_select(props.get(self._schema.meeting_category, {})),
+                    summary=_notion_rich_text(props.get(self._schema.meeting_summary, {})),
+                    krisp_url=_notion_url(props.get(self._schema.meeting_url, {})),
+                    date=_notion_date(props.get(self._schema.meeting_date, {})),
                 )
                 meetings.append(meeting)
             return meetings
