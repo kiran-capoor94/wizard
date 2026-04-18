@@ -234,6 +234,9 @@ async def create_task(
         if source_id:
             existing = t_repo.get_by_source_id(db, source_id)
             if existing:
+                # Don't update completed or archived tasks
+                if existing.status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
+                    return CreateTaskResponse(task_id=existing.id, already_existed=True)
                 scrubbed_name = sec.scrub(name).clean
                 existing.name = scrubbed_name
                 existing.priority = priority
