@@ -1,9 +1,4 @@
-"""Provider functions for FastMCP Depends() injection.
-
-Each function constructs and returns a fresh instance.
-FastMCP caches results per-request when used via Depends().
-CLI commands call these directly as plain callables.
-"""
+"""Provider functions for FastMCP Depends() injection."""
 
 import logging
 
@@ -22,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 def get_security() -> SecurityService:
-    logger.debug("Creating SecurityService")
     return SecurityService(
         allowlist=settings.scrubbing.allowlist,
         enabled=settings.scrubbing.enabled,
