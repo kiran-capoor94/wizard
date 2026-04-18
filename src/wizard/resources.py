@@ -94,7 +94,7 @@ def task_context(
     with get_session() as db:
         task = t_repo.get_by_id(db, task_id)
         task_ctx = t_repo.get_task_context(db, task)
-        notes = n_repo.get_for_task(db, task_id=task.id, source_id=task.source_id)
+        notes = n_repo.get_for_task(db, task_id=task.id)
         note_details = [NoteDetail.from_model(n) for n in notes if n.id is not None]
         return ResourceResult(
             contents=[

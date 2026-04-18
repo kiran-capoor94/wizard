@@ -68,7 +68,7 @@ async def task_start(
             task = t_repo.get_by_id(db, task_id)
             task_ctx = t_repo.get_task_context(db, task)
 
-            notes = n_repo.get_for_task(db, task_id=task.id, source_id=task.source_id)
+            notes = n_repo.get_for_task(db, task_id=task.id)
             notes_by_type: dict[str, int] = {}
             for note in notes:
                 key = note.note_type.value
@@ -290,7 +290,7 @@ async def rewind_task(
         if task_state is None:
             raise ToolError(f"TaskState missing for task {task_id}")
 
-        notes_desc = n_repo.get_for_task(db, task_id=task.id, source_id=task.source_id)
+        notes_desc = n_repo.get_for_task(db, task_id=task.id)
         # Filter persisted notes only (id is None for unpersisted models; DB rows always have id)
         notes_asc = [n for n in reversed(notes_desc) if n.id is not None]
 
