@@ -32,7 +32,8 @@ def _encode_cursor(offset: int) -> str:
 
 def _decode_cursor(cursor: str) -> int:
     try:
-        return json.loads(base64.b64decode(cursor).decode()).get("offset", 0)
+        offset = json.loads(base64.b64decode(cursor).decode()).get("offset", 0)
+        return int(offset) if offset is not None else 0
     except Exception:
         return 0
 
