@@ -3,8 +3,10 @@ import os
 import sqlite3
 from pathlib import Path
 
+import httpx
 import typer
 from alembic.runtime.migration import MigrationContext
+from notion_client.errors import APIResponseError
 from sqlalchemy import create_engine
 
 from wizard import agent_registration, notion_discovery
@@ -80,9 +82,17 @@ def _check_config_file() -> tuple[bool, str]:
 
 def _check_notion_token() -> tuple[bool, str]:
     s = Settings()
-    if s.notion.token.get_secret_value():
-        return True, "Notion token configured"
-    return False, "Notion token not set (notion.token)"
+    token = s.notion.token.get_secret_value()
+    if not token:
+        return False, "Notion token not set (notion.token)"
+    try:
+        client = NotionSdkClient(auth=token)
+        client.users.me()
+        return True, "Notion token valid"
+    except APIResponseError:
+        return False, "Notion token is invalid — re-run 'wizard configure --notion'"
+    except httpx.HTTPError:
+        return False, "Could not reach Notion API — check network"
 
 
 def _check_jira_token() -> tuple[bool, str]:
