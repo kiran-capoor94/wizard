@@ -8,7 +8,6 @@ from notion_client import Client as NotionSdkClient
 from notion_client.errors import APIResponseError
 
 from wizard import notion_discovery
-from wizard.integrations import ConfigurationError
 
 
 def run_notion_discovery(config_path: Path) -> None:
@@ -38,7 +37,13 @@ def run_notion_discovery(config_path: Path) -> None:
     meetings_props = notion_discovery.fetch_db_properties(client, meetings_ds_id)
     all_props = {**tasks_props, **meetings_props}
 
-    required_fields = ["task_name", "task_status", "meeting_title"]
+    if not all_props:
+        typer.echo(
+            "  Could not fetch properties from Notion — check token and database IDs.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     all_fields = [
         "task_name",
         "task_status",
@@ -51,20 +56,18 @@ def run_notion_discovery(config_path: Path) -> None:
         "meeting_url",
         "meeting_summary",
     ]
+    required_fields = ["task_name", "task_status", "meeting_title"]
 
     matches = notion_discovery.match_properties(all_props, all_fields)
 
-    for field in required_fields:
-        if matches[field] is None:
-            available_names = list(all_props.keys())
-            typer.echo(f"Could not auto-match required field '{field}'.")
-            typer.echo(f"Available properties: {', '.join(available_names)}")
-            value = typer.prompt(
-                f"Enter Notion property name for '{field}' (or press Enter to skip)"
-            )
-            if not value:
-                raise ConfigurationError(f"Required field '{field}' must be mapped.")
-            matches[field] = value
+    unmatched = [f for f in required_fields if matches[f] is None]
+    if unmatched:
+        typer.echo("  Auto-match failed for required fields:")
+        for field in unmatched:
+            typer.echo(f"    {field} — no match found")
+        typer.echo(f"  Available properties: {', '.join(all_props.keys())}")
+        typer.echo("  Re-check your Notion database and re-run 'wizard configure --notion'.")
+        raise typer.Exit(1)
 
     schema = {k: v for k, v in matches.items() if v is not None}
     cfg.setdefault("notion", {})["notion_schema"] = schema
@@ -72,7 +75,7 @@ def run_notion_discovery(config_path: Path) -> None:
         json.dump(cfg, f, indent=2)
 
     for k, v in schema.items():
-        typer.echo(f"    {k:<20} → {v}")
+        typer.echo(f"    {k:<20} -> {v}")
     typer.echo("  Schema saved.")
 
 
