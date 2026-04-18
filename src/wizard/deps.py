@@ -85,4 +85,4 @@ def get_task_state_repo() -> TaskStateRepository:
 
 
 def get_session_closer() -> SessionCloser:
-    return SessionCloser()
+    return SessionCloser(security=get_security())

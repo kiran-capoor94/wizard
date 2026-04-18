@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from sqlmodel import select
 
 from wizard.models import Note, NoteType, WizardSession
 from wizard.schemas import AutoCloseSummary
@@ -66,7 +67,6 @@ async def test_auto_close_via_sampling(
     assert s1.session_state is not None
 
     # A session_summary note was created for session 1
-    from sqlmodel import select
     summary_notes = db_session.exec(
         select(Note).where(
             Note.session_id == sid1,

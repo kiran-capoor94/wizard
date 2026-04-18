@@ -372,8 +372,13 @@ class SessionCloser:
     3. Minimal warn fallback
     """
 
-    def __init__(self, note_repo: NoteRepository | None = None):
+    def __init__(
+        self,
+        note_repo: NoteRepository | None = None,
+        security: SecurityService | None = None,
+    ):
         self._note_repo = note_repo or NoteRepository()
+        self._security = security or SecurityService()
 
     async def close_abandoned(
         self, db: Session, ctx: Context, current_session_id: int,
@@ -414,18 +419,19 @@ class SessionCloser:
         if summary_text is None:
             summary_text = "Auto-closed: no summary available"
             closed_via = "fallback"
-        session.summary = summary_text
+        clean_summary = self._security.scrub(summary_text).clean
+        session.summary = clean_summary
         session.session_state = state.model_dump_json()
         session.closed_by = "auto"
         db.add(session)
         db.flush()
         note = Note(
-            note_type=NoteType.SESSION_SUMMARY, content=summary_text,
+            note_type=NoteType.SESSION_SUMMARY, content=clean_summary,
             session_id=session_id,
         )
         self._note_repo.save(db, note)
         return ClosedSessionSummary(
-            session_id=session_id, summary=summary_text,
+            session_id=session_id, summary=clean_summary,
             closed_via=closed_via, task_ids=task_ids, note_count=note_count,
         )
 
