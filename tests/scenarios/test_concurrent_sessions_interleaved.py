@@ -11,7 +11,7 @@ from wizard.tools.task_tools import save_note
 async def test_concurrent_sessions(
     db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer,
+    seed_task, session_closer, capture_synthesiser,
 ):
     task = seed_task(name="Shared task")
 
@@ -21,6 +21,7 @@ async def test_concurrent_sessions(
         ctx=ctx_a, sync_svc=fake_sync, notion=fake_notion,
         t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
         closer=session_closer,
+        synthesiser=capture_synthesiser,
     )
     session_a_id = start_a.session_id
 
@@ -30,6 +31,7 @@ async def test_concurrent_sessions(
         ctx=ctx_b, sync_svc=fake_sync, notion=fake_notion,
         t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
         closer=session_closer,
+        synthesiser=capture_synthesiser,
     )
     session_b_id = start_b.session_id
     assert session_b_id != session_a_id
@@ -55,6 +57,7 @@ async def test_concurrent_sessions(
         open_loops=[], next_actions=[],
         closure_status="clean",
         sec=security, n_repo=note_repo, wb=fake_writeback,
+        synthesiser=capture_synthesiser,
     )
 
     # End session A (was never used, but ending it should work)
@@ -65,4 +68,5 @@ async def test_concurrent_sessions(
         open_loops=[], next_actions=[],
         closure_status="clean",
         sec=security, n_repo=note_repo, wb=fake_writeback,
+        synthesiser=capture_synthesiser,
     )
