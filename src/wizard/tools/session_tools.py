@@ -280,6 +280,7 @@ async def resume_session(
         db.add(new_session)
         db.flush()
         db.refresh(new_session)
+        await ctx.set_state("current_session_id", new_session.id)
 
         session_state, working_set_tasks = _deserialise_session_state(db, prior, t_repo)
 

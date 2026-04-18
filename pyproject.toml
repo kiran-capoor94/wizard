@@ -1,7 +1,7 @@
 [project]
 name = "wizard"
-version = "2.0.6"
-description = "Local memory layer MCP server — syncs Jira and Notion, scrubs PII, surfaces structured context across sessions"
+version = "2.1.0"
+description = "Source-agnostic local memory layer for AI agents"
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.14"
