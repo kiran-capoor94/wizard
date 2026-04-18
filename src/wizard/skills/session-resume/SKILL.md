@@ -27,8 +27,6 @@ You are **picking up a dropped thread**. A prior session exists with state, note
 > - `working_set_tasks: list[TaskContext]` — tasks the prior session was focused on, with **current** state
 > - `prior_notes: list[ResumedTaskNotes]` — notes grouped by task, with mental models
 > - `unsummarised_meetings: list[MeetingContext]` — meetings needing summaries
-> - `sync_results: list[SourceSyncStatus]` — sync status (sync runs during resume)
-> - `daily_page: DailyPageResult | None`
 
 > **`SessionState`** fields (when present):
 >
@@ -63,10 +61,6 @@ You are **picking up a dropped thread**. A prior session exists with state, note
    - ✅ You have an active Tool Registry (restored from prior session or freshly built)
    - 🛑 If not: build one now before proceeding.
 
-4. **Sync results checked**
-   - ✅ Every `sync_results` entry inspected — same gate as `session-start`
-   - 🛑 If any failed: surface the error before showing task state.
-
 ---
 
 ## Steps
@@ -82,25 +76,21 @@ You are **picking up a dropped thread**. A prior session exists with state, note
 
 **Critical:** Use `session_id` (the new one) for ALL subsequent calls. Not `resumed_from_session_id`.
 
-### Step 3 — Check Sync Results
-
-Same protocol as `session-start` Step 4. Render table, flag failures.
-
-### Step 4 — Branch on `session_state`
+### Step 3 — Branch on `session_state`
 
 ```dot
 digraph resume_branch {
     rankdir=TB;
     "session_state present?" [shape=diamond];
-    "Show structured state\n(Step 5A)" [shape=box, style=filled, fillcolor="#e8f5e9"];
-    "Fall back to notes\n(Step 5B)" [shape=box, style=filled, fillcolor="#ffebee"];
+    "Show structured state\n(Step 4A)" [shape=box, style=filled, fillcolor="#e8f5e9"];
+    "Fall back to notes\n(Step 4B)" [shape=box, style=filled, fillcolor="#ffebee"];
 
-    "session_state present?" -> "Show structured state\n(Step 5A)" [label="not null"];
-    "session_state present?" -> "Fall back to notes\n(Step 5B)" [label="null"];
+    "session_state present?" -> "Show structured state\n(Step 4A)" [label="not null"];
+    "session_state present?" -> "Fall back to notes\n(Step 4B)" [label="null"];
 }
 ```
 
-### Step 5A — Structured State Available
+### Step 4A — Structured State Available
 
 Render the prior session state:
 
@@ -124,9 +114,9 @@ If `closure_status == "blocked"`: **bold** the status and add:
 If `closure_status == "interrupted"`: add:
 > Prior session was cut short. `next_actions` may be incomplete.
 
-Then proceed to Step 6.
+Then proceed to Step 5.
 
-### Step 5B — No Structured State (Unclean Close)
+### Step 4B — No Structured State (Unclean Close)
 
 > ⚠️ Session {resumed_from_session_id} was **not cleanly closed** — no structured state available. Falling back to note history.
 
@@ -141,9 +131,9 @@ For each `ResumedTaskNotes` entry:
 >
 > Mental model: {latest_mental_model or "none captured"}
 
-Then proceed to Step 6.
+Then proceed to Step 5.
 
-### Step 6 — Restore Tool Registry
+### Step 5 — Restore Tool Registry
 
 - If `session_state` is not null and `session_state.tool_registry` is a non-empty string:
   - Restore it as your active Tool Registry
@@ -154,7 +144,7 @@ Then proceed to Step 6.
 
 Hold the registry in context. You will save it again at `session_end`.
 
-### Step 7 — Show Working Set Tasks
+### Step 6 — Show Working Set Tasks
 
 Render the tasks the prior session was focused on, with **current** state (sync has already run):
 
@@ -169,13 +159,13 @@ Render the tasks the prior session was focused on, with **current** state (sync 
 
 If `working_set_tasks` is empty: "No working set tasks from prior session."
 
-### Step 8 — Show Unsummarised Meetings
+### Step 7 — Show Unsummarised Meetings
 
-Same protocol as `session-start` Step 7. Render table, dispatch to `wizard:meeting`.
+Same protocol as `session-start` Step 5. Render table, dispatch to `wizard:meeting`.
 
-### Step 9 — Recommend Next Action
+### Step 8 — Recommend Next Action
 
-Use the same decision tree as `session-start` Step 9, but with additional context:
+Use the same decision tree as `session-start` Step 7, but with additional context:
 
 - If `next_actions` from prior session exist: recommend the first unresolved next action
 - If `open_loops` exist: recommend addressing the first open loop
