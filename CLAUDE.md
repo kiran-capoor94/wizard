@@ -28,7 +28,7 @@ uv run alembic upgrade head   # run pending DB migrations
 server.py                    # Entry point — imports mcp_instance, tools, resources, prompts
 src/wizard/
   cli/
-    main.py                  # Typer app: setup, configure, sync, doctor, analytics, update, uninstall
+    main.py                  # Typer app: setup, configure, sync, doctor, analytics, update, uninstall, capture
     doctor.py                # 10-point health checks (wizard doctor)
     analytics.py             # Session/note/task usage stats (wizard analytics)
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
@@ -40,10 +40,11 @@ src/wizard/
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
+  transcript.py              # TranscriptReader + CaptureSynthesiser (auto-capture from agent transcripts)
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, MeetingRepo, etc.)
-  services.py                # SyncService (bidirectional upsert) + WriteBackService
+  services.py                # SyncService (bidirectional upsert) + WriteBackService + SessionCloser
   integrations.py            # JiraClient (httpx) + NotionClient (notion-client v3.0)
   notion_discovery.py        # 3-pass Notion property auto-matching for wizard configure --notion
   security.py                # SecurityService — regex PII scrubbing with allowlist
@@ -51,8 +52,10 @@ src/wizard/
   mappers.py                 # Jira/Notion → TaskStatus/TaskPriority/MeetingCategory
   database.py                # SQLite session factory (SQLModel engine)
   deps.py                    # FastMCP Depends() provider functions
-  agent_registration.py      # Write MCP config into agent JSON/TOML files
+  agent_registration.py      # Write MCP + hook config into agent JSON/TOML files
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
+hooks/                       # Agent hook scripts (installed by wizard setup)
+  session-end.sh             # Claude Code SessionEnd hook — marks session for transcript synthesis
 alembic/                     # DB migration scripts
 tests/                       # pytest suite
 ```
@@ -159,15 +162,16 @@ New tables use snake_case (e.g. `task_state`, `meeting_tasks`).
 via FastMCP's `Depends()` system (identical in spirit to FastAPI's):
 
 ```python
-get_jira_client()       → JiraClient
-get_notion_client()     → NotionClient
-get_security()          → SecurityService
-get_sync_service()      → SyncService
-get_writeback()         → WriteBackService
-get_task_repo()         → TaskRepository
-get_meeting_repo()      → MeetingRepository
-get_note_repo()         → NoteRepository
-get_task_state_repo()   → TaskStateRepository
+get_jira_client()          → JiraClient
+get_notion_client()        → NotionClient
+get_security()             → SecurityService
+get_sync_service()         → SyncService
+get_writeback()            → WriteBackService
+get_task_repo()            → TaskRepository
+get_meeting_repo()         → MeetingRepository
+get_note_repo()            → NoteRepository
+get_task_state_repo()      → TaskStateRepository
+get_capture_synthesiser()  → CaptureSynthesiser
 ```
 
 Tools and resources declare deps as typed default params:
@@ -218,17 +222,22 @@ result = await my_tool(task_id=1, t_repo=TaskRepository())
 ## Agent Registration
 
 `wizard setup --agent <agent>` writes MCP config into the agent's config
-file. Supported agents and their config locations:
+file **and** installs the auto-capture SessionEnd hook into the agent's
+global hooks config. Supported agents and their config locations:
 
-| Agent | Config file | Format |
-|-------|------------|--------|
-| `claude-code` | `~/.claude.json` | JSON (`mcpServers`) |
-| `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON (`mcpServers`) |
-| `gemini` | `~/.gemini/settings.json` | JSON (`mcpServers`) |
-| `opencode` | `~/.config/opencode/opencode.json` | JSON (`mcp`) |
-| `codex` | `~/.codex/config.toml` | TOML (`mcp_servers`) |
+| Agent | MCP Config | Hook Config | Hook Event |
+|-------|-----------|-------------|------------|
+| `claude-code` | `~/.claude.json` | `~/.claude/settings.json` | SessionEnd |
+| `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | _(no hooks)_ | — |
+| `gemini` | `~/.gemini/settings.json` | `~/.gemini/settings.json` | SessionEnd |
+| `opencode` | `~/.config/opencode/opencode.json` | _(TypeScript plugin)_ | — |
+| `codex` | `~/.codex/config.toml` | `~/.codex/hooks.json` | Stop |
 
-`wizard setup --agent all` registers all five. MCP entry point:
+`wizard setup --agent all` registers all five (MCP) and installs hooks
+where supported. `wizard update` re-registers both. `wizard uninstall`
+removes both.
+
+MCP entry point:
 
 ```json
 {
@@ -236,6 +245,43 @@ file. Supported agents and their config locations:
   "args": ["--directory", "<repo-path>", "run", "server.py"]
 }
 ```
+
+## Auto-Capture (Transcript Synthesis)
+
+Wizard automatically generates structured notes from agent conversation
+transcripts. This removes the need for manual `save_note` calls — tasks
+accumulate context as you work.
+
+**How it works:**
+
+1. A **SessionEnd hook** fires when the agent's session ends (installed by
+   `wizard setup`).
+2. The hook calls `wizard capture --close --transcript <path> --agent <id>`,
+   which writes the transcript path to `WizardSession` and sets
+   `closed_by = "hook"`.
+3. At the next `session_start` (or explicit `session_end`),
+   `CaptureSynthesiser` reads the transcript, calls `ctx.sample()` with
+   wizard's opinionated prompt scaffold, and saves structured `Note` objects.
+
+**Three-tier fallback** (same pattern as `SessionCloser`):
+- Tier 1: LLM sampling → structured notes (investigation/decision/docs/learnings)
+- Tier 2: Synthetic summary from transcript metadata
+- Tier 3: Minimal fallback
+
+**Key files:**
+- `transcript.py` — `TranscriptReader` (JSONL parser) + `CaptureSynthesiser`
+- `hooks/session-end.sh` — Claude Code hook script
+- `agent_registration.py` — `register_hook()` / `deregister_hook()`
+
+**Transcript format:** Claude Code writes JSONL with `type` field
+(`user`, `assistant`, `progress`, `file-history-snapshot`, `system`,
+`last-prompt`). The reader skips noise types and normalises
+`tool_use`/`tool_result` blocks into `TranscriptEntry` objects.
+
+**Limitations:**
+- No mid-session intelligence — synthesis runs at session boundaries only
+- Transcript file must exist at synthesis time (not deleted/rotated)
+- Only Claude Code parser is implemented; Codex/Gemini/OpenCode are stubs
 
 ## MCP Tools — Quick Reference
 
@@ -374,3 +420,7 @@ opportunities:
 | `setup` | `cli/main.py` | 18 | agent registration, config validation |
 | `uninstall` | `cli/main.py` | 14 | file cleanup, agent deregistration |
 | `resume_session` | `tools/session_tools.py` | 13 | state deserialization, note grouping |
+
+**Near-cap files:** `cli/main.py` is at 500 lines (the hard cap). The next
+addition requires splitting — extract `capture` into `cli/capture.py` or
+split agent registration helpers into a separate module.

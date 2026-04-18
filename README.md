@@ -24,7 +24,8 @@ uv run wizard setup --agent claude-code
 ```
 
 `wizard setup` creates `~/.wizard/`, scaffolds `config.json`, installs
-skills, and registers the MCP server with your chosen agent.
+skills, registers the MCP server with your chosen agent, and installs
+the auto-capture hook for automatic note generation.
 
 See [Configuration](#configuration) for Jira and Notion setup.
 
@@ -34,14 +35,18 @@ Wizard is built around a **session lifecycle** that keeps your agent
 grounded across work sessions.
 
 1. **Session Start** — Wizard syncs tasks from Jira and meetings from
-   Notion, creates a session, and returns what needs attention.
+   Notion, creates a session, and returns what needs attention. Abandoned
+   sessions from prior runs are auto-closed and their transcripts
+   synthesised into structured notes.
 2. **Work** — As you investigate tasks and review meetings, Wizard stores
    notes that compound across sessions. Each time you revisit a task, you
    get everything from before.
 3. **Write-back** — Status changes and summaries push back to Jira and
    Notion so your external tools stay in sync.
 4. **Session End** — Wizard persists a session summary and updates your
-   daily Notion page.
+   daily Notion page. If the agent has a transcript, Wizard synthesises
+   it into structured notes (investigation, decision, docs, learnings)
+   using its own prompt scaffolding — no manual `save_note` needed.
 
 Context compounds. The more you use Wizard, the less ramp-up time each
 session costs. Your agent starts where you left off, not from scratch.
@@ -186,13 +191,14 @@ surfaced by the Notion API's `data_sources` field.
 ## CLI
 
 ```bash
-uv run wizard setup [--agent AGENT]  # Initialize ~/.wizard/, config, skills, MCP registration
+uv run wizard setup [--agent AGENT]  # Initialize ~/.wizard/, config, skills, MCP + hook registration
 uv run wizard configure --notion     # Auto-discover Notion schema
 uv run wizard sync                   # Manual sync from Jira/Notion
 uv run wizard doctor [--all]         # Health check — config, database, integrations, skills
 uv run wizard analytics [--week]     # Session/task/note usage stats
-uv run wizard update                 # Pull latest, sync deps, migrate DB, re-register agents
-uv run wizard uninstall [--yes]      # Clean removal of all state and MCP registration
+uv run wizard update                 # Pull latest, sync deps, migrate DB, re-register agents + hooks
+uv run wizard uninstall [--yes]      # Clean removal of all state, MCP, and hook registration
+uv run wizard capture --close        # (Called by hooks) Mark session for transcript synthesis
 ```
 
 **Supported agents for `--agent`:** `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `all`
@@ -211,27 +217,33 @@ uv run alembic upgrade head    # Run migrations
 server.py                    # FastMCP server entry point (stdio)
 src/wizard/
   cli/
-    main.py                  # Typer CLI (setup, configure, sync, doctor, analytics, update, uninstall)
+    main.py                  # Typer CLI (setup, configure, sync, doctor, analytics, update, uninstall, capture)
     doctor.py                # 10-point health checks
     analytics.py             # Session/note/task analytics
   mcp_instance.py            # FastMCP app factory + ToolLoggingMiddleware
-  tools.py                   # 13 MCP tools
+  tools/                     # MCP tools (split by domain)
+    session_tools.py         # session_start, session_end, resume_session
+    task_tools.py            # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
+    meeting_tools.py         # get_meeting, save_meeting_summary, ingest_meeting
   resources.py               # 5 MCP read-only resources
   prompts.py                 # MCP prompt templates
-  middleware.py              # ToolLoggingMiddleware
+  middleware.py              # ToolLoggingMiddleware + SessionStateMiddleware
+  transcript.py              # TranscriptReader + CaptureSynthesiser (auto-capture)
   models.py                  # SQLModel entities (task, note, meeting, wizardsession, toolcall, task_state)
   schemas.py                 # Pydantic response schemas
   repositories.py            # Query layer
-  services.py                # SyncService + WriteBackService
+  services.py                # SyncService + WriteBackService + SessionCloser
   integrations.py            # JiraClient + NotionClient (Notion SDK v3.0)
   notion_discovery.py        # 3-pass Notion property auto-matching
   security.py                # PII scrubbing (regex + allowlist)
   config.py                  # Pydantic settings + JsonConfigSettingsSource
   mappers.py                 # External-to-internal data mapping
   database.py                # SQLite connection management
-  deps.py                    # @lru_cache singletons
-  agent_registration.py      # Register MCP in agent configs (JSON/TOML)
+  deps.py                    # FastMCP Depends() provider functions
+  agent_registration.py      # Register MCP + hooks in agent configs
   skills/                    # FastMCP skills (installed to ~/.wizard/skills/ on setup)
+hooks/
+  session-end.sh             # Claude Code SessionEnd hook script
 ```
 
 ## License
