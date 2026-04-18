@@ -186,7 +186,8 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
     for aid in agents_to_register:
         try:
             agent_registration.register(aid)
-            typer.echo(f"  Registered {aid}")
+            hook_ok = agent_registration.register_hook(aid)
+            typer.echo(f"  Registered {aid}" + (" + hook" if hook_ok else ""))
         except Exception as exc:
             typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
 
@@ -239,14 +240,11 @@ def setup(
 
     typer.echo("\n" + "─" * 45)
     typer.echo("Setup complete.")
-    typer.echo(f"  Notion  {notion_status}" + (
-        "" if notion_status != "skipped" else " (run 'wizard configure --notion' to add)"
-    ))
-    typer.echo(f"  Jira    {jira_status}" + (
-        "" if jira_status != "skipped" else " (run 'wizard configure --jira' to add)"
-    ))
-    agent_label = ", ".join(agents_to_register)
-    typer.echo(f"  Agent   {agent_label}")
+    ns = "" if notion_status != "skipped" else " (run 'wizard configure --notion')"
+    js = "" if jira_status != "skipped" else " (run 'wizard configure --jira')"
+    typer.echo(f"  Notion {notion_status}{ns}")
+    typer.echo(f"  Jira   {jira_status}{js}")
+    typer.echo(f"  Agent  {', '.join(agents_to_register)}")
 
 
 @app.command()
@@ -312,7 +310,8 @@ def _deregister_agents(registered: list[str]) -> None:
     for aid in registered:
         try:
             agent_registration.deregister(aid)
-            typer.echo(f"  Removed wizard MCP from {aid}")
+            agent_registration.deregister_hook(aid)
+            typer.echo(f"  Removed wizard from {aid}")
         except Exception as exc:
             typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
 
