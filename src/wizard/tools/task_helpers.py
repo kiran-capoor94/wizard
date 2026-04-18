@@ -18,7 +18,6 @@ def apply_task_fields(
     status: TaskStatus | None,
     priority: TaskPriority | None,
     due_date: str | None,
-    notion_id: str | None,
     name: str | None,
     source_url: str | None,
 ) -> list[str]:
@@ -39,9 +38,6 @@ def apply_task_fields(
             raise ToolError(f"Invalid due_date format: {due_date}. Use ISO 8601.") from exc
         task.due_date = due_date_dt
         updated.append("due_date")
-    if notion_id is not None:
-        task.notion_id = notion_id
-        updated.append("notion_id")
     if name is not None:
         task.name = sec.scrub(name).clean
         updated.append("name")
@@ -66,7 +62,7 @@ def dispatch_writebacks(
         status_writeback = WriteBackStatus(
             ok=jira_wb.ok and notion_wb.ok,
             error=", ".join(filter(None, [jira_wb.error, notion_wb.error])),
-            page_id=task.notion_id,
+            page_id=None,
         )
     if "due_date" in updated_fields:
         due_date_writeback = wb.push_task_due_date(task)

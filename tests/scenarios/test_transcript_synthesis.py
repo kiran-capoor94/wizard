@@ -23,7 +23,7 @@ TRANSCRIPT = [
 
 @pytest.mark.asyncio
 async def test_transcript_synthesis_on_abandoned_session(
-    db_session, fake_ctx, fake_sync, fake_notion,
+    db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo,
     session_closer, capture_synthesiser, tmp_path,
 ):
@@ -51,13 +51,12 @@ async def test_transcript_synthesis_on_abandoned_session(
     # then CaptureSynthesiser synthesises the transcript
     start_resp = await session_start(
         ctx=fake_ctx,
-        sync_svc=fake_sync,
-        notion=fake_notion,
-        t_state_repo=task_state_repo,
         t_repo=task_repo,
+        n_repo=note_repo,
         m_repo=meeting_repo,
-        closer=session_closer,
-        synthesiser=capture_synthesiser,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+        capture_synthesiser=capture_synthesiser,
     )
 
     assert start_resp.session_id != abandoned_id

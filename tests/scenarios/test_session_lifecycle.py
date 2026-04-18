@@ -9,7 +9,7 @@ from wizard.tools.task_tools import save_note, task_start, what_am_i_missing
 
 @pytest.mark.asyncio
 async def test_session_lifecycle(
-    db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
+    db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     seed_task, session_closer, capture_synthesiser,
 ):
@@ -19,13 +19,12 @@ async def test_session_lifecycle(
     # 1. session_start
     start_resp = await session_start(
         ctx=fake_ctx,
-        sync_svc=fake_sync,
-        notion=fake_notion,
-        t_state_repo=task_state_repo,
         t_repo=task_repo,
+        n_repo=note_repo,
         m_repo=meeting_repo,
-        closer=session_closer,
-        synthesiser=capture_synthesiser,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+        capture_synthesiser=capture_synthesiser,
     )
     assert start_resp.session_id is not None
     assert isinstance(start_resp.open_tasks, list)
@@ -87,7 +86,6 @@ async def test_session_lifecycle(
         closure_status="clean",
         sec=security,
         n_repo=note_repo,
-        wb=fake_writeback,
         synthesiser=capture_synthesiser,
     )
     assert end_resp.note_id is not None

@@ -184,9 +184,6 @@ async def ingest_meeting(
             raise ToolError("Internal error: meeting was not assigned an id after flush")
 
         wb_result = wb.push_meeting_to_notion(meeting)
-        if wb_result.page_id:
-            meeting.notion_id = wb_result.page_id
-            db.flush()
 
         return IngestMeetingResponse(
             meeting_id=meeting.id,

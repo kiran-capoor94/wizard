@@ -1,7 +1,7 @@
 import datetime as _dt
 import logging
 
-from sqlmodel import Session, and_, case, col, func, or_, select
+from sqlmodel import Session, case, col, func, select
 
 from .models import (
     Meeting,
@@ -40,15 +40,7 @@ class TaskRepository:
         """Scalar sub-select: created_at of the most recent Note for a given Task."""
         return (
             select(func.max(Note.created_at))
-            .where(
-                or_(
-                    Note.task_id == Task.id,
-                    and_(
-                        Note.source_id == Task.source_id,
-                        Note.source_type == "JIRA",
-                    ),
-                )
-            )
+            .where(Note.task_id == Task.id)
             .correlate(Task)
             .scalar_subquery()
             .label("last_worked_at")
@@ -153,43 +145,19 @@ class TaskRepository:
     def _batch_load_latest_notes(
         self, db: Session, tasks: list[Task]
     ) -> dict[int, Note]:
-        """Batch-load the latest note per task, including Jira source_id fallback.
-
-        Returns {task_id: latest_note}. Direct task_id matches take precedence
-        over source_id matches.
-        """
+        """Batch-load the latest note per task. Returns {task_id: latest_note}."""
         task_ids = [t.id for t in tasks if t.id is not None]
-        jira_source_ids = [t.source_id for t in tasks if t.source_id is not None]
-        source_id_to_task_id: dict[str, int] = {
-            t.source_id: t.id
-            for t in tasks
-            if t.source_id is not None and t.id is not None
-        }
-
-        note_conditions: list = []
-        if task_ids:
-            note_conditions.append(col(Note.task_id).in_(task_ids))
-        if jira_source_ids:
-            note_conditions.append(
-                and_(col(Note.source_id).in_(jira_source_ids), Note.source_type == "JIRA")
-            )
+        if not task_ids:
+            return {}
 
         latest: dict[int, Note] = {}
-        if not note_conditions:
-            return latest
-
         for n in db.execute(
             select(Note)
-            .where(or_(*note_conditions))
+            .where(col(Note.task_id).in_(task_ids))
             .order_by(col(Note.created_at).desc())
         ).scalars().all():
-            if n.task_id is not None:
-                if n.task_id not in latest:
-                    latest[n.task_id] = n
-            elif n.source_id is not None and n.source_type == "JIRA":
-                tid = source_id_to_task_id.get(n.source_id)
-                if tid is not None and tid not in latest:
-                    latest[tid] = n
+            if n.task_id is not None and n.task_id not in latest:
+                latest[n.task_id] = n
         return latest
 
 
@@ -242,19 +210,14 @@ class NoteRepository:
         self,
         db: Session,
         task_id: int | None,
-        source_id: str | None,
+        source_id: str | None = None,
     ) -> list[Note]:
-        conditions = []
-        if task_id is not None:
-            conditions.append(Note.task_id == task_id)
-        if source_id is not None:
-            conditions.append(
-                and_(Note.source_id == source_id, Note.source_type == "JIRA")
-            )
-        if not conditions:
+        if task_id is None:
             return []
         stmt = (
-            select(Note).where(or_(*conditions)).order_by(col(Note.created_at).desc())
+            select(Note)
+            .where(Note.task_id == task_id)
+            .order_by(col(Note.created_at).desc())
         )
         return list(db.exec(stmt).all())
 
@@ -328,21 +291,15 @@ class TaskStateRepository:
         return state
 
     def on_note_saved(self, db: Session, task_id: int) -> TaskState:
-        """Re-query notes for the task (dual-lookup: by task_id OR by Jira
-        source_id) and recompute note_count, decision_count, last_note_at,
-        last_touched_at, stale_days. Does NOT touch last_status_change_at."""
+        """Re-query notes for the task and recompute note_count, decision_count,
+        last_note_at, last_touched_at, stale_days. Does NOT touch last_status_change_at."""
         task = db.get(Task, task_id)
         if task is None:
             raise ValueError(f"Task {task_id} not found")
 
         state = self._get_or_create(db, task)
 
-        conditions: list = [Note.task_id == task_id]
-        if task.source_id is not None:
-            conditions.append(
-                and_(Note.source_id == task.source_id, Note.source_type == "JIRA")
-            )
-        notes = list(db.exec(select(Note).where(or_(*conditions))).all())
+        notes = list(db.exec(select(Note).where(Note.task_id == task_id)).all())
 
         state.note_count = len(notes)
         state.decision_count = sum(

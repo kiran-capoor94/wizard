@@ -9,7 +9,7 @@ from wizard.tools.task_tools import save_note
 
 @pytest.mark.asyncio
 async def test_resume_session(
-    db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
+    db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     seed_task, session_closer, capture_synthesiser,
 ):
@@ -17,9 +17,13 @@ async def test_resume_session(
 
     # Session 1: start, save note, end
     start_resp = await session_start(
-        ctx=fake_ctx, sync_svc=fake_sync, notion=fake_notion,
-        t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
-        closer=session_closer, synthesiser=capture_synthesiser,
+        ctx=fake_ctx,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+        capture_synthesiser=capture_synthesiser,
     )
     session_1_id = start_resp.session_id
 
@@ -38,7 +42,7 @@ async def test_resume_session(
         open_loops=["Need to check prod logs"],
         next_actions=["Compare with staging"],
         closure_status="interrupted",
-        sec=security, n_repo=note_repo, wb=fake_writeback,
+        sec=security, n_repo=note_repo,
         synthesiser=capture_synthesiser,
     )
 
@@ -46,7 +50,6 @@ async def test_resume_session(
     fresh_ctx = type(fake_ctx)()  # new FakeContext (empty state)
     resume_resp = await resume_session(
         ctx=fresh_ctx, session_id=session_1_id,
-        sync_svc=fake_sync, notion=fake_notion,
         t_repo=task_repo, n_repo=note_repo, m_repo=meeting_repo,
     )
     assert resume_resp.resumed_from_session_id == session_1_id

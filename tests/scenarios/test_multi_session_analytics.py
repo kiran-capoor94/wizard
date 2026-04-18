@@ -10,7 +10,7 @@ from wizard.tools.task_tools import save_note
 
 @pytest.mark.asyncio
 async def test_multi_session_analytics(
-    db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
+    db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     seed_task, session_closer, capture_synthesiser,
 ):
@@ -23,9 +23,13 @@ async def test_multi_session_analytics(
     for i, count in enumerate(note_counts):
         ctx = type(fake_ctx)()
         start = await session_start(
-            ctx=ctx, sync_svc=fake_sync, notion=fake_notion,
-            t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
-            closer=session_closer, synthesiser=capture_synthesiser,
+            ctx=ctx,
+            t_repo=task_repo,
+            n_repo=note_repo,
+            m_repo=meeting_repo,
+            ts_repo=task_state_repo,
+            session_closer=session_closer,
+            capture_synthesiser=capture_synthesiser,
         )
         session_ids.append(start.session_id)
 
@@ -45,7 +49,7 @@ async def test_multi_session_analytics(
             working_set=[target_task.id], state_delta="done",
             open_loops=[], next_actions=[],
             closure_status="clean",
-            sec=security, n_repo=note_repo, wb=fake_writeback,
+            sec=security, n_repo=note_repo,
             synthesiser=capture_synthesiser,
         )
 
