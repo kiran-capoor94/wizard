@@ -10,6 +10,36 @@ from notion_client.errors import APIResponseError
 from wizard import notion_discovery
 
 
+def discover_data_sources(
+    client: NotionSdkClient,
+) -> list[tuple[str, str, str]]:
+    """Enumerate all data sources visible to the integration.
+
+    Calls search() to find all databases, then databases.retrieve() on each
+    to read the data_sources array. Returns a flat list of
+    (ds_id, ds_name, db_title) tuples.
+
+    Skips databases that fail to retrieve (permissions, deleted, etc).
+    """
+    response = client.search(
+        filter={"property": "object", "value": "database"},
+    )
+    databases = response.get("results", [])
+
+    result: list[tuple[str, str, str]] = []
+    for db in databases:
+        db_id = db["id"]
+        db_title = db.get("title", [{}])[0].get("plain_text", "(untitled)")
+        try:
+            detail = client.databases.retrieve(database_id=db_id)
+        except (APIResponseError, httpx.HTTPError):
+            continue
+        for ds in detail.get("data_sources", []):
+            result.append((ds["id"], ds["name"], db_title))
+
+    return result
+
+
 def run_notion_discovery(config_path: Path) -> None:
     if not config_path.exists():
         typer.echo("Config not found. Run 'wizard setup' first.", err=True)
