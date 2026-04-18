@@ -45,7 +45,8 @@ def db_session(db_engine):
 
     with patch("wizard.tools.session_tools.get_session", _test_get_session), \
          patch("wizard.tools.task_tools.get_session", _test_get_session), \
-         patch("wizard.tools.meeting_tools.get_session", _test_get_session):
+         patch("wizard.tools.meeting_tools.get_session", _test_get_session), \
+         patch("wizard.middleware.get_session", _test_get_session):
         yield session
 
     session.close()
