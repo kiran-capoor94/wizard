@@ -46,21 +46,6 @@ class ObsidianKSSettings(BaseModel):
     tasks_folder: str = "Tasks"
 
 
-class NotionSchemaSettings(BaseModel):
-    """Deprecated stub for backwards compatibility during refactor. Will be removed."""
-
-    task_name: str = "Task"
-    task_status: str = "Status"
-    task_priority: str = "Priority"
-    task_due_date: str = "Due date"
-    task_jira_key: str = "Jira"
-    meeting_title: str = "Meeting name"
-    meeting_category: str = "Category"
-    meeting_date: str = "Date"
-    meeting_url: str = "Krisp URL"
-    meeting_summary: str = "Summary"
-    daily_page_session_summary: str = "Session Summary"
-
 
 class KnowledgeStoreSettings(BaseModel):
     type: str = ""  # "notion" | "obsidian" | ""

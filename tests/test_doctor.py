@@ -219,8 +219,7 @@ class TestNotionDiscoveryHardFail:
         }))
 
         with patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure.notion_discovery") as mock_disc:
-            mock_disc.fetch_db_properties.return_value = {}
+             patch("wizard.cli.configure.fetch_db_properties", return_value={}):
             with pytest.raises(ClickExit):
                 run_notion_discovery(config_path)
 
@@ -231,22 +230,22 @@ class TestNotionDiscoveryHardFail:
         }))
 
         available = {"Status": "status", "Priority": "select"}
+        match_result = {
+            "task_name": None,
+            "task_status": "Status",
+            "task_priority": "Priority",
+            "task_due_date": None,
+            "task_jira_key": None,
+            "meeting_title": None,
+            "meeting_category": None,
+            "meeting_date": None,
+            "meeting_url": None,
+            "meeting_summary": None,
+        }
 
         with patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure.notion_discovery") as mock_disc:
-            mock_disc.fetch_db_properties.return_value = available
-            mock_disc.match_properties.return_value = {
-                "task_name": None,
-                "task_status": "Status",
-                "task_priority": "Priority",
-                "task_due_date": None,
-                "task_jira_key": None,
-                "meeting_title": None,
-                "meeting_category": None,
-                "meeting_date": None,
-                "meeting_url": None,
-                "meeting_summary": None,
-            }
+             patch("wizard.cli.configure.fetch_db_properties", return_value=available), \
+             patch("wizard.cli.configure.match_properties", return_value=match_result):
             with pytest.raises(ClickExit):
                 run_notion_discovery(config_path)
 
@@ -271,9 +270,8 @@ class TestNotionDiscoveryHardFail:
         }
 
         with patch("wizard.cli.configure.NotionSdkClient"), \
-             patch("wizard.cli.configure.notion_discovery") as mock_disc:
-            mock_disc.fetch_db_properties.return_value = available
-            mock_disc.match_properties.return_value = matches
+             patch("wizard.cli.configure.fetch_db_properties", return_value=available), \
+             patch("wizard.cli.configure.match_properties", return_value=matches):
             run_notion_discovery(config_path)
 
         saved = json.loads(config_path.read_text())
