@@ -7,7 +7,14 @@ from unittest.mock import patch
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from tests.fakes import FakeContext, FakeSessionCloser
+from tests.fakes import (
+    FakeContext,
+    FakeJiraClient,
+    FakeNotionClient,
+    FakeSessionCloser,
+    FakeSyncService,
+    FakeWriteBackService,
+)
 from wizard.repositories import (
     MeetingRepository,
     NoteRepository,
@@ -57,6 +64,26 @@ def fake_ctx():
 @pytest.fixture
 def fake_session_closer():
     return FakeSessionCloser()
+
+
+@pytest.fixture
+def fake_jira():
+    return FakeJiraClient()
+
+
+@pytest.fixture
+def fake_notion():
+    return FakeNotionClient()
+
+
+@pytest.fixture
+def fake_sync():
+    return FakeSyncService()
+
+
+@pytest.fixture
+def fake_writeback():
+    return FakeWriteBackService()
 
 
 @pytest.fixture
