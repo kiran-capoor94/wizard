@@ -6,6 +6,7 @@ from .config import settings
 from .repositories import (
     MeetingRepository,
     NoteRepository,
+    SessionRepository,
     TaskRepository,
     TaskStateRepository,
 )
@@ -37,6 +38,10 @@ def get_note_repo() -> NoteRepository:
 
 def get_task_state_repo() -> TaskStateRepository:
     return TaskStateRepository()
+
+
+def get_session_repo() -> SessionRepository:
+    return SessionRepository()
 
 
 def get_session_closer() -> SessionCloser:
