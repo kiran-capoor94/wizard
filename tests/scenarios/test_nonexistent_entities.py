@@ -58,7 +58,7 @@ async def test_what_am_i_missing_nonexistent(db_session, fake_ctx, task_repo, no
 
 
 @pytest.mark.asyncio
-async def test_session_end_nonexistent(db_session, fake_ctx, note_repo, security, fake_writeback):
+async def test_session_end_nonexistent(db_session, fake_ctx, note_repo, security, fake_writeback, capture_synthesiser):
     with pytest.raises(ToolError):
         await session_end(
             ctx=fake_ctx, session_id=9999,
@@ -66,6 +66,7 @@ async def test_session_end_nonexistent(db_session, fake_ctx, note_repo, security
             state_delta="test", open_loops=[], next_actions=[],
             closure_status="clean",
             sec=security, n_repo=note_repo, wb=fake_writeback,
+            synthesiser=capture_synthesiser,
         )
 
 
