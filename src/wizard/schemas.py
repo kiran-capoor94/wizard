@@ -296,6 +296,24 @@ class DailyPageResult(BaseModel):
     archived_count: int
 
 
+class AutoCloseSummary(BaseModel):
+    """Structured output from LLM sampling when auto-closing an abandoned session."""
+
+    summary: str
+    intent: str
+    open_loops: list[str] = Field(default_factory=list)
+
+
+class ClosedSessionSummary(BaseModel):
+    """Result of auto-closing one abandoned session. Included in SessionStartResponse."""
+
+    session_id: int
+    summary: str
+    closed_via: str  # "sampling", "synthetic", "fallback"
+    task_ids: list[int] = Field(default_factory=list)
+    note_count: int
+
+
 class SessionStartResponse(BaseModel):
     session_id: int
     open_tasks: list[TaskContext]
@@ -304,6 +322,7 @@ class SessionStartResponse(BaseModel):
     sync_results: list[SourceSyncStatus]
     daily_page: DailyPageResult | None = None
     skill_instructions: str | None = None
+    closed_sessions: list[ClosedSessionSummary] = Field(default_factory=list)
 
 
 class TaskStartResponse(BaseModel):
