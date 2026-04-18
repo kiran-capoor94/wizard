@@ -9,9 +9,10 @@ from .middleware import SessionStateMiddleware, ToolLoggingMiddleware
 mcp = FastMCP(
     name=settings.name,
     instructions=(
-        "Wizard is Kiran's local memory layer. It syncs Jira and Notion, scrubs PII, "
-        "and surfaces structured context across sessions. Meetings can be ingested "
-        "via ingest_meeting. Start every session with session_start. End with session_end.\n\n"
+        "Wizard is Kiran's local memory layer. It stores structured context (tasks, notes, "
+        "meetings, sessions) in SQLite, scrubs PII, and surfaces intelligence across sessions. "
+        "External systems (Jira, Notion, etc.) are accessed by the agent via their own MCPs. "
+        "Start every session with session_start. End with session_end.\n\n"
         "NOTE-TAKING: Save notes throughout the session using save_note — not just at the end. "
         "Types: investigation (findings), decision (choices made), docs (how things work), "
         "learnings (surprises). Every note needs a task_id and concrete details (file paths, "
