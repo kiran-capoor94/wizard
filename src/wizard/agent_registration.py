@@ -9,7 +9,7 @@ from typing import Literal
 
 import tomli_w
 
-from .integrations import ConfigurationError
+from .exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
