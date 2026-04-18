@@ -7,22 +7,32 @@ from typing import Any
 import httpx
 from fastmcp import Context
 from notion_client.errors import APIResponseError
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from .integrations import JiraClient, NotionClient, extract_krisp_id
 from .mappers import MeetingCategoryMapper, PriorityMapper, StatusMapper
 from .models import Meeting, MeetingCategory, Note, NoteType, Task, WizardSession
 from .repositories import NoteRepository, TaskStateRepository
-from .schemas import (
-    AutoCloseSummary,
-    ClosedSessionSummary,
-    SessionState,
-    SourceSyncStatus,
-    WriteBackStatus,
-)
+from .schemas import AutoCloseSummary, ClosedSessionSummary, SessionState
 from .security import SecurityService
 
 logger = logging.getLogger(__name__)
+
+
+class SourceSyncStatus(BaseModel):
+    """Per-source sync result."""
+
+    source: str
+    ok: bool
+    error: str | None = None
+    skipped: bool = False
+
+
+class WriteBackStatus(BaseModel):
+    ok: bool
+    error: str | None = None
+    page_id: str | None = None
 
 
 class SyncService:

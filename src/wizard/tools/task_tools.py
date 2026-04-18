@@ -42,10 +42,9 @@ from ..schemas import (
     TaskStartResponse,
     TimelineEntry,
     UpdateTaskResponse,
-    WriteBackStatus,
 )
 from ..security import SecurityService
-from ..services import WriteBackService
+from ..services import WriteBackService, WriteBackStatus
 from ..skills import SKILL_TASK_START, load_skill
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
