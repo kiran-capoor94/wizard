@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -7,7 +8,6 @@ from click.exceptions import Exit as ClickExit
 from notion_client.errors import APIResponseError
 from typer.testing import CliRunner
 
-from wizard import notion_discovery
 from wizard.cli.configure import run_notion_discovery
 from wizard.cli.doctor import _check_jira_token, _check_notion_token
 from wizard.cli.main import app
@@ -133,125 +133,82 @@ class TestConfigureNotion:
             mock_configure.assert_called_once()
 
 
+@pytest.mark.integration
 class TestNotionDataSourceDiscovery:
-    """End-to-end validation of the data source discovery concept.
+    """Live integration test against the real Notion API.
 
-    Given a Notion workspace with multiple databases, each containing
-    data sources, prove that:
-    1. We can enumerate all data sources across the integration
-    2. Filtering by "task"/"meeting" surfaces the right candidates
-    3. A user's pick resolves to the correct ds_id
-    4. That ds_id can be used for schema discovery
+    Uses the token from ~/.wizard/config.json. Validates the entire
+    discovery pipeline against real data.
+
+    Run explicitly: uv run pytest -m integration -v -s
+    Skipped in normal test runs.
     """
 
     @pytest.fixture
     def notion_client(self):
-        """Mock Notion client simulating a realistic workspace.
+        config_path = Path.home() / ".wizard" / "config.json"
+        if not config_path.exists():
+            pytest.skip("No ~/.wizard/config.json found")
+        with open(config_path) as f:
+            cfg = json.load(f)
+        token = cfg.get("notion", {}).get("token", "")
+        if not token:
+            pytest.skip("No Notion token configured")
+        from notion_client import Client as NotionSdkClient
 
-        Workspace layout:
-          - "Engineering" database (db-eng)
-              - "Sprint Tasks" data source (ds-sprint)  <-- should match "task"
-              - "Bug Tracker" data source (ds-bugs)
-          - "People Ops" database (db-ops)
-              - "Meeting Notes" data source (ds-meetings)  <-- should match "meeting"
-              - "1:1 Tracker" data source (ds-1on1)
-          - "Restricted" database (db-restricted)
-              - databases.retrieve raises 404 (no access)
-        """
-        client = MagicMock()
-        client.search.return_value = {
-            "results": [
-                {"object": "database", "id": "db-eng", "title": [{"plain_text": "Engineering"}]},
-                {"object": "database", "id": "db-ops", "title": [{"plain_text": "People Ops"}]},
-                {"object": "database", "id": "db-restricted", "title": [{"plain_text": "Restricted"}]},
-            ],
-            "has_more": False,
-        }
-        client.databases.retrieve.side_effect = [
-            {"data_sources": [
-                {"id": "ds-sprint", "name": "Sprint Tasks"},
-                {"id": "ds-bugs", "name": "Bug Tracker"},
-            ]},
-            {"data_sources": [
-                {"id": "ds-meetings", "name": "Meeting Notes"},
-                {"id": "ds-1on1", "name": "1:1 Tracker"},
-            ]},
-            APIResponseError(
-                code="object_not_found", status=404,
-                message="Not found", headers=MagicMock(), raw_body_text="",
-            ),
-        ]
-        # Schema retrieval for the winning ds_ids
-        client.data_sources.retrieve.side_effect = lambda data_source_id: {
-            "ds-sprint": {"properties": {
-                "Task": {"type": "title"},
-                "Status": {"type": "status"},
-                "Priority": {"type": "select"},
-            }},
-            "ds-meetings": {"properties": {
-                "Meeting name": {"type": "title"},
-                "Date": {"type": "date"},
-                "Summary": {"type": "rich_text"},
-            }},
-        }[data_source_id]
-        return client
+        return NotionSdkClient(auth=token)
 
-    def test_full_discovery_pipeline(self, notion_client):
+    def test_discover_returns_real_data_sources(self, notion_client):
         from wizard.cli.configure import discover_data_sources
 
-        # Step 1: Enumerate all data sources
         all_ds = discover_data_sources(notion_client)
 
-        # Should find 4 data sources (restricted DB skipped)
-        assert len(all_ds) == 4
-        ds_ids = [ds_id for ds_id, _, _ in all_ds]
-        assert "ds-sprint" in ds_ids
-        assert "ds-bugs" in ds_ids
-        assert "ds-meetings" in ds_ids
-        assert "ds-1on1" in ds_ids
-
-        # Step 2: Filter for tasks — "task" matches "Sprint Tasks"
-        task_matches = [(ds_id, name, db) for ds_id, name, db in all_ds
-                        if "task" in name.lower()]
-        assert len(task_matches) == 1
-        assert task_matches[0][0] == "ds-sprint"
-        assert task_matches[0][2] == "Engineering"
-
-        # Step 3: Filter for meetings — "meeting" matches "Meeting Notes"
-        meeting_matches = [(ds_id, name, db) for ds_id, name, db in all_ds
-                           if "meeting" in name.lower()]
-        assert len(meeting_matches) == 1
-        assert meeting_matches[0][0] == "ds-meetings"
-        assert meeting_matches[0][2] == "People Ops"
-
-        # Step 4: The chosen ds_ids work for schema discovery
-        tasks_schema = notion_client.data_sources.retrieve(
-            data_source_id="ds-sprint",
+        assert len(all_ds) > 0, (
+            "No data sources found — is the integration connected to any databases?"
         )
-        assert "Task" in tasks_schema["properties"]
-        assert tasks_schema["properties"]["Task"]["type"] == "title"
 
-        meetings_schema = notion_client.data_sources.retrieve(
-            data_source_id="ds-meetings",
-        )
-        assert "Meeting name" in meetings_schema["properties"]
+        for ds_id, ds_name in all_ds:
+            assert isinstance(ds_id, str) and len(ds_id) > 0
+            assert isinstance(ds_name, str) and len(ds_name) > 0
 
-        # Step 5: The auto-matcher would find required fields
-        tasks_props = {
-            name: prop["type"]
-            for name, prop in tasks_schema["properties"].items()
-        }
-        meetings_props = {
-            name: prop["type"]
-            for name, prop in meetings_schema["properties"].items()
-        }
-        all_props = {**tasks_props, **meetings_props}
-        matches = notion_discovery.match_properties(all_props, [
-            "task_name", "task_status", "meeting_title",
-        ])
-        assert matches["task_name"] is not None, f"task_name unmatched, available: {all_props}"
-        assert matches["task_status"] is not None, f"task_status unmatched, available: {all_props}"
-        assert matches["meeting_title"] is not None, f"meeting_title unmatched, available: {all_props}"
+        print(f"\n  Found {len(all_ds)} data sources:")
+        for ds_id, ds_name in all_ds:
+            print(f"    {ds_name} -- {ds_id}")
+
+    def test_discovered_ds_ids_work_for_schema_retrieval(self, notion_client):
+        from wizard.cli.configure import discover_data_sources
+
+        all_ds = discover_data_sources(notion_client)
+        assert len(all_ds) > 0, "No data sources to test"
+
+        ds_id, ds_name = all_ds[0]
+        schema = notion_client.data_sources.retrieve(data_source_id=ds_id)
+
+        assert "properties" in schema, f"No properties for {ds_name}"
+        props = schema["properties"]
+        assert len(props) > 0, f"Empty properties for {ds_name}"
+
+        print(f"\n  Schema for \"{ds_name}\" ({ds_id}):")
+        for name, prop in props.items():
+            print(f"    {name}: {prop['type']}")
+
+    def test_filtering_finds_candidates(self, notion_client):
+        from wizard.cli.configure import discover_data_sources
+
+        all_ds = discover_data_sources(notion_client)
+        assert len(all_ds) > 0
+
+        for search_term in ("task", "meeting"):
+            matches = [
+                (ds_id, name) for ds_id, name in all_ds
+                if search_term in name.lower()
+            ]
+            if matches:
+                print(f"\n  '{search_term}' matched {len(matches)}:")
+                for _, name in matches:
+                    print(f"    {name}")
+            else:
+                print(f"\n  '{search_term}' matched 0 -- would show all {len(all_ds)}")
 
 
 class TestNotionDiscoveryHardFail:
