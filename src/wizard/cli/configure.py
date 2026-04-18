@@ -1,5 +1,4 @@
 import json
-import re
 from pathlib import Path
 
 import typer
@@ -95,36 +94,6 @@ def run_notion_discovery(config_path: Path) -> None:
         typer.echo(f"    {k:<20} -> {v}")
     typer.echo("  Schema saved.")
 
-
-def resolve_notion_page_id(url: str) -> str:
-    """Extract 32-char hex page ID from a Notion URL and format as UUID.
-
-    Handles:
-      https://www.notion.so/workspace/My-Tasks-abc123def456789012345678901234ab
-      https://www.notion.so/abc123def456789012345678901234ab
-      https://www.notion.so/My-Tasks-abc123def456789012345678901234ab?v=...
-
-    Query strings are stripped before matching. URL fragments (#...) are not
-    stripped separately, but the hex-only regex ignores them in practice.
-    """
-    path = url.split("?")[0]
-    matches = re.findall(r"[0-9a-f]{32}", path.lower())
-    if not matches:
-        raise ValueError(f"Could not extract page ID from URL: {url}")
-    raw = matches[-1]
-    return f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
-
-
-def resolve_ds_id(client, page_id: str) -> str:
-    """Confirm page_id is a valid data source ID and return it unchanged.
-
-    In notion-client v3.0, the 32-char page ID extracted from a Notion database
-    URL IS the data source ID — no translation or lookup is needed. This call
-    confirms the ID is reachable before we persist it, and raises on 404 / auth
-    errors so the caller's retry loop can re-prompt the user.
-    """
-    client.data_sources.retrieve(data_source_id=page_id)
-    return page_id
 
 
 def notion_is_configured(cfg: dict) -> bool:
