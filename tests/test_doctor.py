@@ -2,9 +2,12 @@ import json
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
+from click.exceptions import Exit as ClickExit
 from notion_client.errors import APIResponseError
 from typer.testing import CliRunner
 
+from wizard.cli.configure import run_notion_discovery
 from wizard.cli.doctor import _check_jira_token, _check_notion_token
 from wizard.cli.main import app
 
@@ -127,3 +130,76 @@ class TestConfigureNotion:
             runner = CliRunner()
             runner.invoke(app, ["configure", "--notion"])
             mock_configure.assert_called_once()
+
+
+class TestNotionDiscoveryHardFail:
+    def test_empty_properties_exits(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({
+            "notion": {"token": "ntn_test", "tasks_ds_id": "ds1", "meetings_ds_id": "ds2"},
+        }))
+
+        with patch("wizard.cli.configure.NotionSdkClient"), \
+             patch("wizard.cli.configure.notion_discovery") as mock_disc:
+            mock_disc.fetch_db_properties.return_value = {}
+            with pytest.raises(ClickExit):
+                run_notion_discovery(config_path)
+
+    def test_unmatched_required_field_exits(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({
+            "notion": {"token": "ntn_test", "tasks_ds_id": "ds1", "meetings_ds_id": "ds2"},
+        }))
+
+        available = {"Status": "status", "Priority": "select"}
+
+        with patch("wizard.cli.configure.NotionSdkClient"), \
+             patch("wizard.cli.configure.notion_discovery") as mock_disc:
+            mock_disc.fetch_db_properties.return_value = available
+            mock_disc.match_properties.return_value = {
+                "task_name": None,
+                "task_status": "Status",
+                "task_priority": "Priority",
+                "task_due_date": None,
+                "task_jira_key": None,
+                "meeting_title": None,
+                "meeting_category": None,
+                "meeting_date": None,
+                "meeting_url": None,
+                "meeting_summary": None,
+            }
+            with pytest.raises(ClickExit):
+                run_notion_discovery(config_path)
+
+    def test_all_required_matched_saves_schema(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({
+            "notion": {"token": "ntn_test", "tasks_ds_id": "ds1", "meetings_ds_id": "ds2"},
+        }))
+
+        available = {"Task": "title", "Status": "status", "Meeting name": "title"}
+        matches = {
+            "task_name": "Task",
+            "task_status": "Status",
+            "task_priority": None,
+            "task_due_date": None,
+            "task_jira_key": None,
+            "meeting_title": "Meeting name",
+            "meeting_category": None,
+            "meeting_date": None,
+            "meeting_url": None,
+            "meeting_summary": None,
+        }
+
+        with patch("wizard.cli.configure.NotionSdkClient"), \
+             patch("wizard.cli.configure.notion_discovery") as mock_disc:
+            mock_disc.fetch_db_properties.return_value = available
+            mock_disc.match_properties.return_value = matches
+            run_notion_discovery(config_path)
+
+        saved = json.loads(config_path.read_text())
+        schema = saved["notion"]["notion_schema"]
+        assert schema["task_name"] == "Task"
+        assert schema["task_status"] == "Status"
+        assert schema["meeting_title"] == "Meeting name"
+        assert "task_priority" not in schema  # None values excluded
