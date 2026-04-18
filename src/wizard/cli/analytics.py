@@ -3,7 +3,7 @@ import logging
 
 from sqlmodel import select
 
-from wizard.models import Note, TaskState, ToolCall
+from wizard.models import Note, TaskState, ToolCall, WizardSession
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +31,28 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
     }
 
     session_count = len(starts)
+
+    # Durations: user-closed sessions use session_end ToolCall timestamp
     durations = []
     for sid, start_time in starts.items():
         if sid in ends:
             delta = (ends[sid] - start_time).total_seconds() / 60
+            durations.append(delta)
+
+    # Query WizardSession for abandoned metrics and their durations
+    sessions_in_range = db.exec(
+        select(WizardSession).where(
+            WizardSession.created_at >= start_dt,
+            WizardSession.created_at <= end_dt,
+        )
+    ).all()
+
+    abandoned = [s for s in sessions_in_range if s.closed_by == "auto"]
+    abandoned_count = len(abandoned)
+
+    for s in abandoned:
+        if s.last_active_at is not None and s.id in starts:
+            delta = (s.last_active_at - starts[s.id]).total_seconds() / 60
             durations.append(delta)
 
     avg_duration = sum(durations) / len(durations) if durations else 0.0
@@ -43,6 +61,8 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
         "session_count": session_count,
         "avg_duration_minutes": round(avg_duration, 1),
         "total_tool_calls": total_tool_calls,
+        "abandoned_count": abandoned_count,
+        "abandoned_rate": round(abandoned_count / session_count, 2) if session_count else 0.0,
     }
 
 
@@ -166,6 +186,12 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
         f"  Sessions:             {sessions.get('session_count', 0)}",
         f"  Avg duration (min):   {sessions.get('avg_duration_minutes', 0.0)}",
         f"  Total tool calls:     {sessions.get('total_tool_calls', 0)}",
+    ]
+    abandoned_count = sessions.get('abandoned_count', 0)
+    if abandoned_count > 0:
+        rate = sessions.get('abandoned_rate', 0.0)
+        lines.append(f"  Abandoned:            {abandoned_count} ({rate:.0%})")
+    lines += [
         "",
         "Notes",
         f"  Total notes:          {notes.get('total', 0)}",
