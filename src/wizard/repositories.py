@@ -232,7 +232,6 @@ class NoteRepository:
         self,
         db: Session,
         task_id: int | None,
-        source_id: str | None = None,
     ) -> list[Note]:
         if task_id is None:
             return []

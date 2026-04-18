@@ -29,7 +29,7 @@ server.py                    # Entry point — imports mcp_instance, tools, reso
 src/wizard/
   cli/
     main.py                  # Typer app: setup, configure, sync, doctor, analytics, update, uninstall, capture
-    doctor.py                # 10-point health checks (wizard doctor)
+    doctor.py                # 8-point health checks (wizard doctor)
     analytics.py             # Session/note/task usage stats (wizard analytics)
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
   tools/                       # MCP tools package (split by domain)
@@ -202,22 +202,19 @@ result = await my_tool(task_id=1, t_repo=TaskRepository())
 
 ## Doctor Checks
 
-`wizard doctor` runs 10 checks in order. Stops at first failure unless
-`--all` is passed. Check 8 (Notion schema) is skipped if check 2
-(Notion token) fails.
+`wizard doctor` runs 8 checks in order. Stops at first failure unless
+`--all` is passed.
 
 | # | Check | What it validates |
 |---|-------|------------------|
 | 1 | DB file | `settings.db` path exists |
-| 2 | Notion token | `notion.token` is set |
-| 3 | Jira token | `jira.token` is set |
-| 4 | Config file | `~/.wizard/config.json` exists |
-| 5 | DB tables | All 6 required tables present |
-| 6 | Allowlist file | `~/.wizard/allowlist.txt` exists |
-| 7 | Agent registered | ≥1 agent in registered_agents.json or scanned |
-| 8 | Notion schema | Live DB properties match config schema (skipped if no token) |
-| 9 | Migration current | Alembic revision matches DB |
-| 10 | Skills installed | `~/.wizard/skills/` is non-empty |
+| 2 | Config file | `~/.wizard/config.json` exists |
+| 3 | DB tables | All 6 required tables present |
+| 4 | Allowlist file | `~/.wizard/allowlist.txt` exists |
+| 5 | Agent registered | ≥1 agent in registered_agents.json or scanned |
+| 6 | Migration current | Alembic revision matches DB |
+| 7 | Skills installed | `~/.wizard/skills/` is non-empty |
+| 8 | Knowledge store | KS type configured (INFO only) |
 
 ## Agent Registration
 
