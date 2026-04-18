@@ -23,6 +23,8 @@ class FakeContext:
 
     def __init__(self):
         self._state: dict = {}
+        self.sample_result = None
+        self.sample_error: Exception | None = None
 
     async def get_state(self, key: str):
         return self._state.get(key)
@@ -44,6 +46,16 @@ class FakeContext:
 
     async def elicit(self, prompt: str, response_type=None):
         raise NotImplementedError("elicit not available in tests")
+
+    async def sample(self, messages, **kwargs):
+        """Configurable fake for ctx.sample().
+
+        Set ``self.sample_result`` to control the return value.
+        Set ``self.sample_error`` to make it raise.
+        """
+        if self.sample_error is not None:
+            raise self.sample_error
+        return self.sample_result
 
 
 class FakeJiraClient:
