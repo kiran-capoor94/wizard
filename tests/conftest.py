@@ -101,8 +101,8 @@ def meeting_repo():
 
 
 @pytest.fixture
-def session_closer():
-    return SessionCloser()
+def session_closer(security):
+    return SessionCloser(security=security)
 
 
 @pytest.fixture
