@@ -61,6 +61,9 @@ class TaskRepository:
             raise ValueError(f"Task {task_id} not found")
         return task
 
+    def get_by_source_id(self, db: Session, source_id: str) -> Task | None:
+        return db.exec(select(Task).where(Task.source_id == source_id)).first()
+
     def get_open_task_contexts(self, db: Session) -> list[TaskContext]:
         """Open tasks (TODO / IN_PROGRESS) sorted by priority then last-worked desc."""
         return self._query_task_contexts(
