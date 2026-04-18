@@ -12,6 +12,7 @@ from sqlmodel import Session
 
 from ..database import get_session
 from ..deps import (
+    get_capture_synthesiser,
     get_meeting_repo,
     get_note_repo,
     get_notion_client,
@@ -48,6 +49,7 @@ from ..schemas import (
 from ..security import SecurityService
 from ..services import SessionCloser, SyncService, WriteBackService
 from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_START, load_skill
+from ..transcript import CaptureSynthesiser
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,7 @@ async def session_start(
     t_repo: TaskRepository = Depends(get_task_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
     closer: SessionCloser = Depends(get_session_closer),
+    synthesiser: CaptureSynthesiser = Depends(get_capture_synthesiser),
 ) -> SessionStartResponse:
     """Create a session, sync Jira/Notion, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start")
@@ -92,6 +95,17 @@ async def session_start(
         await ctx.info(f"Session {session.id} started.")
 
         closed_sessions = await closer.close_abandoned(db, ctx, session.id)
+
+        for cs_summary in closed_sessions:
+            cs = db.get(WizardSession, cs_summary.session_id)
+            if cs and cs.transcript_path:
+                try:
+                    await synthesiser.synthesise(db, ctx, cs)
+                except Exception as e:
+                    logger.warning(
+                        "Transcript synthesis failed for session %d: %s",
+                        cs_summary.session_id, e,
+                    )
 
         try:
             t_state_repo.refresh_stale_days(db)
@@ -124,6 +138,7 @@ async def session_end(
     sec: SecurityService = Depends(get_security),
     n_repo: NoteRepository = Depends(get_note_repo),
     wb: WriteBackService = Depends(get_writeback),
+    synthesiser: CaptureSynthesiser = Depends(get_capture_synthesiser),
 ) -> SessionEndResponse:
     """Persists session summary + SessionState to WizardSession. Writes Notion daily page."""
     logger.info("session_end session_id=%d", session_id)
@@ -169,6 +184,12 @@ async def session_end(
                 raise ToolError("Internal error: note was not assigned an id after flush")
 
             wb_result = wb.push_session_summary(session)
+
+            if session.transcript_path:
+                try:
+                    await synthesiser.synthesise(db, ctx, session)
+                except Exception as e:
+                    logger.warning("Transcript synthesis failed: %s", e)
 
             await ctx.delete_state("current_session_id")
             await ctx.info(
