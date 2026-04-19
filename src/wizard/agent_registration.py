@@ -208,7 +208,8 @@ def write_registered_agents(agents: list[str]) -> None:
     _REGISTERED_AGENTS_PATH.write_text(json.dumps(agents, indent=2))
 
 
-_HOOK_SCRIPT = _PROJECT_DIR / "hooks" / "session-end.sh"
+_HOOK_SCRIPT_SESSION_END = _PROJECT_DIR / "hooks" / "session-end.sh"
+_HOOK_SCRIPT_SESSION_START = _PROJECT_DIR / "hooks" / "session-start.sh"
 
 _HOOK_CONFIGS: dict[str, tuple[Path, str]] = {
     # agent_id -> (config_path, hooks_key_path)
@@ -226,22 +227,24 @@ _HOOK_CONFIGS: dict[str, tuple[Path, str]] = {
     ),
 }
 
-_HOOK_EVENT: dict[str, str] = {
-    "claude-code": "SessionEnd",
-    "codex": "Stop",
-    "gemini": "SessionEnd",
+_HOOK_SCRIPTS: dict[str, dict[str, Path]] = {
+    "claude-code": {
+        "SessionEnd": _HOOK_SCRIPT_SESSION_END,
+        "SessionStart": _HOOK_SCRIPT_SESSION_START,
+    },
+    "codex": {"Stop": _HOOK_SCRIPT_SESSION_END},
+    "gemini": {"SessionEnd": _HOOK_SCRIPT_SESSION_END},
 }
 
 
 def register_hook(agent_id: str) -> bool:
-    """Install wizard SessionEnd hook into agent's hooks config. Idempotent.
+    """Install wizard hook(s) into agent's hooks config. Idempotent.
 
-    Returns True if hook was installed, False if agent not supported.
+    Returns True if agent is supported, False otherwise.
     """
-    if agent_id not in _HOOK_CONFIGS:
+    if agent_id not in _HOOK_CONFIGS or agent_id not in _HOOK_SCRIPTS:
         return False
     config_path, hooks_key = _HOOK_CONFIGS[agent_id]
-    event = _HOOK_EVENT[agent_id]
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     if config_path.exists():
@@ -253,41 +256,41 @@ def register_hook(agent_id: str) -> bool:
         data = {}
 
     hooks = data.setdefault(hooks_key, {})
-    event_hooks = hooks.setdefault(event, [])
 
-    # Check if wizard hook already registered
-    for entry in event_hooks:
-        for h in entry.get("hooks", []):
-            if "wizard" in h.get("command", "") and "session-end" in h.get(
-                "command", ""
-            ):
-                return True  # already installed
+    for event, script in _HOOK_SCRIPTS[agent_id].items():
+        event_hooks = hooks.setdefault(event, [])
+        stem = script.stem  # e.g. "session-end" or "session-start"
 
-    hook_command = f"bash {_HOOK_SCRIPT}"
-    event_hooks.append(
-        {
+        already = any(
+            stem in h.get("command", "")
+            for entry in event_hooks
+            for h in entry.get("hooks", [])
+        )
+        if already:
+            continue
+
+        event_hooks.append({
             "hooks": [
                 {
                     "type": "command",
-                    "command": hook_command,
+                    "command": f"bash {script}",
                     "timeout": 10,
                 }
             ],
-        }
-    )
+        })
+
     config_path.write_text(json.dumps(data, indent=2))
     return True
 
 
 def deregister_hook(agent_id: str) -> bool:
-    """Remove wizard SessionEnd hook from agent's hooks config.
+    """Remove wizard hook(s) from agent's hooks config.
 
-    Returns True if hook was removed, False if agent not supported or not found.
+    Returns True if any hook was removed, False if agent not supported or nothing removed.
     """
-    if agent_id not in _HOOK_CONFIGS:
+    if agent_id not in _HOOK_CONFIGS or agent_id not in _HOOK_SCRIPTS:
         return False
     config_path, hooks_key = _HOOK_CONFIGS[agent_id]
-    event = _HOOK_EVENT[agent_id]
 
     if not config_path.exists():
         return False
@@ -298,24 +301,23 @@ def deregister_hook(agent_id: str) -> bool:
         return False
 
     hooks = data.get(hooks_key, {})
-    event_hooks = hooks.get(event, [])
+    removed_any = False
 
-    filtered = [
-        entry
-        for entry in event_hooks
-        if not any(
-            "wizard" in h.get("command", "") and "session-end" in h.get("command", "")
-            for h in entry.get("hooks", [])
-        )
-    ]
+    for event, script in _HOOK_SCRIPTS[agent_id].items():
+        stem = script.stem
+        event_hooks = hooks.get(event, [])
+        filtered = [
+            entry
+            for entry in event_hooks
+            if not any(stem in h.get("command", "") for h in entry.get("hooks", []))
+        ]
+        if len(filtered) < len(event_hooks):
+            hooks[event] = filtered
+            removed_any = True
 
-    if len(filtered) == len(event_hooks):
-        return False  # nothing removed
-
-    hooks[event] = filtered
     data[hooks_key] = hooks
     config_path.write_text(json.dumps(data, indent=2))
-    return True
+    return removed_any
 
 
 def scan_all_registered() -> list[str]:
