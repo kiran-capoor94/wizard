@@ -1,6 +1,7 @@
 """Tests for OllamaSynthesiser -- mocks ollama.Client to avoid a live Ollama server."""
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from sqlmodel import select
@@ -45,6 +46,20 @@ _FAKE_NOTES = [
         "mental_model": None,
     },
 ]
+
+
+def _fake_ollama_response():
+    """Minimal valid Ollama response for synthesis tests."""
+    from wizard.transcript import SynthesisNote
+    note = SynthesisNote(
+        note_type="investigation",
+        content="Investigated X.",
+        task_id=None,
+        mental_model=None,
+    )
+    resp = MagicMock()
+    resp.message.content = f'[{note.model_dump_json()}]'
+    return resp
 
 
 def test_synthesise_saves_notes(db_session):
@@ -163,3 +178,37 @@ def test_task_ids_always_null(db_session):
     assert result.task_ids_touched == []
     notes = list(db_session.execute(select(Note).where(Note.session_id == session.id)).scalars())
     assert all(n.task_id is None for n in notes)
+
+
+def test_synthesise_path_ignores_session_transcript_path(db_session):
+    """synthesise_path must use its explicit path arg, not session.transcript_path."""
+    session = WizardSession(agent="claude-code")  # transcript_path is None
+    db_session.add(session)
+    db_session.flush()
+
+    with patch.object(TranscriptReader, "read", return_value=_FAKE_ENTRIES) as mock_read, \
+         patch("wizard.transcript.ollama.Client") as mock_client_cls:
+        mock_client_cls.return_value.chat.return_value = _fake_ollama_response()
+        result = _make_synthesiser().synthesise_path(
+            db_session, session, Path("/explicit/path.jsonl")
+        )
+
+    mock_read.assert_called_once_with("/explicit/path.jsonl", "claude-code")
+    assert result.synthesised_via == "ollama"
+
+
+def test_synthesise_delegates_to_synthesise_path(db_session):
+    """`synthesise()` calls `synthesise_path()` with `session.transcript_path`."""
+    session = WizardSession(
+        transcript_path="/stored/path.jsonl", agent="claude-code"
+    )
+    db_session.add(session)
+    db_session.flush()
+
+    with patch.object(TranscriptReader, "read", return_value=_FAKE_ENTRIES) as mock_read, \
+         patch("wizard.transcript.ollama.Client") as mock_client_cls:
+        mock_client_cls.return_value.chat.return_value = _fake_ollama_response()
+        result = _make_synthesiser().synthesise(db_session, session)
+
+    mock_read.assert_called_once_with("/stored/path.jsonl", "claude-code")
+    assert result.synthesised_via == "ollama"
