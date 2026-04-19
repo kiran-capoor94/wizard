@@ -35,22 +35,23 @@ run `uv run wizard configure knowledge-store` after setup.
 Wizard is built around a **session lifecycle** that keeps your agent
 grounded across work sessions.
 
-1. **Session Start** — Wizard syncs tasks from Jira and meetings from
-   Notion, creates a session, and returns what needs attention. Abandoned
-   sessions from prior runs are auto-closed and their transcripts
-   synthesised into structured notes.
-2. **Work** — As you investigate tasks and review meetings, Wizard stores
-   notes that compound across sessions. Each time you revisit a task, you
-   get everything from before.
-3. **Write-back** — Status changes and summaries push back to Jira and
-   Notion so your external tools stay in sync.
-4. **Session End** — Wizard persists a session summary and updates your
-   daily Notion page. If the agent has a transcript, Wizard synthesises
-   it into structured notes (investigation, decision, docs, learnings)
-   using its own prompt scaffolding — no manual `save_note` needed.
-
-Context compounds. The more you use Wizard, the less ramp-up time each
-session costs. Your agent starts where you left off, not from scratch.
+1. **Session continuity** — `session_start` creates a session and returns
+   your open and blocked tasks, unsummarised meetings, and optional
+   knowledge store context. Abandoned sessions from prior runs are
+   auto-closed and their transcripts synthesised.
+2. **Compounding context** — Notes, decisions, and investigations accumulate
+   per task across sessions. Every time you revisit a task, prior context
+   surfaces automatically. The more you use Wizard, the less ramp-up each
+   session costs.
+3. **Transcript synthesis** — When a session ends, a `SessionEnd` hook fires
+   and Wizard synthesises the agent's conversation transcript into structured
+   notes (investigation, decision, docs, learnings) via `CaptureSynthesiser`.
+   No manual `save_note` calls required.
+4. **Work triage** — `what_should_i_work_on` scores your open tasks by
+   priority, recency, and momentum in three modes: `focus` (weighted toward
+   high-priority active work), `quick-wins` (simplicity-weighted), and
+   `unblock` (surfaces stuck tasks). The skill handles the full interaction —
+   just say "what should I work on?" or "I have 30 minutes".
 
 ## MCP Tools
 
