@@ -55,25 +55,29 @@ grounded across work sessions.
 
 ## MCP Tools
 
-Wizard exposes 13 tools via the
+Wizard exposes 17 tools via the
 [Model Context Protocol](https://modelcontextprotocol.io/).
 The MCP server self-describes its tools — this is just for orientation.
 
-| Tool                   | Description                                                           |
-| ---------------------- | --------------------------------------------------------------------- |
-| `session_start`        | Sync all sources, return open/blocked tasks and unsummarised meetings |
-| `session_end`          | Persist session summary, update daily Notion page                     |
-| `resume_session`       | Restore prior session state into a new session                        |
-| `task_start`           | Get full task context + all prior notes (compounds across sessions)   |
-| `create_task`          | Create a new task, optionally linked to a meeting                     |
-| `update_task`          | Update any task field with optional Jira/Notion write-back            |
-| `rewind_task`          | Full note timeline for a task, oldest to newest                       |
-| `save_note`            | Scrub PII and persist investigation/decision/learning notes           |
-| `what_am_i_missing`    | 7-point diagnostic — surfaces stale context, missing decisions, etc.  |
-| `get_meeting`          | Retrieve transcript and linked open tasks                             |
-| `save_meeting_summary` | Store summary, create note, update Notion                             |
-| `ingest_meeting`       | Accept raw meeting data (e.g. from Krisp), scrub and store            |
-| `update_task_status`   | _(Deprecated — use `update_task` instead)_                            |
+| Tool                     | Description                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------ |
+| `session_start`          | Create session, return open/blocked tasks, unsummarised meetings, wizard context |
+| `session_end`            | Persist session summary and state                                              |
+| `resume_session`         | Restore prior session state into a new session                                 |
+| `task_start`             | Get full task context + all prior notes (compounds across sessions)            |
+| `create_task`            | Create a new task, optionally linked to a meeting                              |
+| `update_task`            | Update any task field                                                          |
+| `rewind_task`            | Full note timeline for a task, oldest to newest                                |
+| `save_note`              | Scrub PII and persist investigation/decision/learning notes                    |
+| `what_am_i_missing`      | 7-point diagnostic — surfaces stale context, missing decisions, etc.           |
+| `what_should_i_work_on`  | Scored recommendation with mode (focus / quick-wins / unblock) and time budget |
+| `get_meeting`            | Retrieve transcript and linked open tasks                                      |
+| `save_meeting_summary`   | Store meeting summary and create linked note                                   |
+| `ingest_meeting`         | Accept raw meeting data (e.g. from Krisp), scrub and store                     |
+| `get_tasks`              | Paginated task list with optional status and source filters                    |
+| `get_task`               | Full task detail with note timeline and task state                             |
+| `get_sessions`           | Paginated session history                                                      |
+| `get_session`            | Single session detail with state and prior notes                               |
 
 ## MCP Resources
 
