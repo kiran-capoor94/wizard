@@ -1,5 +1,7 @@
 """Tests for the `wizard capture --close` CLI command."""
 
+import datetime
+import os
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -9,6 +11,7 @@ from typer.testing import CliRunner
 
 from wizard.cli.main import app
 from wizard.models import WizardSession
+from wizard.schemas import SynthesisResult
 
 runner = CliRunner()
 
@@ -39,6 +42,76 @@ def open_session(capture_engine):
         db.flush()
         db.refresh(s)
         return s.id
+
+
+class TestCollectTranscripts:
+    def test_returns_empty_when_no_transcript_path(self, capture_engine):
+        from wizard.cli.main import _collect_transcripts
+        with _session_for(capture_engine) as db:
+            s = WizardSession()  # no transcript_path
+            db.add(s)
+            db.flush()
+            db.refresh(s)
+            result = _collect_transcripts(s)
+        assert result == []
+
+    def test_returns_only_main_when_no_siblings(self, tmp_path, capture_engine):
+        from wizard.cli.main import _collect_transcripts
+        transcript = tmp_path / "main.jsonl"
+        transcript.write_text("{}\n")
+        with _session_for(capture_engine) as db:
+            s = WizardSession(transcript_path=str(transcript))
+            db.add(s)
+            db.flush()
+            db.refresh(s)
+            result = _collect_transcripts(s)
+        assert result == [transcript]
+
+    def test_includes_siblings_created_after_session(self, tmp_path, capture_engine):
+        from wizard.cli.main import _collect_transcripts
+
+        transcript = tmp_path / "main.jsonl"
+        transcript.write_text("{}\n")
+        sibling = tmp_path / "sub-agent.jsonl"
+        sibling.write_text("{}\n")
+
+        with _session_for(capture_engine) as db:
+            # Session created 5 seconds ago, sibling has current mtime
+            s = WizardSession(
+                transcript_path=str(transcript),
+                created_at=datetime.datetime.utcnow() - datetime.timedelta(seconds=5),
+            )
+            db.add(s)
+            db.flush()
+            db.refresh(s)
+            result = _collect_transcripts(s)
+
+        assert transcript in result
+        assert sibling in result
+
+    def test_excludes_siblings_created_before_session(self, tmp_path, capture_engine):
+        from wizard.cli.main import _collect_transcripts
+
+        old_sibling = tmp_path / "old.jsonl"
+        old_sibling.write_text("{}\n")
+        # Force old_sibling mtime to epoch
+        os.utime(str(old_sibling), (0, 0))
+
+        transcript = tmp_path / "main.jsonl"
+        transcript.write_text("{}\n")
+
+        with _session_for(capture_engine) as db:
+            s = WizardSession(
+                transcript_path=str(transcript),
+                created_at=datetime.datetime.utcnow(),
+            )
+            db.add(s)
+            db.flush()
+            db.refresh(s)
+            result = _collect_transcripts(s)
+
+        assert transcript in result
+        assert old_sibling not in result
 
 
 class TestCaptureClose:
@@ -205,3 +278,31 @@ class TestCaptureClose:
         with _session_for(capture_engine) as db:
             s = db.get(WizardSession, sid)
             assert s.agent_session_id == "original-uuid"
+
+    def test_synthesises_via_collect_transcripts(self, open_session, capture_engine, tmp_path):
+        """capture calls synthesise_path once per path from _collect_transcripts."""
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("{}\n")
+        fake_result = SynthesisResult(notes_created=1, task_ids_touched=[], synthesised_via="ollama")
+
+        def fake_get_session():
+            return _session_for(capture_engine)
+
+        with patch("wizard.cli.main.get_db_session", fake_get_session), \
+             patch("wizard.cli.main.settings") as mock_settings, \
+             patch("wizard.cli.main._collect_transcripts", return_value=[transcript]) as mock_collect, \
+             patch("wizard.cli.main.OllamaSynthesiser.synthesise_path", return_value=fake_result):
+            mock_settings.synthesis.enabled = True
+            mock_settings.synthesis.base_url = "http://localhost:11434"
+            mock_settings.synthesis.model = "gemma4:latest-64k"
+            mock_settings.scrubbing.allowlist = []
+            mock_settings.scrubbing.enabled = True
+            result = runner.invoke(app, [
+                "capture", "--close",
+                "--transcript", str(transcript),
+                "--agent", "claude-code",
+                "--session-id", str(open_session),
+            ])
+
+        assert result.exit_code == 0, result.output
+        mock_collect.assert_called_once()
