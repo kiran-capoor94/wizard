@@ -88,6 +88,7 @@ async def session_start(
             raise ToolError("Internal error: session was not assigned an id after flush")
 
         await ctx.set_state("current_session_id", session.id)
+        _SESSION_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
         _SESSION_ID_FILE.write_text(str(session.id))
         await ctx.info(f"Session {session.id} started.")
 
@@ -275,6 +276,8 @@ async def resume_session(
         db.flush()
         db.refresh(new_session)
         await ctx.set_state("current_session_id", new_session.id)
+        _SESSION_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SESSION_ID_FILE.write_text(str(new_session.id))
 
         session_state, working_set_tasks = _deserialise_session_state(db, prior, t_repo)
 

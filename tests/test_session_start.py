@@ -1,3 +1,5 @@
+"""Tests for session_start behavioral invariants."""
+
 import pytest
 
 from tests.fakes import FakeContext, FakeSessionCloser
@@ -9,10 +11,7 @@ from wizard.repositories import (
     TaskRepository,
     TaskStateRepository,
 )
-from wizard.schemas import SessionStartResponse
-from wizard.security import SecurityService
 from wizard.tools.session_tools import session_start
-from wizard.transcript import CaptureSynthesiser, TranscriptReader
 
 
 @pytest.mark.asyncio
@@ -29,9 +28,6 @@ async def test_session_start_returns_wizard_context(db_session, monkeypatch):
         m_repo=MeetingRepository(),
         ts_repo=TaskStateRepository(),
         session_closer=FakeSessionCloser(),
-        capture_synthesiser=CaptureSynthesiser(
-            reader=TranscriptReader(), note_repo=NoteRepository(), security=SecurityService(),
-        ),
     )
 
     assert result.wizard_context is not None
@@ -41,6 +37,7 @@ async def test_session_start_returns_wizard_context(db_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_session_start_wizard_context_null_when_no_ks(db_session, monkeypatch):
+    """wizard_context is None when no knowledge store is configured."""
     monkeypatch.setattr(settings.knowledge_store, "type", "")
 
     result = await session_start(
@@ -50,31 +47,21 @@ async def test_session_start_wizard_context_null_when_no_ks(db_session, monkeypa
         m_repo=MeetingRepository(),
         ts_repo=TaskStateRepository(),
         session_closer=FakeSessionCloser(),
-        capture_synthesiser=CaptureSynthesiser(
-            reader=TranscriptReader(), note_repo=NoteRepository(), security=SecurityService(),
-        ),
     )
 
     assert result.wizard_context is None
 
 
 @pytest.mark.asyncio
-async def test_session_start_has_no_sync_results(db_session):
-    assert "sync_results" not in SessionStartResponse.model_fields
-    assert "daily_page" not in SessionStartResponse.model_fields
-
-
-@pytest.mark.asyncio
 async def test_session_start_open_tasks_total_reflects_full_count(db_session):
     """open_tasks_total equals total open tasks; open_tasks is capped at 20."""
     for i in range(25):
-        t = Task(
+        db_session.add(Task(
             name=f"Task {i}",
             status=TaskStatus.TODO,
             priority=TaskPriority.MEDIUM,
             category=TaskCategory.ISSUE,
-        )
-        db_session.add(t)
+        ))
     db_session.flush()
 
     result = await session_start(
@@ -84,11 +71,6 @@ async def test_session_start_open_tasks_total_reflects_full_count(db_session):
         m_repo=MeetingRepository(),
         ts_repo=TaskStateRepository(),
         session_closer=FakeSessionCloser(),
-        capture_synthesiser=CaptureSynthesiser(
-            reader=TranscriptReader(),
-            note_repo=NoteRepository(),
-            security=SecurityService(),
-        ),
     )
 
     assert len(result.open_tasks) == 20

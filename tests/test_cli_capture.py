@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from typer.testing import CliRunner
 
 from wizard.cli.main import app
@@ -98,7 +98,6 @@ class TestCaptureClose:
 
         # Mark all sessions as synthesised so none match
         with _session_for(capture_engine) as db:
-            from sqlmodel import select
             for s in db.exec(select(WizardSession)).all():
                 s.is_synthesised = True
                 db.add(s)
