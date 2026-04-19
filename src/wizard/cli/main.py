@@ -14,17 +14,9 @@ from sqlmodel import select
 
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
-from wizard.cli.configure import (
-    configure_jira,
-    configure_notion,
-    jira_is_configured,
-    notion_is_configured,
-    run_jira_configure,
-)
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
-from wizard.deps import get_sync_service
 from wizard.models import WizardSession
 
 logger = logging.getLogger(__name__)
@@ -37,16 +29,12 @@ app = typer.Typer(
 
 app.command()(doctor)
 
+configure_app = typer.Typer(help="Configure wizard settings.")
+app.add_typer(configure_app, name="configure")
+
 WIZARD_HOME = Path.home() / ".wizard"
 
 _DEFAULT_CONFIG = {
-    "jira": {"base_url": "", "project_key": "", "token": "", "email": ""},
-    "notion": {
-        "token": "",
-        "daily_page_parent_id": "",
-        "tasks_ds_id": "",
-        "meetings_ds_id": "",
-    },
     "scrubbing": {"enabled": True, "allowlist": []},
 }
 
@@ -107,57 +95,6 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
     return ok, (result.stdout + result.stderr).strip()
 
 
-def _prompt_integrations(cfg: dict, config_path: Path) -> tuple[str, str]:
-    """Run integration selection prompt and configure chosen integrations.
-
-    Returns (notion_status, jira_status).
-    """
-    typer.echo("\nWhich integrations would you like to configure?")
-    typer.echo("  1. Notion")
-    typer.echo("  2. Jira")
-    typer.echo("  3. Both")
-    typer.echo("  4. Neither")
-    int_selection = typer.prompt("Enter number (1-4)")
-    try:
-        int_idx = int(int_selection)
-        if int_idx not in (1, 2, 3, 4):
-            raise ValueError
-    except ValueError:
-        typer.echo("Invalid selection.", err=True)
-        raise typer.Exit(1) from None
-
-    wants_notion = int_idx in (1, 3)
-    wants_jira = int_idx in (2, 3)
-
-    notion_status = "skipped"
-    jira_status = "skipped"
-
-    if wants_notion:
-        if notion_is_configured(cfg):
-            typer.echo("\nNotion already configured — run 'wizard configure --notion' to update")
-            notion_status = "already configured"
-        else:
-            try:
-                configure_notion(cfg, config_path)
-                notion_status = "configured"
-            except Exception as exc:
-                typer.echo(f"\nNotion configuration failed: {exc}", err=True)
-                raise typer.Exit(1) from exc
-
-    if wants_jira:
-        # Re-read to get the authoritative on-disk state after the Notion step
-        with open(config_path) as f:
-            cfg.update(json.load(f))
-        if jira_is_configured(cfg):
-            typer.echo("\nJira already configured — run 'wizard configure --jira' to update")
-            jira_status = "already configured"
-        else:
-            configure_jira(cfg, config_path)
-            jira_status = "configured"
-
-    return notion_status, jira_status
-
-
 def _prompt_and_register_agents(agent: str | None) -> list[str]:
     """Run agent selection prompt (or validate --agent flag) and register.
 
@@ -213,11 +150,6 @@ def setup(
     else:
         typer.echo(f"Config already exists at {config_path}")
 
-    with open(config_path) as f:
-        cfg = json.load(f)
-
-    notion_status, jira_status = _prompt_integrations(cfg, config_path)
-
     _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")
 
@@ -240,51 +172,52 @@ def setup(
 
     typer.echo("\n" + "─" * 45)
     typer.echo("Setup complete.")
-    ns = "" if notion_status != "skipped" else " (run 'wizard configure --notion')"
-    js = "" if jira_status != "skipped" else " (run 'wizard configure --jira')"
-    typer.echo(f"  Notion {notion_status}{ns}")
-    typer.echo(f"  Jira   {jira_status}{js}")
     typer.echo(f"  Agent  {', '.join(agents_to_register)}")
+    typer.echo("\nTo configure a knowledge store, run: wizard configure knowledge-store")
 
 
-@app.command()
-def configure(
-    notion: bool = typer.Option(False, "--notion", help="Re-configure Notion integration"),
-    jira: bool = typer.Option(False, "--jira", help="Re-configure Jira credentials"),
-) -> None:
-    """Configure Wizard integrations."""
-    config_path = WIZARD_HOME / "config.json"
-    if notion:
-        if not config_path.exists():
-            typer.echo("Config not found. Run 'wizard setup' first.", err=True)
-            raise typer.Exit(1)
-        with open(config_path) as f:
-            cfg = json.load(f)
-        configure_notion(cfg, config_path)
-        return
-    if jira:
-        run_jira_configure(config_path)
-        return
-    typer.echo("Available flags: --notion, --jira")
+@configure_app.command("knowledge-store")
+def configure_knowledge_store() -> None:
+    """Configure where session summaries are written."""
+    config_file = Path.home() / ".wizard" / "config.json"
+    existing = json.loads(config_file.read_text()) if config_file.exists() else {}
 
+    ks_type = typer.prompt(
+        "Knowledge store type",
+        default="",
+        prompt_suffix=" [notion/obsidian/none]: ",
+    ).strip().lower()
+    if ks_type == "none":
+        ks_type = ""
 
-@app.command()
-def sync() -> None:
-    """Run Jira and Notion sync manually (outside a session)."""
-    svc = get_sync_service()
-    with get_db_session() as session:
-        results = svc.sync_all(session)
+    if ks_type not in ("notion", "obsidian", ""):
+        typer.echo(f"Unknown type: {ks_type}. Valid: notion, obsidian, or leave blank for none.")
+        raise typer.Exit(1)
 
-    for r in results:
-        if r.skipped:
-            status = "skipped (not configured)"
-        elif r.ok:
-            status = "ok"
-        else:
-            status = f"FAILED: {r.error}"
-        typer.echo(f"  {r.source}: {status}")
+    ks_config: dict = {"type": ks_type, "notion": {}, "obsidian": {}}
 
-    typer.echo("Sync complete.")
+    if ks_type == "notion":
+        ks_config["notion"]["daily_parent_id"] = typer.prompt(
+            "Notion daily page parent ID", default=""
+        )
+        ks_config["notion"]["tasks_db_id"] = typer.prompt(
+            "Notion tasks DB ID (optional)", default=""
+        )
+        ks_config["notion"]["meetings_db_id"] = typer.prompt(
+            "Notion meetings DB ID (optional)", default=""
+        )
+    elif ks_type == "obsidian":
+        ks_config["obsidian"]["vault_path"] = typer.prompt("Obsidian vault path")
+        ks_config["obsidian"]["daily_notes_folder"] = typer.prompt(
+            "Daily notes folder", default="Daily"
+        )
+        ks_config["obsidian"]["tasks_folder"] = typer.prompt(
+            "Tasks folder", default="Tasks"
+        )
+
+    existing["knowledge_store"] = ks_config
+    config_file.write_text(json.dumps(existing, indent=2))
+    typer.echo(f"Knowledge store configured: {ks_type or 'none'}")
 
 
 def _confirm_uninstall(

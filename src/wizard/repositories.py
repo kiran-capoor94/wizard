@@ -1,7 +1,7 @@
 import datetime as _dt
 import logging
 
-from sqlmodel import Session, and_, case, col, func, or_, select
+from sqlmodel import Session, case, col, func, select
 
 from .models import (
     Meeting,
@@ -40,19 +40,14 @@ class TaskRepository:
         """Scalar sub-select: created_at of the most recent Note for a given Task."""
         return (
             select(func.max(Note.created_at))
-            .where(
-                or_(
-                    Note.task_id == Task.id,
-                    and_(
-                        Note.source_id == Task.source_id,
-                        Note.source_type == "JIRA",
-                    ),
-                )
-            )
+            .where(Note.task_id == Task.id)
             .correlate(Task)
             .scalar_subquery()
             .label("last_worked_at")
         )
+
+    def get(self, db: Session, task_id: int) -> Task | None:
+        return db.get(Task, task_id)
 
     def get_by_id(self, db: Session, task_id: int) -> Task:
         task = db.get(Task, task_id)
@@ -61,26 +56,72 @@ class TaskRepository:
             raise ValueError(f"Task {task_id} not found")
         return task
 
-    def get_open_task_contexts(self, db: Session) -> list[TaskContext]:
+    def list_paginated(
+        self,
+        db: Session,
+        status_filter: list[str] | None = None,
+        source_type_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Task]:
+        stmt = select(Task)
+        if status_filter:
+            stmt = stmt.where(Task.status.in_(status_filter))
+        if source_type_filter:
+            stmt = stmt.where(Task.source_type == source_type_filter)
+        stmt = stmt.order_by(Task.id.desc()).offset(offset).limit(limit)
+        return list(db.exec(stmt).all())
+
+    def get_by_source_id(self, db: Session, source_id: str) -> Task | None:
+        return db.exec(select(Task).where(Task.source_id == source_id)).first()
+
+    def get_open_task_contexts(self, db: Session, limit: int | None = None) -> list[TaskContext]:
         """Open tasks (TODO / IN_PROGRESS) sorted by priority then last-worked desc."""
         return self._query_task_contexts(
             db,
             col(Task.status).in_(
                 [TaskStatus.TODO, TaskStatus.IN_PROGRESS]
             ),  # pyright: ignore[reportAttributeAccessIssue]
+            limit=limit,
         )
 
-    def get_blocked_task_contexts(self, db: Session) -> list[TaskContext]:
+    def get_blocked_task_contexts(self, db: Session, limit: int | None = None) -> list[TaskContext]:
         """Blocked tasks sorted by priority then last-worked desc."""
-        return self._query_task_contexts(db, Task.status == TaskStatus.BLOCKED)
+        return self._query_task_contexts(db, Task.status == TaskStatus.BLOCKED, limit=limit)
 
-    def _query_task_contexts(self, db: Session, *where) -> list[TaskContext]:
+    def get_workable_task_contexts(
+        self, db: Session, include_blocked: bool = False, limit: int | None = None
+    ) -> list[TaskContext]:
+        """Open + in_progress tasks with task_state joined. Optionally includes blocked."""
+        statuses = [TaskStatus.TODO, TaskStatus.IN_PROGRESS]
+        if include_blocked:
+            statuses.append(TaskStatus.BLOCKED)
+        return self._query_task_contexts(
+            db,
+            col(Task.status).in_(statuses),  # pyright: ignore[reportAttributeAccessIssue]
+            limit=limit,
+        )
+
+    def count_open_tasks(self, db: Session) -> int:
+        """Total count of TODO and IN_PROGRESS tasks."""
+        stmt = (
+            select(func.count())
+            .select_from(Task)
+            .where(col(Task.status).in_([TaskStatus.TODO, TaskStatus.IN_PROGRESS]))
+        )
+        return db.execute(stmt).scalar_one()
+
+    def _query_task_contexts(
+        self, db: Session, *where, limit: int | None = None
+    ) -> list[TaskContext]:
         last_worked = self._latest_note_subquery()
         stmt = (
             select(Task, last_worked)
             .where(*where)
             .order_by(_PRIORITY_ORDER, func.coalesce(last_worked, 0).desc())
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
         rows = db.execute(stmt).all()
         if not rows:
             return []
@@ -150,43 +191,19 @@ class TaskRepository:
     def _batch_load_latest_notes(
         self, db: Session, tasks: list[Task]
     ) -> dict[int, Note]:
-        """Batch-load the latest note per task, including Jira source_id fallback.
-
-        Returns {task_id: latest_note}. Direct task_id matches take precedence
-        over source_id matches.
-        """
+        """Batch-load the latest note per task. Returns {task_id: latest_note}."""
         task_ids = [t.id for t in tasks if t.id is not None]
-        jira_source_ids = [t.source_id for t in tasks if t.source_id is not None]
-        source_id_to_task_id: dict[str, int] = {
-            t.source_id: t.id
-            for t in tasks
-            if t.source_id is not None and t.id is not None
-        }
-
-        note_conditions: list = []
-        if task_ids:
-            note_conditions.append(col(Note.task_id).in_(task_ids))
-        if jira_source_ids:
-            note_conditions.append(
-                and_(col(Note.source_id).in_(jira_source_ids), Note.source_type == "JIRA")
-            )
+        if not task_ids:
+            return {}
 
         latest: dict[int, Note] = {}
-        if not note_conditions:
-            return latest
-
         for n in db.execute(
             select(Note)
-            .where(or_(*note_conditions))
+            .where(col(Note.task_id).in_(task_ids))
             .order_by(col(Note.created_at).desc())
         ).scalars().all():
-            if n.task_id is not None:
-                if n.task_id not in latest:
-                    latest[n.task_id] = n
-            elif n.source_id is not None and n.source_type == "JIRA":
-                tid = source_id_to_task_id.get(n.source_id)
-                if tid is not None and tid not in latest:
-                    latest[tid] = n
+            if n.task_id is not None and n.task_id not in latest:
+                latest[n.task_id] = n
         return latest
 
 
@@ -196,6 +213,9 @@ class TaskRepository:
 
 
 class MeetingRepository:
+    def get_by_source_id(self, db: Session, source_id: str) -> Meeting | None:
+        return db.exec(select(Meeting).where(Meeting.source_id == source_id)).first()
+
     def get_by_id(self, db: Session, meeting_id: int) -> Meeting:
         meeting = db.get(Meeting, meeting_id)
         if meeting is None:
@@ -239,19 +259,13 @@ class NoteRepository:
         self,
         db: Session,
         task_id: int | None,
-        source_id: str | None,
     ) -> list[Note]:
-        conditions = []
-        if task_id is not None:
-            conditions.append(Note.task_id == task_id)
-        if source_id is not None:
-            conditions.append(
-                and_(Note.source_id == source_id, Note.source_type == "JIRA")
-            )
-        if not conditions:
+        if task_id is None:
             return []
         stmt = (
-            select(Note).where(or_(*conditions)).order_by(col(Note.created_at).desc())
+            select(Note)
+            .where(Note.task_id == task_id)
+            .order_by(col(Note.created_at).desc())
         )
         return list(db.exec(stmt).all())
 
@@ -291,6 +305,21 @@ class NoteRepository:
         )
         return db.exec(stmt).first() is not None
 
+    def list_for_task(self, db: Session, task_id: int) -> list[Note]:
+        stmt = select(Note).where(Note.task_id == task_id).order_by(col(Note.created_at).asc())
+        return list(db.exec(stmt).all())
+
+    def list_for_session(self, db: Session, session_id: int) -> list[Note]:
+        stmt = (
+            select(Note).where(Note.session_id == session_id).order_by(col(Note.created_at).asc())
+        )
+        return list(db.exec(stmt).all())
+
+    def count_for_session(self, db: Session, session_id: int) -> int:
+        return db.exec(
+            select(func.count()).select_from(Note).where(Note.session_id == session_id)
+        ).one()
+
 
 # ---------------------------------------------------------------------------
 # TaskStateRepository
@@ -325,21 +354,15 @@ class TaskStateRepository:
         return state
 
     def on_note_saved(self, db: Session, task_id: int) -> TaskState:
-        """Re-query notes for the task (dual-lookup: by task_id OR by Jira
-        source_id) and recompute note_count, decision_count, last_note_at,
-        last_touched_at, stale_days. Does NOT touch last_status_change_at."""
+        """Re-query notes for the task and recompute note_count, decision_count,
+        last_note_at, last_touched_at, stale_days. Does NOT touch last_status_change_at."""
         task = db.get(Task, task_id)
         if task is None:
             raise ValueError(f"Task {task_id} not found")
 
         state = self._get_or_create(db, task)
 
-        conditions: list = [Note.task_id == task_id]
-        if task.source_id is not None:
-            conditions.append(
-                and_(Note.source_id == task.source_id, Note.source_type == "JIRA")
-            )
-        notes = list(db.exec(select(Note).where(or_(*conditions))).all())
+        notes = list(db.exec(select(Note).where(Note.task_id == task_id)).all())
 
         state.note_count = len(notes)
         state.decision_count = sum(
@@ -381,6 +404,12 @@ class TaskStateRepository:
             state.stale_days = (now - state.last_touched_at).days
         db.flush()
 
+    def get_for_tasks(self, db: Session, task_ids: list[int]) -> list[TaskState]:
+        if not task_ids:
+            return []
+        stmt = select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+        return list(db.exec(stmt).all())
+
     def _get_or_create(self, db: Session, task: Task) -> TaskState:
         """Defensive helper: returns the TaskState for `task`, creating one
         with zero counts if missing. Used internally by on_note_saved and
@@ -398,6 +427,35 @@ class TaskStateRepository:
             task.id,
         )
         return self.create_for_task(db, task)
+
+
+# ---------------------------------------------------------------------------
+# SessionRepository
+# ---------------------------------------------------------------------------
+
+
+class SessionRepository:
+    def list_paginated(
+        self,
+        db: Session,
+        closure_status_filter: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[WizardSession]:
+        stmt = select(WizardSession)
+        if closure_status_filter:
+            stmt = stmt.where(WizardSession.closed_by == closure_status_filter)
+        stmt = stmt.order_by(col(WizardSession.created_at).desc()).offset(offset).limit(limit)
+        return list(db.exec(stmt).all())
+
+    def count(self, db: Session, closure_status_filter: str | None = None) -> int:
+        stmt = select(func.count()).select_from(WizardSession)
+        if closure_status_filter:
+            stmt = stmt.where(WizardSession.closed_by == closure_status_filter)
+        return db.exec(stmt).one()
+
+    def get(self, db: Session, session_id: int) -> WizardSession | None:
+        return db.exec(select(WizardSession).where(WizardSession.id == session_id)).first()
 
 
 # ---------------------------------------------------------------------------

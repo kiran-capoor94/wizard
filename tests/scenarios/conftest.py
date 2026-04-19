@@ -17,7 +17,6 @@ def seed_task(db_session: Session):
         status: TaskStatus = TaskStatus.TODO,
         source_id: str | None = None,
         source_url: str | None = None,
-        notion_id: str | None = None,
     ) -> Task:
         task = Task(
             name=name,
@@ -26,7 +25,6 @@ def seed_task(db_session: Session):
             status=status,
             source_id=source_id,
             source_url=source_url,
-            notion_id=notion_id,
         )
         db_session.add(task)
         db_session.flush()

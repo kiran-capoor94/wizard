@@ -13,34 +13,18 @@ You are a **triage analyst opening a shift**. Your job: sync external sources, a
 
 ## Schema Reference
 
-> **`SessionStartResponse`** — returned by `session_start`:
->
-> - `session_id: int` — hold this for ALL subsequent tool calls this session
-> - `open_tasks: list[TaskContext]` — tasks with status `open` or `in_progress`
-> - `blocked_tasks: list[TaskContext]` — tasks with status `blocked`
-> - `unsummarised_meetings: list[MeetingContext]` — meetings without a summary note
-> - `sync_results: list[SourceSyncStatus]` — one per source (Jira, Notion)
-> - `daily_page: DailyPageResult | None` — Notion daily page status
+**`SessionStartResponse`** key fields:
+- `session_id: int` — hold for all subsequent tool calls this session
+- `open_tasks: list[TaskContext]` — top 20 open/in-progress tasks by priority + recency
+- `open_tasks_total: int` — total open task count (may exceed 20)
+- `blocked_tasks: list[TaskContext]`
+- `unsummarised_meetings: list[MeetingContext]`
+- `wizard_context: dict | None` — knowledge store addresses (`tasks_db_id`, `meetings_db_id`, `daily_parent_id` for Notion; `vault_path`, `daily_notes_folder`, `tasks_folder` for Obsidian)
+- `closed_sessions: list[ClosedSessionSummary]` — sessions auto-closed this run (≤3, recent only)
 
-> **`TaskContext`** fields you will use in triage:
->
-> - `id: int`, `name: str`, `status`, `priority`, `category`
-> - `due_date: datetime | None`
-> - `stale_days: int` — days since last note activity
-> - `note_count: int` — total notes on this task
-> - `decision_count: int` — notes of type `decision`
-> - `last_note_type: str | None` — most recent note type
-> - `last_note_preview: str | None` — first 300 chars of most recent note
-> - `source_url: str | None` — link to Jira/Notion source
+**`TaskContext`** key fields: `id`, `name`, `status`, `priority`, `category`, `due_date`, `stale_days`, `note_count`, `decision_count`, `last_note_type`, `last_note_preview` (300 chars), `source_url`
 
-> **`MeetingContext`** fields:
->
-> - `id: int`, `title: str`, `category`, `created_at: datetime`
-> - `source_url: str | None`, `already_summarised: bool`
-
-> **`SourceSyncStatus`**: `source: str`, `ok: bool`, `error: str | None`
->
-> **`DailyPageResult`**: `page_id: str`, `created: bool`, `archived_count: int`
+**`MeetingContext`** key fields: `id`, `title`, `category`, `created_at`, `source_url`, `already_summarised`
 
 ---
 
@@ -60,13 +44,35 @@ Complete each gate in order. Do not advance past a failed gate.
    - ✅ You have explicitly printed `session_id` in your output
    - 🛑 If not: state it now. This value is required for `session_end`, `save_note`, and `save_meeting_summary`.
 
-4. **Sync results checked**
-   - ✅ Every entry in `sync_results` has been inspected
-   - 🛑 If any entry has `ok: false`: surface the `source` and `error` field **verbatim** before continuing to triage. Do not silently skip failed syncs.
-
 ---
 
 ## Steps
+
+### Step 0 — Pre-populate wizard from available MCPs (conditional)
+
+**Run this step if `open_tasks` is empty OR if you want a fresh sync.**
+
+If `wizard_context` is null: inform the user no knowledge store is configured.
+Run `wizard configure --knowledge-store` to set one up.
+
+**If Atlassian MCP is available and `wizard_context` is not null:**
+Call your Jira MCP to fetch open issues:
+- For each issue, call `wizard:create_task`:
+  - `name`: issue summary
+  - `priority`: Highest/High → "high", Medium → "medium", Low/Lowest → "low"
+  - `source_id`: issue key (e.g., "ENG-123")
+  - `source_type`: "JIRA"
+  - `source_url`: browse URL
+
+**If Notion MCP is available and `wizard_context.tasks_db_id` is set:**
+Query the tasks database using Notion MCP.
+For each open task, call `wizard:create_task`:
+  - `source_id`: Notion page ID
+  - `source_type`: "NOTION"
+
+**For Linear, Monday, or other MCPs:** follow the same pattern.
+
+`wizard:create_task` deduplicates by `source_id` — safe to call every session.
 
 ### Step 1 — Build Tool Registry
 
@@ -80,7 +86,7 @@ Before calling any tool:
 
 ### Step 2 — Call `session_start`
 
-Call `session_start` with no parameters. It syncs Jira and Notion, creates a session, and returns triage data.
+Call `session_start` with no parameters. It creates a session and returns triage data.
 
 ### Step 3 — Verify and State Session ID
 
@@ -88,27 +94,7 @@ Confirm `session_id` is an integer. Output:
 
 > **Session `{session_id}` started.**
 
-### Step 4 — Report Sync Results
-
-Render sync results as a table:
-
-| Source | Status | Error |
-|--------|--------|-------|
-| `{source}` | `{ok}` | `{error or "—"}` |
-
-- If all syncs succeeded: one line confirming all sources synced.
-- If any sync failed: **bold the failed row** and state the error. The engineer needs to know before triage, because task data may be stale.
-
-### Step 5 — Report Daily Page
-
-If `daily_page` is not null, render one line:
-
-- `created: true` → "Created today's Notion daily page. Archived {archived_count} prior page(s)."
-- `created: false` → "Today's Notion daily page already existed."
-
-If null: "Daily page: unavailable (Notion sync may have failed)."
-
-### Step 6 — Triage Blocked Tasks
+### Step 4 — Triage Blocked Tasks
 
 **These are costing time. Surface them first.**
 
@@ -129,7 +115,7 @@ After the table, add a **one-sentence recommendation per blocked task** citing t
 
 > **Task 12** has been blocked 7 days with 4 investigations and no decisions — this needs a decision or escalation, not more investigation.
 
-### Step 7 — Triage Unsummarised Meetings
+### Step 5 — Triage Unsummarised Meetings
 
 If `unsummarised_meetings` is empty: "No unsummarised meetings."
 
@@ -147,7 +133,7 @@ After the table, for each meeting state the dispatch:
 
 > → Invoke `wizard:meeting` with `meeting_id={id}` — {reason: e.g. "48h old, context fading" or "standup from this morning, summarise while fresh"}
 
-### Step 8 — Triage Open Tasks
+### Step 6 — Triage Open Tasks
 
 Render:
 
@@ -162,34 +148,15 @@ Render:
 - Append " *(analysis loop)*" where `note_count > 3 and decision_count == 0`
 - Sort by: `priority` (critical > high > medium > low), then `stale_days` descending
 
-### Step 9 — Recommend Next Action
+### Step 7 — Recommend Next Action
 
-Based on the triage, recommend **one** next action. Use this decision tree:
+Based on triage, recommend **one** next action using this priority order:
 
-```dot
-digraph recommend {
-    rankdir=TB;
-    "Any sync failed?" [shape=diamond];
-    "Blocked tasks with stale_days >= 5?" [shape=diamond];
-    "Unsummarised meetings > 48h old?" [shape=diamond];
-    "Critical task with stale_days >= 1?" [shape=diamond];
-    "Highest priority open task" [shape=box, style=filled, fillcolor="#e8f5e9"];
-
-    "Warn engineer about stale data" [shape=box, style=filled, fillcolor="#ffebee"];
-    "Recommend unblock/escalate task X" [shape=box, style=filled, fillcolor="#ffebee"];
-    "Recommend summarise meeting X" [shape=box, style=filled, fillcolor="#fff3e0"];
-    "Recommend start critical task X" [shape=box, style=filled, fillcolor="#fff3e0"];
-
-    "Any sync failed?" -> "Warn engineer about stale data" [label="yes"];
-    "Any sync failed?" -> "Blocked tasks with stale_days >= 5?" [label="no"];
-    "Blocked tasks with stale_days >= 5?" -> "Recommend unblock/escalate task X" [label="yes"];
-    "Blocked tasks with stale_days >= 5?" -> "Unsummarised meetings > 48h old?" [label="no"];
-    "Unsummarised meetings > 48h old?" -> "Recommend summarise meeting X" [label="yes"];
-    "Unsummarised meetings > 48h old?" -> "Critical task with stale_days >= 1?" [label="no"];
-    "Critical task with stale_days >= 1?" -> "Recommend start critical task X" [label="yes"];
-    "Critical task with stale_days >= 1?" -> "Highest priority open task" [label="no"];
-}
-```
+1. Any sync failed → warn engineer about stale data
+2. Blocked task with `stale_days >= 5` → recommend unblock/escalate
+3. Unsummarised meeting older than 48h → recommend summarise
+4. Critical task with `stale_days >= 1` → recommend start immediately
+5. Otherwise → highest priority open task by the sort order from Step 6
 
 State the recommendation with the trigger:
 
@@ -219,11 +186,8 @@ Cross-reference these field combinations when triaging. Cite the fields in your 
 
 ## Anti-Patterns
 
-- ⚠️ Do NOT skip straight to "what would you like to work on?" — triage ALL sections first, in order.
-- ⚠️ Do NOT invent task priorities, statuses, or note counts — read them from `TaskContext` fields.
 - ⚠️ Do NOT summarise meetings inline during session-start — dispatch to `wizard:meeting` skill.
 - ⚠️ Do NOT dump raw JSON — render every response as formatted tables and prose.
-- ⚠️ Do NOT proceed past a sync failure without surfacing the error to the engineer.
 - ⚠️ Do NOT recommend a task without citing the specific fields that drive the recommendation.
 - ⚠️ Do NOT answer questions about the codebase, libraries, or APIs from memory — use a tool first. Reference your Tool Registry.
 - ⚠️ Do NOT forget `session_id` — if you lose it, you cannot call `session_end`. State it early and hold it.

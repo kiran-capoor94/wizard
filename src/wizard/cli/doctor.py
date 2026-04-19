@@ -3,16 +3,12 @@ import os
 import sqlite3
 from pathlib import Path
 
-import httpx
 import typer
 from alembic.runtime.migration import MigrationContext
-from httpx import HTTPError, HTTPStatusError
-from notion_client.errors import APIResponseError
 from sqlalchemy import create_engine
 
-from wizard import agent_registration, notion_discovery
-from wizard.config import Settings, settings
-from wizard.integrations import NotionSdkClient
+from wizard import agent_registration
+from wizard.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -81,40 +77,6 @@ def _check_config_file() -> tuple[bool, str]:
     return False, f"Config file not found: {config_path}"
 
 
-def _check_notion_token() -> tuple[bool, str]:
-    s = Settings()
-    token = s.notion.token.get_secret_value()
-    if not token:
-        return False, "Notion token not set (notion.token)"
-    try:
-        client = NotionSdkClient(auth=token)
-        client.users.me()
-        return True, "Notion token valid"
-    except APIResponseError:
-        return False, "Notion token is invalid — re-run 'wizard configure --notion'"
-    except HTTPError:
-        return False, "Could not reach Notion API — check network"
-
-
-def _check_jira_token() -> tuple[bool, str]:
-    s = Settings()
-    token = s.jira.token.get_secret_value()
-    base_url = s.jira.base_url
-    email = s.jira.email
-    if not token or not base_url or not email:
-        return False, "Jira token not set (jira.token) — Jira sync disabled"
-    try:
-        response = httpx.get(
-            f"{base_url.rstrip('/')}/rest/api/3/myself",
-            auth=(email, token),
-            timeout=10.0,
-        )
-        response.raise_for_status()
-        return True, "Jira token valid"
-    except HTTPStatusError:
-        return False, "Jira token is invalid — re-run 'wizard configure --jira'"
-    except HTTPError:
-        return False, "Could not reach Jira API — check network"
 
 
 def _check_allowlist_file() -> tuple[bool, str]:
@@ -155,66 +117,38 @@ def _check_skills_installed() -> tuple[bool, str]:
     )
 
 
-def _validate_properties(
-    available: dict[str, str], expected: list[tuple[str, str]]
-) -> list[str]:
-    """Return error strings for each property that is missing or has the wrong type."""
-    errors = []
-    for name, expected_type in expected:
-        if name not in available:
-            errors.append(f"'{name}' not found (expected {expected_type})")
-        elif available[name] != expected_type:
-            errors.append(f"'{name}' is {available[name]}, expected {expected_type}")
-    return errors
+def _check_knowledge_store() -> tuple[bool, str]:
+    ks_type = settings.knowledge_store.type
+    if not ks_type:
+        msg = (
+            "Not configured — session summaries saved locally only. "
+            "Run: wizard configure --knowledge-store"
+        )
+        return True, msg
+    return True, f"Configured: {ks_type}"
 
 
-def _check_notion_schema() -> tuple[bool, str]:
-    s = Settings()
-    notion = s.notion
-    schema = notion.notion_schema
-
-    if not notion.token.get_secret_value() or not notion.tasks_ds_id or not notion.meetings_ds_id:
-        return False, "Notion not configured — run 'wizard configure --notion'"
-
-    client = NotionSdkClient(auth=notion.token.get_secret_value())
-    tasks_props = notion_discovery.fetch_db_properties(client, notion.tasks_ds_id)
-    meetings_props = notion_discovery.fetch_db_properties(client, notion.meetings_ds_id)
-
-    if not tasks_props and not meetings_props:
-        return False, "Could not reach Notion API — check token and network"
-
-    task_fields: list[tuple[str, str]] = [
-        (schema.task_name, "title"),
-        (schema.task_status, "status"),
-        (schema.task_priority, "select"),
-        (schema.task_due_date, "date"),
-        (schema.task_jira_key, "url"),
-    ]
-    meeting_fields: list[tuple[str, str]] = [
-        (schema.meeting_title, "title"),
-        (schema.meeting_date, "date"),
-        (schema.meeting_url, "url"),
-        (schema.meeting_summary, "rich_text"),
-        (schema.meeting_category, "multi_select"),
+def run_checks(stop_on_failure: bool = True) -> list[tuple[str, bool, str]]:
+    """Run all checks and return list of (name, passed, message) tuples."""
+    checks = [
+        ("DB file exists", _check_db_file),
+        ("Config file", _check_config_file),
+        ("DB tables", _check_db_tables),
+        ("Allowlist file", _check_allowlist_file),
+        ("Agent registered", _check_agent_registrations),
+        ("Migration current", _check_migration_current),
+        ("Skills installed", _check_skills_installed),
+        ("Knowledge store", _check_knowledge_store),
     ]
 
-    task_errors = _validate_properties(tasks_props, task_fields)
-    meeting_errors = _validate_properties(meetings_props, meeting_fields)
+    results = []
+    for name, check_fn in checks:
+        passed, message = check_fn()
+        results.append((name, passed, message))
+        if not passed and stop_on_failure:
+            break
 
-    parts = []
-    if task_errors:
-        parts.append(f"Tasks DB: {'; '.join(task_errors)}")
-    if meeting_errors:
-        parts.append(f"Meetings DB: {'; '.join(meeting_errors)}")
-
-    if parts:
-        return False, " | ".join(parts)
-    return True, "Notion schema matches live DB"
-
-
-# Index of the Notion schema check in the ordered list below (1-based).
-# Used to skip it when the Notion token is not configured.
-_NOTION_SCHEMA_CHECK_INDEX = 8
+    return results
 
 
 def doctor(
@@ -223,39 +157,15 @@ def doctor(
     ),
 ) -> None:
     """Run health checks on the wizard installation."""
-    checks = [
-        ("DB file exists", _check_db_file),
-        ("Notion token", _check_notion_token),
-        ("Jira token", _check_jira_token),
-        ("Config file", _check_config_file),
-        ("DB tables", _check_db_tables),
-        ("Allowlist file", _check_allowlist_file),
-        ("Agent registered", _check_agent_registrations),
-        ("Notion schema", _check_notion_schema),
-        ("Migration current", _check_migration_current),
-        ("Skills installed", _check_skills_installed),
-    ]
+    results = run_checks(stop_on_failure=not all_checks)
 
     failures = []
-    notion_token_ok = True
-
-    for i, (name, check_fn) in enumerate(checks, 1):
-        if i == _NOTION_SCHEMA_CHECK_INDEX and not notion_token_ok:
-            typer.echo(f"  [{i:2d}] SKIP  {name} (Notion token not configured)")
-            continue
-
-        passed, message = check_fn()
-
-        if i == 2:  # Notion token check
-            notion_token_ok = passed
-
+    for i, (name, passed, message) in enumerate(results, 1):
         status = "PASS" if passed else "FAIL"
         typer.echo(f"  [{i:2d}] {status}  {name}: {message}")
 
         if not passed:
             failures.append((i, name, message))
-            if not all_checks:
-                raise typer.Exit(1)
 
     if failures:
         raise typer.Exit(1)

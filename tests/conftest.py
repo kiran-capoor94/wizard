@@ -9,10 +9,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from tests.fakes import (
     FakeContext,
-    FakeJiraClient,
-    FakeNotionClient,
-    FakeSyncService,
-    FakeWriteBackService,
+    FakeSessionCloser,
 )
 from wizard.repositories import (
     MeetingRepository,
@@ -47,6 +44,7 @@ def db_session(db_engine):
     with patch("wizard.tools.session_tools.get_session", _test_get_session), \
          patch("wizard.tools.task_tools.get_session", _test_get_session), \
          patch("wizard.tools.meeting_tools.get_session", _test_get_session), \
+         patch("wizard.tools.triage_tools.get_session", _test_get_session), \
          patch("wizard.middleware.get_session", _test_get_session):
         yield session
 
@@ -61,23 +59,8 @@ def fake_ctx():
 
 
 @pytest.fixture
-def fake_jira():
-    return FakeJiraClient()
-
-
-@pytest.fixture
-def fake_notion():
-    return FakeNotionClient()
-
-
-@pytest.fixture
-def fake_sync():
-    return FakeSyncService()
-
-
-@pytest.fixture
-def fake_writeback():
-    return FakeWriteBackService()
+def fake_session_closer():
+    return FakeSessionCloser()
 
 
 @pytest.fixture
