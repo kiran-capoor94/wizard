@@ -293,8 +293,14 @@ async def resume_session(
         if prior.id is None:
             raise ToolError("Internal error: session was not assigned an id after flush")
 
+        # Read agent session UUID written by the SessionStart hook (best-effort).
+        agent_session_id: str | None = None
+        if _AGENT_SESSION_ID_FILE.exists():
+            agent_session_id = _AGENT_SESSION_ID_FILE.read_text().strip() or None
+            _AGENT_SESSION_ID_FILE.unlink(missing_ok=True)
+
         # Create new session
-        new_session = WizardSession()
+        new_session = WizardSession(agent_session_id=agent_session_id)
         db.add(new_session)
         db.flush()
         db.refresh(new_session)

@@ -161,7 +161,11 @@ class OllamaSynthesiser:
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
             )
-        entries = self._reader.read(wizard_session.transcript_path, wizard_session.agent)
+        try:
+            entries = self._reader.read(wizard_session.transcript_path, wizard_session.agent)
+        except (FileNotFoundError, NotImplementedError, ValueError) as e:
+            logger.warning("OllamaSynthesiser: cannot read transcript: %s", e)
+            return SynthesisResult(notes_created=0, task_ids_touched=[], synthesised_via="fallback")
         if not entries:
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
