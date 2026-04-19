@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Literal
 
@@ -107,15 +108,24 @@ async def session_start(
         except Exception as e:
             logger.warning("refresh_stale_days failed: %s", e)
 
-        return SessionStartResponse(
+        open_tasks_total = t_repo.count_open_tasks(db)
+        open_tasks = t_repo.get_open_task_contexts(db, limit=20)
+
+        response = SessionStartResponse(
             session_id=session.id,
-            open_tasks=t_repo.get_open_task_contexts(db),
+            open_tasks=open_tasks,
+            open_tasks_total=open_tasks_total,
             blocked_tasks=t_repo.get_blocked_task_contexts(db),
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             wizard_context=_build_wizard_context(),
             skill_instructions=load_skill(SKILL_SESSION_START),
             closed_sessions=closed_sessions,
         )
+
+    # Background task dispatched AFTER db context closes so it gets its own clean session
+    asyncio.create_task(session_closer.close_abandoned_background(response.session_id))
+
+    return response
 
 
 async def session_end(
