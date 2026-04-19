@@ -53,3 +53,26 @@ def test_query_response_types_exist():
     assert GetTasksResponse.model_fields
     assert GetSessionsResponse.model_fields
     assert TaskDetailResponse.model_fields
+
+
+def test_session_start_response_has_source_field():
+    from wizard.schemas import SessionStartResponse
+    assert "source" in SessionStartResponse.model_fields
+    r = SessionStartResponse(
+        session_id=1,
+        open_tasks=[],
+        blocked_tasks=[],
+        unsummarised_meetings=[],
+        open_tasks_total=0,
+    )
+    assert r.source == "startup"
+
+    r2 = SessionStartResponse(
+        session_id=2,
+        open_tasks=[],
+        blocked_tasks=[],
+        unsummarised_meetings=[],
+        open_tasks_total=0,
+        source="compact",
+    )
+    assert r2.source == "compact"

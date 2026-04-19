@@ -203,6 +203,7 @@ class SessionStartResponse(BaseModel):
     skill_instructions: str | None = None
     closed_sessions: list[ClosedSessionSummary] = Field(default_factory=list)
     open_tasks_total: int = 0
+    source: str = "startup"
 
 
 class TaskStartResponse(BaseModel):
