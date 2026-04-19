@@ -400,7 +400,10 @@ def update() -> None:
 def _find_capture_session(db, session_id: int | None) -> WizardSession | None:
     """Return the target session for capture: by ID or latest unsynthesised within 24h."""
     if session_id is not None:
-        return db.get(WizardSession, session_id)
+        session = db.get(WizardSession, session_id)
+        if session is not None and session.is_synthesised:
+            return None
+        return session
     cutoff = datetime.datetime.now() - datetime.timedelta(hours=24)
     return db.exec(
         select(WizardSession)

@@ -256,6 +256,7 @@ def register_hook(agent_id: str) -> bool:
         data = {}
 
     hooks = data.setdefault(hooks_key, {})
+    changed = False
 
     for event, script in _HOOK_SCRIPTS[agent_id].items():
         event_hooks = hooks.setdefault(event, [])
@@ -278,8 +279,10 @@ def register_hook(agent_id: str) -> bool:
                 }
             ],
         })
+        changed = True
 
-    config_path.write_text(json.dumps(data, indent=2))
+    if changed:
+        config_path.write_text(json.dumps(data, indent=2))
     return True
 
 
@@ -315,8 +318,9 @@ def deregister_hook(agent_id: str) -> bool:
             hooks[event] = filtered
             removed_any = True
 
-    data[hooks_key] = hooks
-    config_path.write_text(json.dumps(data, indent=2))
+    if removed_any:
+        data[hooks_key] = hooks
+        config_path.write_text(json.dumps(data, indent=2))
     return removed_any
 
 
