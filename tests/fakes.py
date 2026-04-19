@@ -58,4 +58,7 @@ class FakeSessionCloser:
     async def close_recent_abandoned(self, db, ctx, current_session_id: int) -> list:
         return []
 
+    async def close_abandoned_background(self, current_session_id: int) -> None:
+        pass
+
 
