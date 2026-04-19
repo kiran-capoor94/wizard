@@ -201,6 +201,7 @@ class SessionStartResponse(BaseModel):
     wizard_context: dict | None = None
     skill_instructions: str | None = None
     closed_sessions: list[ClosedSessionSummary] = Field(default_factory=list)
+    open_tasks_total: int = 0
 
 
 class TaskStartResponse(BaseModel):
