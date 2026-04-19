@@ -20,7 +20,7 @@ async def test_session_closer_closes_abandoned_with_synthetic_fallback(db_sessio
     ctx.sample_error = Exception("sampling unavailable")
 
     closer = SessionCloser(note_repo=NoteRepository(), security=SecurityService())
-    results = await closer.close_abandoned(db_session, ctx, current_session_id=999)
+    results = await closer.close_recent_abandoned(db_session, ctx, current_session_id=999)
 
     assert len(results) == 1
     assert results[0].session_id == abandoned.id
@@ -41,7 +41,7 @@ async def test_session_closer_picks_up_hook_closed_sessions(db_session):
     ctx.sample_error = Exception("sampling unavailable")
 
     closer = SessionCloser(note_repo=NoteRepository(), security=SecurityService())
-    results = await closer.close_abandoned(db_session, ctx, current_session_id=999)
+    results = await closer.close_recent_abandoned(db_session, ctx, current_session_id=999)
 
     result_ids = [r.session_id for r in results]
     assert hook_session.id in result_ids
@@ -103,6 +103,68 @@ async def test_find_old_abandoned_returns_only_old(db_session):
 
     assert old.id in found_ids
     assert recent.id not in found_ids
+
+
+@pytest.mark.asyncio
+async def test_close_recent_abandoned_ignores_old_sessions(db_session):
+    from tests.fakes import FakeContext
+    from wizard.models import WizardSession
+    from wizard.repositories import NoteRepository
+    from wizard.security import SecurityService
+    from wizard.services import SessionCloser
+
+    old = WizardSession()
+    old.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+    db_session.add(old)
+    db_session.flush()
+    db_session.refresh(old)
+
+    ctx = FakeContext()
+    closer = SessionCloser(note_repo=NoteRepository(), security=SecurityService())
+    results = await closer.close_recent_abandoned(db_session, ctx, current_session_id=999)
+
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_close_abandoned_background_processes_old_sessions(db_engine):
+    """close_abandoned_background opens its own session and closes old sessions."""
+    from contextlib import contextmanager
+    from unittest.mock import patch
+
+    from sqlmodel import Session as SQLSession
+
+    from wizard.models import WizardSession
+    from wizard.repositories import NoteRepository
+    from wizard.security import SecurityService
+    from wizard.services import SessionCloser
+
+    with SQLSession(db_engine) as db:
+        session = WizardSession()
+        session.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        old_id = session.id
+
+    @contextmanager
+    def fake_get_session():
+        with SQLSession(db_engine) as s:
+            try:
+                yield s
+                s.commit()
+            except Exception:
+                s.rollback()
+                raise
+
+    closer = SessionCloser(note_repo=NoteRepository(), security=SecurityService())
+    with patch("wizard.services.get_session", fake_get_session):
+        await closer.close_abandoned_background(current_session_id=999)
+
+    with SQLSession(db_engine) as db:
+        closed = db.get(WizardSession, old_id)
+        assert closed is not None
+        assert closed.summary is not None
 
 
 @pytest.mark.asyncio

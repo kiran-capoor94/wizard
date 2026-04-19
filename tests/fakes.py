@@ -55,7 +55,7 @@ class FakeContext:
 class FakeSessionCloser:
     """Fake SessionCloser that does nothing."""
 
-    async def close_abandoned(self, db, ctx, current_session_id: int) -> list:
+    async def close_recent_abandoned(self, db, ctx, current_session_id: int) -> list:
         return []
 
 
