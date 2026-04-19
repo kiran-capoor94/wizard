@@ -28,15 +28,20 @@ uv run alembic upgrade head   # run pending DB migrations
 server.py                    # Entry point — imports mcp_instance, tools, resources, prompts
 src/wizard/
   cli/
-    main.py                  # Typer app: setup, configure, sync, doctor, analytics, update, uninstall, capture
+    main.py                  # Typer app: setup, configure, doctor, analytics, update, uninstall, capture
+    configure.py             # configure knowledge-store subcommand (Notion/Obsidian)
     doctor.py                # 8-point health checks (wizard doctor)
     analytics.py             # Session/note/task usage stats (wizard analytics)
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
+  skills.py                  # Skill loader (reads ~/.wizard/skills/ at startup)
   tools/                       # MCP tools package (split by domain)
     __init__.py                # Re-exports all tool functions
     session_tools.py           # session_start, session_end, resume_session
     task_tools.py              # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
+    task_helpers.py            # Shared helpers for task tools
+    triage_tools.py            # what_should_i_work_on (mode-based scoring + LLM reasons)
     meeting_tools.py           # get_meeting, save_meeting_summary, ingest_meeting
+    query_tools.py             # get_tasks, get_task, get_sessions, get_session (paginated, no session required)
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
@@ -44,12 +49,9 @@ src/wizard/
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, MeetingRepo, etc.)
-  services.py                # SyncService (bidirectional upsert) + WriteBackService + SessionCloser
-  integrations.py            # JiraClient (httpx) + NotionClient (notion-client v3.0)
-  notion_discovery.py        # 3-pass Notion property auto-matching for wizard configure --notion
+  services.py                # SessionCloser — auto-closes abandoned sessions
   security.py                # SecurityService — regex PII scrubbing with allowlist
   config.py                  # Pydantic Settings + JsonConfigSettingsSource
-  mappers.py                 # Jira/Notion → TaskStatus/TaskPriority/MeetingCategory
   database.py                # SQLite session factory (SQLModel engine)
   deps.py                    # FastMCP Depends() provider functions
   agent_registration.py      # Write MCP + hook config into agent JSON/TOML files
