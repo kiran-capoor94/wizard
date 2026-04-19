@@ -13,32 +13,18 @@ You are a **triage analyst opening a shift**. Your job: sync external sources, a
 
 ## Schema Reference
 
-> **`SessionStartResponse`** — returned by `session_start`:
->
-> - `session_id: int` — hold this for ALL subsequent tool calls this session
-> - `open_tasks: list[TaskContext]` — tasks with status `open` or `in_progress`
-> - `blocked_tasks: list[TaskContext]` — tasks with status `blocked`
-> - `unsummarised_meetings: list[MeetingContext]` — meetings without a summary note
-> - `wizard_context: dict | None` — knowledge store addresses if configured. Keys depend on `knowledge_store_type`:
->   - `"notion"`: `tasks_db_id`, `meetings_db_id`, `daily_parent_id`
->   - `"obsidian"`: `vault_path`, `daily_notes_folder`, `tasks_folder`
->   - `null` if no knowledge store configured
+**`SessionStartResponse`** key fields:
+- `session_id: int` — hold for all subsequent tool calls this session
+- `open_tasks: list[TaskContext]` — top 20 open/in-progress tasks by priority + recency
+- `open_tasks_total: int` — total open task count (may exceed 20)
+- `blocked_tasks: list[TaskContext]`
+- `unsummarised_meetings: list[MeetingContext]`
+- `wizard_context: dict | None` — knowledge store addresses (`tasks_db_id`, `meetings_db_id`, `daily_parent_id` for Notion; `vault_path`, `daily_notes_folder`, `tasks_folder` for Obsidian)
+- `closed_sessions: list[ClosedSessionSummary]` — sessions auto-closed this run (≤3, recent only)
 
-> **`TaskContext`** fields you will use in triage:
->
-> - `id: int`, `name: str`, `status`, `priority`, `category`
-> - `due_date: datetime | None`
-> - `stale_days: int` — days since last note activity
-> - `note_count: int` — total notes on this task
-> - `decision_count: int` — notes of type `decision`
-> - `last_note_type: str | None` — most recent note type
-> - `last_note_preview: str | None` — first 300 chars of most recent note
-> - `source_url: str | None` — link to Jira/Notion source
+**`TaskContext`** key fields: `id`, `name`, `status`, `priority`, `category`, `due_date`, `stale_days`, `note_count`, `decision_count`, `last_note_type`, `last_note_preview` (300 chars), `source_url`
 
-> **`MeetingContext`** fields:
->
-> - `id: int`, `title: str`, `category`, `created_at: datetime`
-> - `source_url: str | None`, `already_summarised: bool`
+**`MeetingContext`** key fields: `id`, `title`, `category`, `created_at`, `source_url`, `already_summarised`
 
 ---
 
@@ -164,32 +150,13 @@ Render:
 
 ### Step 7 — Recommend Next Action
 
-Based on the triage, recommend **one** next action. Use this decision tree:
+Based on triage, recommend **one** next action using this priority order:
 
-```dot
-digraph recommend {
-    rankdir=TB;
-    "Any sync failed?" [shape=diamond];
-    "Blocked tasks with stale_days >= 5?" [shape=diamond];
-    "Unsummarised meetings > 48h old?" [shape=diamond];
-    "Critical task with stale_days >= 1?" [shape=diamond];
-    "Highest priority open task" [shape=box, style=filled, fillcolor="#e8f5e9"];
-
-    "Warn engineer about stale data" [shape=box, style=filled, fillcolor="#ffebee"];
-    "Recommend unblock/escalate task X" [shape=box, style=filled, fillcolor="#ffebee"];
-    "Recommend summarise meeting X" [shape=box, style=filled, fillcolor="#fff3e0"];
-    "Recommend start critical task X" [shape=box, style=filled, fillcolor="#fff3e0"];
-
-    "Any sync failed?" -> "Warn engineer about stale data" [label="yes"];
-    "Any sync failed?" -> "Blocked tasks with stale_days >= 5?" [label="no"];
-    "Blocked tasks with stale_days >= 5?" -> "Recommend unblock/escalate task X" [label="yes"];
-    "Blocked tasks with stale_days >= 5?" -> "Unsummarised meetings > 48h old?" [label="no"];
-    "Unsummarised meetings > 48h old?" -> "Recommend summarise meeting X" [label="yes"];
-    "Unsummarised meetings > 48h old?" -> "Critical task with stale_days >= 1?" [label="no"];
-    "Critical task with stale_days >= 1?" -> "Recommend start critical task X" [label="yes"];
-    "Critical task with stale_days >= 1?" -> "Highest priority open task" [label="no"];
-}
-```
+1. Any sync failed → warn engineer about stale data
+2. Blocked task with `stale_days >= 5` → recommend unblock/escalate
+3. Unsummarised meeting older than 48h → recommend summarise
+4. Critical task with `stale_days >= 1` → recommend start immediately
+5. Otherwise → highest priority open task by the sort order from Step 6
 
 State the recommendation with the trigger:
 
@@ -219,8 +186,6 @@ Cross-reference these field combinations when triaging. Cite the fields in your 
 
 ## Anti-Patterns
 
-- ⚠️ Do NOT skip straight to "what would you like to work on?" — triage ALL sections first, in order.
-- ⚠️ Do NOT invent task priorities, statuses, or note counts — read them from `TaskContext` fields.
 - ⚠️ Do NOT summarise meetings inline during session-start — dispatch to `wizard:meeting` skill.
 - ⚠️ Do NOT dump raw JSON — render every response as formatted tables and prose.
 - ⚠️ Do NOT recommend a task without citing the specific fields that drive the recommendation.
