@@ -396,7 +396,6 @@ def update() -> None:
 
     typer.echo("Wizard updated.")
 
-
 def _find_capture_session(db, session_id: int | None) -> WizardSession | None:
     """Return the target session for capture: by ID or latest unsynthesised within 24h."""
     if session_id is not None:
@@ -415,7 +414,6 @@ def _find_capture_session(db, session_id: int | None) -> WizardSession | None:
         .limit(1)
     ).first()
 
-
 def _apply_hook_metadata(
     session: WizardSession,
     transcript: str,
@@ -432,19 +430,23 @@ def _apply_hook_metadata(
     if session.closed_by is None:
         session.closed_by = "hook"
 
-
 def _collect_transcripts(session: WizardSession) -> list[Path]:
-    """Return the main transcript plus sibling .jsonl files created after session start."""
+    """Return all transcript paths to synthesise for this session."""
     if not session.transcript_path:
         return []
     main_path = Path(session.transcript_path)
-    ts = session.created_at.timestamp() if session.created_at else 0.0
-    siblings = [
-        p for p in main_path.parent.glob("*.jsonl")
-        if p != main_path and p.stat().st_mtime >= ts
-    ]
+    project_dir = main_path.parent
+    session_start_ts = session.created_at.timestamp() if session.created_at else 0.0
+    siblings = []
+    for p in project_dir.glob("*.jsonl"):
+        if p == main_path:
+            continue
+        try:
+            if p.stat().st_mtime >= session_start_ts:
+                siblings.append(p)
+        except OSError:
+            pass  # file deleted between glob and stat — skip
     return [main_path] + siblings
-
 
 @app.command()
 def capture(
@@ -463,7 +465,6 @@ def capture(
 
     with get_db_session() as db:
         session = _find_capture_session(db, session_id)
-
         if session is None:
             typer.echo("No unsynthesised session found within 24h.")
             raise typer.Exit(0)
@@ -471,7 +472,6 @@ def capture(
         _apply_hook_metadata(session, transcript, agent, agent_session_id)
         db.add(session)
         db.flush()
-
         if not settings.synthesis.enabled:
             typer.echo(f"Session {session.id} marked (synthesis disabled).")
             return
