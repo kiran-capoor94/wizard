@@ -433,6 +433,19 @@ def _apply_hook_metadata(
         session.closed_by = "hook"
 
 
+def _collect_transcripts(session: WizardSession) -> list[Path]:
+    """Return the main transcript plus sibling .jsonl files created after session start."""
+    if not session.transcript_path:
+        return []
+    main_path = Path(session.transcript_path)
+    ts = session.created_at.timestamp() if session.created_at else 0.0
+    siblings = [
+        p for p in main_path.parent.glob("*.jsonl")
+        if p != main_path and p.stat().st_mtime >= ts
+    ]
+    return [main_path] + siblings
+
+
 @app.command()
 def capture(
     close: bool = typer.Option(False, "--close", help="Mark session as closed by hook"),
@@ -463,7 +476,8 @@ def capture(
             typer.echo(f"Session {session.id} marked (synthesis disabled).")
             return
 
-        if not session.transcript_path:
+        transcripts = _collect_transcripts(session)
+        if not transcripts:
             typer.echo(f"Session {session.id}: no transcript path, skipping synthesis.")
             return
 
@@ -475,10 +489,12 @@ def capture(
                 enabled=settings.scrubbing.enabled,
             ),
         )
-        try:
-            result = synthesiser.synthesise(db, session)
-            via = result.synthesised_via
-            typer.echo(f"Session {session.id}: {result.notes_created} note(s) via {via}.")
-        except Exception as e:
-            typer.echo(f"Synthesis failed: {e}", err=True)
-            raise typer.Exit(1) from e
+        total_notes, synthesised_via = 0, "fallback"
+        for path in transcripts:
+            try:
+                result = synthesiser.synthesise_path(db, session, path)
+                total_notes += result.notes_created
+                synthesised_via = result.synthesised_via
+            except Exception as e:
+                typer.echo(f"Synthesis failed for {path}: {e}", err=True)
+        typer.echo(f"Session {session.id}: {total_notes} note(s) via {synthesised_via}.")
