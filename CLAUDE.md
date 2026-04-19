@@ -212,25 +212,35 @@ Wizard tracks three distinct session layers and links them explicitly:
 | Wizard session | Integer (SQLite PK) | Matches agent session 1:1 | `WizardSession.id` |
 | FastMCP session | Per-connection `ctx.state` | Transport lifetime | Not persisted |
 
-**Continuation detection** (`session_start` tool):
+**Session directory (`~/.wizard/sessions/<uuid>/`):**
 
-1. If `~/.wizard/current_session_id` exists when `session_start` runs, the
-   previous wizard session was not cleanly ended (compaction, crash, or
-   abandon). The old integer ID is read and stored as `continued_from_id` on
-   the new session, forming an explicit chain.
-2. The `SessionStart` hook writes the agent's UUID to
-   `~/.wizard/pending_agent_session_id`. `session_start` reads and clears this
-   file, storing it as `agent_session_id` on the new wizard session.
-3. The `SessionEnd` hook passes `--agent-session-id <uuid>` to
-   `wizard capture`, which stores it on the session as a fallback if
-   `session_start` never ran (e.g. hook-only capture).
+Each top-level agent session owns an isolated directory. Sub-agents have no directory (they're suppressed entirely).
+
+| File | Written by | Read by | Content |
+|------|-----------|---------|---------|
+| `source` | `session-start.sh` hook at SessionStart | `session_start` tool | `"startup"`, `"compact"`, or `"resume"` |
+| `wizard_id` | `session_start` tool after DB insert | `session-end.sh` hook at SessionEnd | Integer wizard session ID |
+
+The directory is deleted by `session-end.sh` after `wizard capture` completes.
+
+**Sub-agent suppression:**
+
+Both `session-start.sh` and `session-end.sh` exit immediately (`exit 0`) when `agent_id` is present in the hook payload. Top-level sessions never have `agent_id` — this is the suppression signal from Claude Code.
+
+**Continuation detection (`session_start` tool):**
+
+1. The `SessionStart` hook writes `source` (from payload) to `~/.wizard/sessions/<uuid>/source`.
+2. The hook emits `agent_session_id=<uuid> source=<source>` in `additionalContext`.
+3. The agent calls `session_start(agent_session_id=<uuid>)`.
+4. `session_start` reads `source` from the keyed directory.
+5. If `source == "compact"`, the tool queries the DB for the most recent prior session and sets `continued_from_id`.
 
 **Key files:**
-- `hooks/session-start.sh` — extracts `session_id` UUID from stdin JSON, writes to `pending_agent_session_id`
-- `hooks/session-end.sh` — passes `--agent-session-id` to `wizard capture`
-- `tools/session_tools.py` — `_SESSION_ID_FILE`, `_AGENT_SESSION_ID_FILE`, continuation detection in `session_start`
+- `hooks/session-start.sh` — sub-agent suppression, keyed dir write, UUID in additionalContext
+- `hooks/session-end.sh` — sub-agent suppression, keyed dir lookup, cleanup
+- `tools/session_tools.py` — `SESSIONS_DIR`, `_find_previous_session_id`, `agent_session_id` param
 - `models.py` — `WizardSession.agent_session_id`, `WizardSession.continued_from_id`
-- `schemas.py` — `SessionStartResponse.continued_from_id`
+- `schemas.py` — `SessionStartResponse.source`, `SessionStartResponse.continued_from_id`
 
 ## Auto-Capture (Transcript Synthesis)
 
