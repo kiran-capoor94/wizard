@@ -4,6 +4,7 @@ import logging
 from fastmcp import Context
 from sqlmodel import Session, or_, select
 
+from .database import get_session
 from .models import Note, NoteType, WizardSession
 from .repositories import NoteRepository
 from .schemas import AutoCloseSummary, ClosedSessionSummary, SessionState
@@ -27,11 +28,34 @@ class SessionCloser:
         self._note_repo = note_repo or NoteRepository()
         self._security = security or SecurityService()
 
-    async def close_abandoned(
-        self, db: Session, ctx: Context, current_session_id: int,
+    async def close_recent_abandoned(
+        self,
+        db: Session,
+        ctx: Context,
+        current_session_id: int,
     ) -> list[ClosedSessionSummary]:
-        abandoned = self._find_recent_abandoned(db, current_session_id)
-        return [await self._close_one(db, s, ctx) for s in abandoned]
+        """Close sessions abandoned within the last 2h inline. Uses LLM synthesis via ctx."""
+        recent = self._find_recent_abandoned(db, current_session_id)
+        return [await self._close_one(db, s, ctx) for s in recent]
+
+    async def close_abandoned_background(self, current_session_id: int) -> None:
+        """Close sessions older than 2h using synthetic closure. Opens its own DB session."""
+        try:
+            with get_session() as db:
+                old = self._find_old_abandoned(db, current_session_id)
+                count = 0
+                for session in old:
+                    try:
+                        await self._close_one(db, session, ctx=None)
+                        count += 1
+                    except Exception as e:
+                        logger.warning(
+                            "close_abandoned_background: failed for session %d: %s",
+                            session.id, e,
+                        )
+                logger.info("close_abandoned_background: closed %d session(s)", count)
+        except Exception as e:
+            logger.warning("close_abandoned_background: outer failure: %s", e)
 
     def _find_recent_abandoned(
         self,

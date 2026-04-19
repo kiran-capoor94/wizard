@@ -89,7 +89,7 @@ async def session_start(
         await ctx.set_state("current_session_id", session.id)
         await ctx.info(f"Session {session.id} started.")
 
-        closed_sessions = await session_closer.close_abandoned(db, ctx, session.id)
+        closed_sessions = await session_closer.close_recent_abandoned(db, ctx, session.id)
 
         for cs_summary in closed_sessions:
             cs = db.get(WizardSession, cs_summary.session_id)
