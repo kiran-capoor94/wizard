@@ -59,11 +59,11 @@ async def test_find_recent_abandoned_returns_only_recent(db_session):
     from wizard.services import SessionCloser
 
     recent = WizardSession()
-    recent.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+    recent.created_at = datetime.datetime.now() - datetime.timedelta(hours=1)
     db_session.add(recent)
 
     old = WizardSession()
-    old.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+    old.created_at = datetime.datetime.now() - datetime.timedelta(hours=48)
     db_session.add(old)
 
     db_session.flush()
@@ -86,11 +86,11 @@ async def test_find_old_abandoned_returns_only_old(db_session):
     from wizard.services import SessionCloser
 
     recent = WizardSession()
-    recent.created_at = datetime.datetime.utcnow() - datetime.timedelta(minutes=30)
+    recent.created_at = datetime.datetime.now() - datetime.timedelta(minutes=30)
     db_session.add(recent)
 
     old = WizardSession()
-    old.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+    old.created_at = datetime.datetime.now() - datetime.timedelta(hours=48)
     db_session.add(old)
 
     db_session.flush()
@@ -114,7 +114,7 @@ async def test_close_recent_abandoned_ignores_old_sessions(db_session):
     from wizard.services import SessionCloser
 
     old = WizardSession()
-    old.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+    old.created_at = datetime.datetime.now() - datetime.timedelta(hours=48)
     db_session.add(old)
     db_session.flush()
     db_session.refresh(old)
@@ -141,7 +141,7 @@ async def test_close_abandoned_background_processes_old_sessions(db_engine):
 
     with SQLSession(db_engine) as db:
         session = WizardSession()
-        session.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=48)
+        session.created_at = datetime.datetime.now() - datetime.timedelta(hours=48)
         db.add(session)
         db.commit()
         db.refresh(session)
@@ -180,7 +180,9 @@ async def test_close_one_without_ctx_uses_synthetic(db_session):
     db_session.refresh(session)
 
     closer = SessionCloser(note_repo=NoteRepository(), security=SecurityService())
-    result = await closer._close_one(db_session, session, ctx=None)
+    result = await closer.close_one(db_session, session, ctx=None)
 
     assert result.closed_via == "synthetic"
     assert result.session_id == session.id
+
+

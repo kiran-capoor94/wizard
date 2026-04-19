@@ -44,8 +44,7 @@ def _score_task(
 ) -> float:
     weights = _MODE_WEIGHTS.get(mode, _MODE_WEIGHTS["focus"])
 
-    priority_val = task.priority.value if hasattr(task.priority, "value") else task.priority
-    priority_score = _PRIORITY_SCORES.get(priority_val, 0.2)
+    priority_score = _PRIORITY_SCORES.get(task.priority.value, 0.2)
     recency_score = 1.0 / (1.0 + task.stale_days)
     momentum_score = min(task.note_count / 10.0, 1.0)  # saturates at 10 notes
 
@@ -61,9 +60,8 @@ def _score_task(
     )
 
     # time_budget adjustments
-    status_val = task.status.value if hasattr(task.status, "value") else task.status
     if time_budget == "30m":
-        if status_val == "in_progress":
+        if task.status.value == "in_progress":
             score += 0.1
         if task.note_count == 0:
             score -= 0.1
@@ -75,8 +73,7 @@ def _dominant_signal(
     task: TaskContext, mode: str, time_budget: str | None
 ) -> str:
     weights = _MODE_WEIGHTS.get(mode, _MODE_WEIGHTS["focus"])
-    priority_val = task.priority.value if hasattr(task.priority, "value") else task.priority
-    priority_score = _PRIORITY_SCORES.get(priority_val, 0.2)
+    priority_score = _PRIORITY_SCORES.get(task.priority.value, 0.2)
     recency_score = 1.0 / (1.0 + task.stale_days)
     momentum_score = min(task.note_count / 10.0, 1.0)
 
@@ -105,12 +102,10 @@ async def _sample_reason(
 ) -> str:
     dominant = _dominant_signal(task, mode, time_budget)
     momentum = _classify_momentum(task)
-    priority_val = task.priority.value if hasattr(task.priority, "value") else task.priority
-    status_val = task.status.value if hasattr(task.status, "value") else task.status
     prompt = (
         f"Task: {task.name!r}\n"
-        f"Priority: {priority_val}\n"
-        f"Status: {status_val}\n"
+        f"Priority: {task.priority.value}\n"
+        f"Status: {task.status.value}\n"
         f"Momentum: {momentum} ({task.stale_days}d since last note,"
         f" {task.note_count} notes total)\n"
         f"Dominant scoring signal: {dominant}\n"
@@ -142,20 +137,14 @@ async def what_should_i_work_on(
         mode: Scoring mode — 'focus' (default), 'quick-wins', or 'unblock'.
         time_budget: Available time — '30m', '2h', 'half-day', 'full-day'.
     """
-    include_blocked = mode == "unblock"
+    # Always fetch all workable tasks including blocked so we can count skipped ones
+    # without a second query. Filter post-fetch based on mode.
     all_workable = t_repo.get_workable_task_contexts(db, include_blocked=True)
 
-    # In unblock mode, only surface blocked tasks; otherwise exclude them
     if mode == "unblock":
-        tasks = [
-            t for t in all_workable
-            if (t.status.value if hasattr(t.status, "value") else t.status) == "blocked"
-        ]
+        tasks = [t for t in all_workable if t.status.value == "blocked"]
     else:
-        tasks = [
-            t for t in all_workable
-            if (t.status.value if hasattr(t.status, "value") else t.status) != "blocked"
-        ]
+        tasks = [t for t in all_workable if t.status.value != "blocked"]
 
     if not tasks:
         return WorkRecommendationResponse(
@@ -168,22 +157,16 @@ async def what_should_i_work_on(
             ),
         )
 
-    # Count blocked tasks skipped in non-unblock mode
     skipped_blocked = 0
-    if not include_blocked:
-        skipped_blocked = sum(
-            1 for t in all_workable
-            if (t.status.value if hasattr(t.status, "value") else t.status) == "blocked"
-        )
+    if mode != "unblock":
+        skipped_blocked = sum(1 for t in all_workable if t.status.value == "blocked")
 
     # Score and rank
     scored = sorted(
         tasks,
         key=lambda t: (
             -_score_task(t, mode=mode, time_budget=time_budget),
-            {"high": 0, "medium": 1, "low": 2}.get(
-                t.priority.value if hasattr(t.priority, "value") else t.priority, 2
-            ),
+            {"high": 0, "medium": 1, "low": 2}.get(t.priority.value, 2),
             t.stale_days,
         ),
     )
@@ -197,8 +180,8 @@ async def what_should_i_work_on(
         recs.append(TaskRecommendation(
             task_id=task.id,
             name=task.name,
-            priority=task.priority.value if hasattr(task.priority, "value") else task.priority,
-            status=task.status.value if hasattr(task.status, "value") else task.status,
+            priority=task.priority.value,
+            status=task.status.value,
             score=_score_task(task, mode=mode, time_budget=time_budget),
             reason=reason,
             momentum=_classify_momentum(task),

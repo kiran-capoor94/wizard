@@ -10,7 +10,7 @@ from wizard.tools.session_tools import session_start
 async def test_auto_close_empty_session(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    session_closer, capture_synthesiser,
+    session_closer,
 ):
     # Session 1: start with NO notes (empty session)
     start1 = await session_start(
@@ -20,7 +20,6 @@ async def test_auto_close_empty_session(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     sid1 = start1.session_id
 
@@ -35,7 +34,6 @@ async def test_auto_close_empty_session(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
 
     assert len(start2.closed_sessions) == 1

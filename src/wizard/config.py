@@ -53,6 +53,13 @@ class KnowledgeStoreSettings(BaseModel):
     obsidian: ObsidianKSSettings = Field(default_factory=ObsidianKSSettings)
 
 
+class SynthesisSettings(BaseModel):
+    provider: str = "ollama"
+    model: str = "gemma4:latest-64k"
+    base_url: str = "http://localhost:11434"
+    enabled: bool = True
+
+
 class Settings(BaseSettings):
     model_config = {"extra": "ignore"}
 
@@ -61,6 +68,7 @@ class Settings(BaseSettings):
     db: str = str(Path.home() / ".wizard" / "wizard.db")
     scrubbing: ScrubbingSettings = Field(default_factory=ScrubbingSettings)
     knowledge_store: KnowledgeStoreSettings = Field(default_factory=KnowledgeStoreSettings)
+    synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
 
     @classmethod
     def settings_customise_sources(

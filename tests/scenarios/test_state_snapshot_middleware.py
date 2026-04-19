@@ -13,7 +13,7 @@ from wizard.tools.task_tools import save_note
 async def test_state_snapshot_on_note_save(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer,
 ):
     """After saving a note, calling snapshot_session_state should update
     last_active_at and session_state on the WizardSession."""
@@ -26,7 +26,6 @@ async def test_state_snapshot_on_note_save(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     sid = start.session_id
 

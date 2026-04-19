@@ -147,6 +147,10 @@ class WizardSession(TimestampMixin, table=True):
             "Agent that produced this session: 'claude-code', 'codex', 'gemini', 'opencode'."
         ),
     )
+    is_synthesised: bool = Field(
+        default=False,
+        description="True once OllamaSynthesiser has processed transcript_path into notes.",
+    )
     notes: list["Note"] = Relationship(back_populates="session")
 
 

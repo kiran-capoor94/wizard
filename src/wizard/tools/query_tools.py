@@ -6,6 +6,7 @@ import json
 import logging
 
 from fastmcp.dependencies import Depends
+from fastmcp.exceptions import ToolError
 from sqlmodel import Session
 
 from ..database import get_session as _get_db_session
@@ -90,34 +91,32 @@ async def get_task(
     task_id: int,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
+    ts_repo: TaskStateRepository = Depends(get_task_state_repo),
     db: Session = Depends(_get_db_session),
 ) -> TaskDetailResponse:
     """Get a single task with all its notes. Read-only — does not log access."""
     task = t_repo.get(db, task_id)
     if task is None:
-        raise ValueError(f"Task {task_id} not found")
+        raise ToolError(f"Task {task_id} not found")
 
-    notes_raw = n_repo.list_for_task(db, task_id)
-    notes = [
-        NoteDetail(
-            id=n.id,
-            note_type=n.note_type.value,
-            content=n.content,
-            mental_model=n.mental_model,
-            created_at=n.created_at,
-        )
-        for n in notes_raw
-    ]
+    notes_raw = n_repo.get_for_task(db, task_id, ascending=True)
+    notes = [NoteDetail.from_model(n) for n in notes_raw]
 
     latest_mental_model = next(
         (n.mental_model for n in reversed(notes_raw) if n.mental_model), None
     )
+
+    states = ts_repo.get_for_tasks(db, [task_id])
+    state = states[0] if states else None
 
     summary = TaskSummary(
         id=task.id, name=task.name, status=task.status.value,
         priority=task.priority.value, category=task.category.value,
         source_id=task.source_id, source_type=task.source_type,
         source_url=task.source_url, due_date=task.due_date,
+        stale_days=state.stale_days if state else 0,
+        note_count=state.note_count if state else 0,
+        last_worked_at=state.last_note_at if state else None,
     )
 
     return TaskDetailResponse(task=summary, notes=notes, latest_mental_model=latest_mental_model)
@@ -139,9 +138,12 @@ async def get_sessions(
     has_more = len(sessions) > limit
     items = sessions[:limit]
 
+    session_ids = [s.id for s in items if s.id is not None]
+    note_counts = n_repo.count_for_sessions(db, session_ids)
+
     summaries = []
     for s in items:
-        note_count = n_repo.count_for_session(db, s.id)
+        note_count = note_counts.get(s.id, 0)
         intent = None
         if s.session_state:
             with contextlib.suppress(Exception):
@@ -167,7 +169,7 @@ async def get_session(
     """Get a single session with its notes and state."""
     session = s_repo.get(db, session_id)
     if session is None:
-        raise ValueError(f"Session {session_id} not found")
+        raise ToolError(f"Session {session_id} not found")
 
     state = None
     if session.session_state:
@@ -175,13 +177,7 @@ async def get_session(
             state = SessionState.model_validate_json(session.session_state)
 
     notes_raw = n_repo.list_for_session(db, session_id)
-    notes = [
-        NoteDetail(
-            id=n.id, note_type=n.note_type.value, content=n.content,
-            mental_model=n.mental_model, created_at=n.created_at,
-        )
-        for n in notes_raw
-    ]
+    notes = [NoteDetail.from_model(n) for n in notes_raw]
 
     note_count = len(notes)
     intent = state.intent if state else None

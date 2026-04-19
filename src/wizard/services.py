@@ -36,17 +36,20 @@ class SessionCloser:
     ) -> list[ClosedSessionSummary]:
         """Close sessions abandoned within the last 2h inline. Uses LLM synthesis via ctx."""
         recent = self._find_recent_abandoned(db, current_session_id)
-        return [await self._close_one(db, s, ctx) for s in recent]
+        return [await self.close_one(db, s, ctx) for s in recent]
 
     async def close_abandoned_background(self, current_session_id: int) -> None:
-        """Close sessions older than 2h using synthetic closure. Opens its own DB session."""
+        """Synthetically close sessions older than 24h with no summary. Opens its own DB session.
+
+        Hook-marked sessions (with transcripts) are handled inline in session_start so that
+        ctx.sample() is available. This task only handles sessions with closed_by=None."""
         try:
             with get_session() as db:
                 old = self._find_old_abandoned(db, current_session_id)
                 count = 0
                 for session in old:
                     try:
-                        await self._close_one(db, session, ctx=None)
+                        await self.close_one(db, session, ctx=None)
                         count += 1
                     except Exception as e:
                         logger.warning(
@@ -65,7 +68,7 @@ class SessionCloser:
         limit: int = 3,
     ) -> list[WizardSession]:
         """Sessions with no summary abandoned within the last max_age_hours."""
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=max_age_hours)
+        cutoff = datetime.datetime.now() - datetime.timedelta(hours=max_age_hours)
         stmt = (
             select(WizardSession)
             .where(
@@ -89,7 +92,7 @@ class SessionCloser:
         min_age_hours: int = 2,
     ) -> list[WizardSession]:
         """Sessions with no summary older than min_age_hours."""
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=min_age_hours)
+        cutoff = datetime.datetime.now() - datetime.timedelta(hours=min_age_hours)
         stmt = (
             select(WizardSession)
             .where(
@@ -105,7 +108,7 @@ class SessionCloser:
         )
         return list(db.execute(stmt).scalars().all())
 
-    async def _close_one(
+    async def close_one(
         self,
         db: Session,
         session: WizardSession,

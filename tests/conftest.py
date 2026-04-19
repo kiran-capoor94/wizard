@@ -19,7 +19,6 @@ from wizard.repositories import (
 )
 from wizard.security import SecurityService
 from wizard.services import SessionCloser
-from wizard.transcript import CaptureSynthesiser, TranscriptReader
 
 
 @pytest.fixture(scope="session")
@@ -87,15 +86,6 @@ def meeting_repo():
 @pytest.fixture
 def session_closer(security):
     return SessionCloser(security=security)
-
-
-@pytest.fixture
-def capture_synthesiser(security, note_repo):
-    return CaptureSynthesiser(
-        reader=TranscriptReader(),
-        note_repo=note_repo,
-        security=security,
-    )
 
 
 @pytest.fixture

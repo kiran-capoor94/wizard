@@ -45,7 +45,7 @@ src/wizard/
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
-  transcript.py              # TranscriptReader + CaptureSynthesiser (auto-capture from agent transcripts)
+  transcript.py              # TranscriptReader + OllamaSynthesiser (auto-capture via local Ollama)
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, MeetingRepo, etc.)
@@ -57,7 +57,7 @@ src/wizard/
   agent_registration.py      # Write MCP + hook config into agent JSON/TOML files
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
 hooks/                       # Agent hook scripts (installed by wizard setup)
-  session-end.sh             # Claude Code SessionEnd hook — marks session for transcript synthesis
+  session-end.sh             # Claude Code SessionEnd hook — calls `wizard capture --close` to synthesise transcript
   session-start.sh           # Claude Code SessionStart hook — personalization refresh (80%) + session boot injection
 alembic/                     # DB migration scripts
 tests/                       # pytest suite
@@ -88,6 +88,12 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
   "scrubbing": {
     "enabled": true,
     "allowlist": []
+  },
+  "synthesis": {
+    "provider": "ollama",
+    "model": "gemma4:latest-64k",
+    "base_url": "http://localhost:11434",
+    "enabled": true
   }
 }
 ```
@@ -207,32 +213,40 @@ accumulate context as you work.
 
 1. A **SessionEnd hook** fires when the agent's session ends (installed by
    `wizard setup`).
-2. The hook calls `wizard capture --close --transcript <path> --agent <id>`,
-   which writes the transcript path to `WizardSession` and sets
-   `closed_by = "hook"`.
-3. At the next `session_start` (or explicit `session_end`),
-   `CaptureSynthesiser` reads the transcript, calls `ctx.sample()` with
-   wizard's opinionated prompt scaffold, and saves structured `Note` objects.
+2. The hook calls `wizard capture --close --transcript <path> --agent <id>`.
+3. `wizard capture` finds the most recent unsynthesised session (within 24h),
+   sets `transcript_path` + `agent`, then calls `OllamaSynthesiser` which
+   POSTs the transcript to a local Ollama instance and saves the resulting
+   notes to SQLite. On success, `WizardSession.is_synthesised` is set to
+   `True`.
 
-**Three-tier fallback** (same pattern as `SessionCloser`):
-- Tier 1: LLM sampling → structured notes (investigation/decision/docs/learnings)
-- Tier 2: Synthetic summary from transcript metadata
-- Tier 3: Minimal fallback
+**Synthesis is fully decoupled from the MCP server.** It runs at hook time,
+before the next session starts. No `ctx.sample()` involved — no round-trip
+cost, no dependency on MCP context availability.
+
+**Fallback:** If Ollama is unreachable, `wizard capture` exits non-zero. The
+session retains its `transcript_path` (`is_synthesised` stays `False`). Retry
+with `wizard capture --close --session-id <id>` after Ollama is available.
 
 **Key files:**
-- `transcript.py` — `TranscriptReader` (JSONL parser) + `CaptureSynthesiser`
+- `transcript.py` — `TranscriptReader` (JSONL parser) + `OllamaSynthesiser`
 - `hooks/session-end.sh` — Claude Code hook script
 - `agent_registration.py` — `register_hook()` / `deregister_hook()`
+- `config.py` — `SynthesisSettings` (provider, model, base_url, enabled)
 
 **Transcript format:** Claude Code writes JSONL with `type` field
 (`user`, `assistant`, `progress`, `file-history-snapshot`, `system`,
 `last-prompt`). The reader skips noise types and normalises
 `tool_use`/`tool_result` blocks into `TranscriptEntry` objects.
 
+**Task matching:** `OllamaSynthesiser` always sets `task_id=None` on notes.
+Wizard owns task matching — the Ollama model is not shown the task list.
+
 **Limitations:**
 - No mid-session intelligence — synthesis runs at session boundaries only
 - Transcript file must exist at synthesis time (not deleted/rotated)
 - Only Claude Code parser is implemented; Codex/Gemini/OpenCode are stubs
+- Requires a running local Ollama instance with `gemma4:latest-64k` pulled
 
 ## Session Personalization
 

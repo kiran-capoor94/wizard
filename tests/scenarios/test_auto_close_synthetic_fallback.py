@@ -11,7 +11,7 @@ from wizard.tools.task_tools import save_note
 async def test_auto_close_synthetic_fallback(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer,
 ):
     task = seed_task(name="Fix auth bug")
 
@@ -23,7 +23,6 @@ async def test_auto_close_synthetic_fallback(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     sid1 = start1.session_id
 
@@ -45,7 +44,6 @@ async def test_auto_close_synthetic_fallback(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
 
     assert len(start2.closed_sessions) == 1

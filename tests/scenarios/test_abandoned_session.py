@@ -11,7 +11,7 @@ from wizard.tools.task_tools import save_note, task_start
 async def test_abandoned_session(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer,
 ):
     task = seed_task(name="Debug memory leak")
 
@@ -23,7 +23,6 @@ async def test_abandoned_session(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     session_1_id = start_resp.session_id
 
@@ -44,7 +43,6 @@ async def test_abandoned_session(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     assert start_resp2.session_id is not None
     assert start_resp2.session_id != session_1_id

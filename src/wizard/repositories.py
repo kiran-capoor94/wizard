@@ -1,6 +1,8 @@
 import datetime as _dt
 import logging
 
+from sqlalchemy import Integer
+from sqlalchemy import update as _sql_update
 from sqlmodel import Session, case, col, func, select
 
 from .models import (
@@ -259,15 +261,12 @@ class NoteRepository:
         self,
         db: Session,
         task_id: int | None,
+        ascending: bool = False,
     ) -> list[Note]:
         if task_id is None:
             return []
-        stmt = (
-            select(Note)
-            .where(Note.task_id == task_id)
-            .order_by(col(Note.created_at).desc())
-        )
-        return list(db.exec(stmt).all())
+        order = col(Note.created_at).asc() if ascending else col(Note.created_at).desc()
+        return list(db.exec(select(Note).where(Note.task_id == task_id).order_by(order)).all())
 
     def get_notes_grouped_by_task(
         self, db: Session, session_id: int
@@ -305,10 +304,6 @@ class NoteRepository:
         )
         return db.exec(stmt).first() is not None
 
-    def list_for_task(self, db: Session, task_id: int) -> list[Note]:
-        stmt = select(Note).where(Note.task_id == task_id).order_by(col(Note.created_at).asc())
-        return list(db.exec(stmt).all())
-
     def list_for_session(self, db: Session, session_id: int) -> list[Note]:
         stmt = (
             select(Note).where(Note.session_id == session_id).order_by(col(Note.created_at).asc())
@@ -319,6 +314,17 @@ class NoteRepository:
         return db.exec(
             select(func.count()).select_from(Note).where(Note.session_id == session_id)
         ).one()
+
+    def count_for_sessions(self, db: Session, session_ids: list[int]) -> dict[int, int]:
+        """Batch-count notes per session. Returns {session_id: count}."""
+        if not session_ids:
+            return {}
+        stmt = (
+            select(Note.session_id, func.count().label("cnt"))
+            .where(col(Note.session_id).in_(session_ids))
+            .group_by(Note.session_id)
+        )
+        return {row[0]: row[1] for row in db.execute(stmt).all()}
 
 
 # ---------------------------------------------------------------------------
@@ -398,10 +404,18 @@ class TaskStateRepository:
         """Recompute stale_days for all tasks based on current wall-clock time.
 
         Called at session_start so that what_am_i_missing sees up-to-date
-        staleness rather than the value frozen at last note-save."""
-        now = _dt.datetime.now()
-        for state in db.exec(select(TaskState)).all():
-            state.stale_days = (now - state.last_touched_at).days
+        staleness rather than the value frozen at last note-save.
+
+        Uses a single bulk UPDATE via SQLite's julianday() to avoid loading
+        all TaskState rows into Python objects."""
+        db.execute(
+            _sql_update(TaskState).values(
+                stale_days=func.cast(
+                    func.julianday("now") - func.julianday(TaskState.last_touched_at),
+                    Integer,
+                )
+            )
+        )
         db.flush()
 
     def get_for_tasks(self, db: Session, task_ids: list[int]) -> list[TaskState]:

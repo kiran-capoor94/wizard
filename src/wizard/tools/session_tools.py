@@ -11,7 +11,6 @@ from sqlmodel import Session
 from ..config import settings
 from ..database import get_session
 from ..deps import (
-    get_capture_synthesiser,
     get_meeting_repo,
     get_note_repo,
     get_security,
@@ -44,7 +43,6 @@ from ..schemas import (
 from ..security import SecurityService
 from ..services import SessionCloser
 from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_START, load_skill
-from ..transcript import CaptureSynthesiser
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +73,6 @@ async def session_start(
     m_repo: MeetingRepository = Depends(get_meeting_repo),
     ts_repo: TaskStateRepository = Depends(get_task_state_repo),
     session_closer: SessionCloser = Depends(get_session_closer),
-    capture_synthesiser: CaptureSynthesiser = Depends(get_capture_synthesiser),
 ) -> SessionStartResponse:
     """Create a session, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start")
@@ -91,17 +88,6 @@ async def session_start(
         await ctx.info(f"Session {session.id} started.")
 
         closed_sessions = await session_closer.close_recent_abandoned(db, ctx, session.id)
-
-        for cs_summary in closed_sessions:
-            cs = db.get(WizardSession, cs_summary.session_id)
-            if cs and cs.transcript_path:
-                try:
-                    await capture_synthesiser.synthesise(db, ctx, cs)
-                except Exception as e:
-                    logger.warning(
-                        "Transcript synthesis failed for session %d: %s",
-                        cs_summary.session_id, e,
-                    )
 
         try:
             ts_repo.refresh_stale_days(db)
@@ -141,7 +127,6 @@ async def session_end(
     tool_registry: str | None = None,
     sec: SecurityService = Depends(get_security),
     n_repo: NoteRepository = Depends(get_note_repo),
-    synthesiser: CaptureSynthesiser = Depends(get_capture_synthesiser),
 ) -> SessionEndResponse:
     """Persists session summary + SessionState to WizardSession."""
     logger.info("session_end session_id=%d", session_id)
@@ -185,12 +170,6 @@ async def session_end(
             saved = n_repo.save(db, note)
             if saved.id is None:
                 raise ToolError("Internal error: note was not assigned an id after flush")
-
-            if session.transcript_path:
-                try:
-                    await synthesiser.synthesise(db, ctx, session)
-                except Exception as e:
-                    logger.warning("Transcript synthesis failed: %s", e)
 
             await ctx.delete_state("current_session_id")
             await ctx.info(
