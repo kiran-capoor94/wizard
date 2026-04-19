@@ -36,7 +36,7 @@ class SessionCloser:
     ) -> list[ClosedSessionSummary]:
         """Close sessions abandoned within the last 2h inline. Uses LLM synthesis via ctx."""
         recent = self._find_recent_abandoned(db, current_session_id)
-        return [await self.close_one(db, s, ctx) for s in recent]
+        return [await self._close_one(db, s, ctx) for s in recent]
 
     async def close_abandoned_background(self, current_session_id: int) -> None:
         """Synthetically close sessions older than 24h with no summary. Opens its own DB session.
@@ -49,7 +49,7 @@ class SessionCloser:
                 count = 0
                 for session in old:
                     try:
-                        await self.close_one(db, session, ctx=None)
+                        await self._close_one(db, session, ctx=None)
                         count += 1
                     except Exception as e:
                         logger.warning(
@@ -108,7 +108,7 @@ class SessionCloser:
         )
         return list(db.execute(stmt).scalars().all())
 
-    async def close_one(
+    async def _close_one(
         self,
         db: Session,
         session: WizardSession,

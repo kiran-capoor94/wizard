@@ -299,8 +299,11 @@ async def resume_session(
             agent_session_id = _AGENT_SESSION_ID_FILE.read_text().strip() or None
             _AGENT_SESSION_ID_FILE.unlink(missing_ok=True)
 
-        # Create new session
-        new_session = WizardSession(agent_session_id=agent_session_id)
+        # Resumed sessions explicitly continue from the source session.
+        new_session = WizardSession(
+            agent_session_id=agent_session_id,
+            continued_from_id=prior.id,
+        )
         db.add(new_session)
         db.flush()
         db.refresh(new_session)
@@ -315,6 +318,7 @@ async def resume_session(
         return ResumeSessionResponse(
             session_id=new_session.id,
             resumed_from_session_id=prior.id,
+            continued_from_id=prior.id,
             session_state=session_state,
             working_set_tasks=working_set_tasks,
             prior_notes=prior_notes,

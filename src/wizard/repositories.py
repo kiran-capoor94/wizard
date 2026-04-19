@@ -19,24 +19,13 @@ from .schemas import MeetingContext, TaskContext
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
 _PRIORITY_ORDER = case(
     (col(Task.priority) == TaskPriority.HIGH, 0),
     (col(Task.priority) == TaskPriority.MEDIUM, 1),
     else_=2,
 )
 
-
-# ---------------------------------------------------------------------------
-# TaskRepository
-# ---------------------------------------------------------------------------
-
-
 class TaskRepository:
-
     @staticmethod
     def _latest_note_subquery():
         """Scalar sub-select: created_at of the most recent Note for a given Task."""
@@ -208,12 +197,6 @@ class TaskRepository:
                 latest[n.task_id] = n
         return latest
 
-
-# ---------------------------------------------------------------------------
-# MeetingRepository
-# ---------------------------------------------------------------------------
-
-
 class MeetingRepository:
     def get_by_source_id(self, db: Session, source_id: str) -> Meeting | None:
         return db.exec(select(Meeting).where(Meeting.source_id == source_id)).first()
@@ -243,12 +226,6 @@ class MeetingRepository:
                 )
             )
         return results
-
-
-# ---------------------------------------------------------------------------
-# NoteRepository
-# ---------------------------------------------------------------------------
-
 
 class NoteRepository:
     def save(self, db: Session, note: Note) -> Note:
@@ -326,15 +303,9 @@ class NoteRepository:
         )
         return {row[0]: row[1] for row in db.execute(stmt).all()}
 
-
-# ---------------------------------------------------------------------------
-# TaskStateRepository
-# ---------------------------------------------------------------------------
-
-
 class TaskStateRepository:
     """Pre-computes derived signals per Task. Updated synchronously by
-    create_task / save_note / update_task_status tools — never lazily on read.
+    create_task / save_note / update_task tools — never lazily on read.
 
     stale_days is computed at write time and stored. Status changes do NOT
     reset stale_days; only cognitive activity (note saves) advances it.
@@ -442,12 +413,6 @@ class TaskStateRepository:
         )
         return self.create_for_task(db, task)
 
-
-# ---------------------------------------------------------------------------
-# SessionRepository
-# ---------------------------------------------------------------------------
-
-
 class SessionRepository:
     def list_paginated(
         self,
@@ -470,12 +435,6 @@ class SessionRepository:
 
     def get(self, db: Session, session_id: int) -> WizardSession | None:
         return db.exec(select(WizardSession).where(WizardSession.id == session_id)).first()
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
-
 
 def find_latest_session_with_notes(db: Session) -> WizardSession | None:
     """Most recent WizardSession that has at least one associated Note."""
