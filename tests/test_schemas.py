@@ -36,6 +36,19 @@ def test_session_end_no_writeback():
     assert "notion_write_back" not in SessionEndResponse.model_fields
 
 
+def test_session_start_response_has_open_tasks_total():
+    from wizard.schemas import SessionStartResponse
+    assert "open_tasks_total" in SessionStartResponse.model_fields
+    r = SessionStartResponse(
+        session_id=1,
+        open_tasks=[],
+        blocked_tasks=[],
+        unsummarised_meetings=[],
+        open_tasks_total=0,
+    )
+    assert r.open_tasks_total == 0
+
+
 def test_query_response_types_exist():
     assert GetTasksResponse.model_fields
     assert GetSessionsResponse.model_fields
