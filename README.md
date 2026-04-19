@@ -91,6 +91,25 @@ Wizard also exposes 5 read-only resources:
 | `wizard://tasks/{task_id}/context` | Task + full note timeline                    |
 | `wizard://config`                  | Integration status, scrubbing, DB path       |
 
+## Skills
+
+Wizard ships 10 FastMCP skills, installed to `~/.wizard/skills/` during
+`wizard setup`. Skills guide agent behaviour for common workflows — when
+a trigger phrase is detected, the agent loads and follows the skill.
+
+| Skill                   | When it fires                                                  |
+| ----------------------- | -------------------------------------------------------------- |
+| `session-start`         | Beginning a coding session                                     |
+| `session-end`           | "Let's wrap up", "I'm done for today"                          |
+| `session-resume`        | "Continue where I left off", "pick up from yesterday"          |
+| `task-start`            | "Let's work on task X", picking a task from triage             |
+| `what-should-i-work-on` | "What should I work on?", "I have 30 minutes", "quick win"     |
+| `note`                  | After investigations, decisions, or non-obvious discoveries    |
+| `meeting`               | Summarising a meeting flagged by session_start                 |
+| `meeting-to-tasks`      | Turning meeting action items into tracked tasks                |
+| `code-review`           | Reviewing code changes with prior wizard context               |
+| `architecture-debate`   | Choosing between design approaches before implementing         |
+
 ## Architecture
 
 ```mermaid
