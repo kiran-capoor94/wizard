@@ -164,18 +164,6 @@ After running `wizard setup`, edit `~/.wizard/config.json`:
 ```json
 {
   "db": "~/.wizard/wizard.db",
-  "jira": {
-    "base_url": "https://yourorg.atlassian.net",
-    "project_key": "ENG",
-    "token": "your-jira-api-token",
-    "email": "your@email.com"
-  },
-  "notion": {
-    "token": "your-notion-integration-token",
-    "daily_page_parent_id": "notion-page-id",
-    "tasks_ds_id": "notion-tasks-data-source-id",
-    "meetings_ds_id": "notion-meetings-data-source-id"
-  },
   "scrubbing": {
     "enabled": true,
     "allowlist": ["ENG-\\d+"]
@@ -183,40 +171,52 @@ After running `wizard setup`, edit `~/.wizard/config.json`:
 }
 ```
 
-| Field                   | Notes                                                                                                                                                 |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jira.token`            | [Create an API token](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) from your Atlassian account |
-| `notion.token`          | [Create an integration](https://www.notion.so/profile/integrations) and share your databases with it                                                  |
-| `notion.tasks_ds_id`    | The data source ID of your Notion tasks database (not the page ID)                                                                                    |
-| `notion.meetings_ds_id` | The data source ID of your Notion meetings database (not the page ID)                                                                                 |
-| `scrubbing.allowlist`   | Regex patterns for identifiers to preserve through PII scrubbing (e.g. `ENG-\d+` keeps Jira keys intact)                                              |
+That's the minimal config. Wizard works without a knowledge store.
+
+### Knowledge Store (optional)
+
+A knowledge store enables optional write-back — session summaries and
+task updates can be pushed to Notion or Obsidian. Configure interactively:
+
+```bash
+uv run wizard configure knowledge-store
+```
+
+This prompts for the backend type (`notion` / `obsidian` / blank for none)
+and the relevant credentials, then writes a `knowledge_store` block to
+`config.json`:
+
+**Notion:**
+
+```json
+"knowledge_store": {
+  "type": "notion",
+  "notion": {
+    "daily_parent_id": "notion-page-id",
+    "tasks_db_id": "notion-tasks-database-id",
+    "meetings_db_id": "notion-meetings-database-id"
+  }
+}
+```
+
+You'll need a [Notion integration token](https://www.notion.so/profile/integrations)
+with access to your task and meeting databases. The IDs here are database
+page IDs (visible in the Notion URL).
+
+**Obsidian:**
+
+```json
+"knowledge_store": {
+  "type": "obsidian",
+  "obsidian": {
+    "vault_path": "/path/to/vault",
+    "daily_notes_folder": "Daily",
+    "tasks_folder": "Tasks"
+  }
+}
+```
 
 Override the config path with the `WIZARD_CONFIG_FILE` environment variable.
-
-### Notion Schema Discovery
-
-Wizard can auto-detect your Notion property names:
-
-```bash
-uv run wizard configure --notion
-```
-
-This fetches your database schemas and maps property names to wizard
-fields using a 3-pass matching strategy (exact name → type hint → synonyms).
-Matched mappings are saved to `config.json` under `notion.notion_schema`.
-
-### Finding Your Notion Data Source IDs
-
-Data source IDs differ from page IDs. The easiest way to find them:
-
-```bash
-uv run wizard doctor
-```
-
-The doctor check will report schema validation results including which IDs
-it resolved. Alternatively, use the Notion URL of your database — the ID
-after the last `/` in the URL is the page ID; the data source ID is
-surfaced by the Notion API's `data_sources` field.
 
 ## CLI
 
