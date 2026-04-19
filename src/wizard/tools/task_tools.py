@@ -46,7 +46,7 @@ from ..skills import SKILL_TASK_START, load_skill
 from .task_helpers import apply_task_fields
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-_VALID_STATUSES = {"todo", "in_progress", "blocked", "done", "archived"}
+_VALID_STATUSES = {s.value for s in TaskStatus}
 
 logger = logging.getLogger(__name__)
 

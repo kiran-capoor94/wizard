@@ -15,7 +15,7 @@ def signal_types(resp) -> set[str]:
 async def test_signal_progression(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer,
 ):
     task = seed_task(name="Signal test task")
     await session_start(
@@ -25,7 +25,6 @@ async def test_signal_progression(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
 
     # 1. No notes -> no_context signal

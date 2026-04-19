@@ -7,7 +7,12 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from wizard.models import Note, NoteType
+import ollama
+from pydantic import RootModel
+from sqlmodel import Session
+
+from wizard.config import settings
+from wizard.models import Note, NoteType, WizardSession
 from wizard.repositories import NoteRepository
 from wizard.schemas import SynthesisNote, SynthesisResult
 from wizard.security import SecurityService
@@ -17,6 +22,12 @@ logger = logging.getLogger(__name__)
 _CLAUDE_CODE_SKIP_TYPES = frozenset({
     "progress", "file-history-snapshot", "system", "last-prompt",
 })
+
+_SYNTHESIS_SYSTEM_PROMPT = (
+    "You are synthesising a coding session transcript into structured notes "
+    "for a task management system. Be concise. Focus on what was accomplished, "
+    "what was found, and what decisions were made."
+)
 
 
 @dataclass
@@ -127,15 +138,13 @@ class TranscriptReader:
         raise NotImplementedError("OpenCode transcript parser not yet implemented")
 
 
-_SYNTHESIS_SYSTEM_PROMPT = (
-    "You are synthesising a coding session transcript into structured notes "
-    "for a task management system. Be concise. Focus on what was accomplished, "
-    "what was found, and what decisions were made."
-)
+class _NoteList(RootModel[list[SynthesisNote]]):
+    """Pydantic wrapper so model_json_schema() produces a top-level array schema."""
+    root: list[SynthesisNote]
 
 
-class CaptureSynthesiser:
-    """Synthesise agent transcripts into structured Note objects."""
+class OllamaSynthesiser:
+    """Synthesise agent transcripts into structured Note objects via local Ollama."""
 
     def __init__(
         self,
@@ -147,84 +156,40 @@ class CaptureSynthesiser:
         self._note_repo = note_repo
         self._security = security
 
-    async def synthesise(self, db, ctx, wizard_session, tasks=None) -> SynthesisResult:
+    def synthesise(self, db: Session, wizard_session: WizardSession) -> SynthesisResult:
         if not wizard_session.transcript_path or not wizard_session.agent:
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
             )
-        try:
-            entries = self._reader.read(
-                wizard_session.transcript_path, wizard_session.agent,
-            )
-        except (FileNotFoundError, NotImplementedError) as e:
-            logger.warning("CaptureSynthesiser: could not read transcript: %s", e)
-            return SynthesisResult(
-                notes_created=0, task_ids_touched=[], synthesised_via="fallback",
-            )
+        entries = self._reader.read(wizard_session.transcript_path, wizard_session.agent)
         if not entries:
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
             )
-        tasks = tasks or []
-        notes_data, via = await self._try_sampling(ctx, entries, tasks)
-        if notes_data is None:
-            summary, via = self._synthetic_summary(entries)
-            clean = self._security.scrub(summary).clean
-            note = Note(
-                note_type=NoteType.SESSION_SUMMARY,
-                content=clean,
-                session_id=wizard_session.id,
-            )
-            self._note_repo.save(db, note)
-            return SynthesisResult(
-                notes_created=1, task_ids_touched=[], synthesised_via=via,
-            )
-        saved_count = 0
-        task_ids: list[int] = []
-        for nd in notes_data:
-            clean_content = self._security.scrub(nd.content).clean
-            clean_model = (
-                self._security.scrub(nd.mental_model).clean if nd.mental_model else None
-            )
-            note = Note(
-                note_type=self._resolve_note_type(nd.note_type),
-                content=clean_content,
-                mental_model=clean_model,
-                task_id=nd.task_id,
-                session_id=wizard_session.id,
-            )
-            self._note_repo.save(db, note)
-            saved_count += 1
-            if nd.task_id is not None:
-                task_ids.append(nd.task_id)
+        notes_data = self._call_ollama(entries)
+        saved = self._save_notes(db, notes_data, wizard_session)
+        wizard_session.is_synthesised = True
+        if wizard_session.summary is None:
+            wizard_session.summary = f"Synthesised {saved} note(s) from transcript."
+        db.add(wizard_session)
+        db.flush()
         return SynthesisResult(
-            notes_created=saved_count,
-            task_ids_touched=list(set(task_ids)),
-            synthesised_via=via,
+            notes_created=saved, task_ids_touched=[], synthesised_via="ollama",
         )
 
-    async def _try_sampling(self, ctx, entries, tasks):
-        chunks = self._chunk_entries(entries)
-        all_notes: list[SynthesisNote] = []
-        for chunk in chunks:
-            prompt = self._build_synthesis_prompt(chunk, tasks)
-            try:
-                result = await ctx.sample(
-                    messages=prompt,
-                    system_prompt=_SYNTHESIS_SYSTEM_PROMPT,
-                    result_type=list[SynthesisNote],
-                    max_tokens=2000,
-                    temperature=0.3,
-                )
-                all_notes.extend(result.result)
-            except Exception as e:
-                logger.warning("CaptureSynthesiser sampling failed: %s", e)
-                return None, ""
-        if not all_notes:
-            return None, ""
-        return all_notes[:5], "sampling"
+    def _call_ollama(self, entries: list[TranscriptEntry]) -> list[SynthesisNote]:
+        client = ollama.Client(host=settings.synthesis.base_url)
+        response = client.chat(
+            model=settings.synthesis.model,
+            messages=[
+                {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
+                {"role": "user", "content": self._build_prompt(entries)},
+            ],
+            format=_NoteList.model_json_schema(),
+        )
+        return _NoteList.model_validate_json(response.message.content).root
 
-    def _build_synthesis_prompt(self, entries, tasks) -> str:
+    def _build_prompt(self, entries: list[TranscriptEntry]) -> str:
         lines = ["Session transcript (chronological):\n"]
         for e in entries:
             prefix = e.role.upper()
@@ -232,16 +197,9 @@ class CaptureSynthesiser:
                 prefix = f"{prefix} [{e.tool_name}]"
             content = e.content[:2000] if len(e.content) > 2000 else e.content
             lines.append(f"  {prefix}: {content}")
-        if tasks:
-            lines.append("\nKnown tasks in this session:")
-            for t in tasks:
-                lines.append(f"  - Task {t.id}: {t.name}")
         lines.append(
-            "\nFor each distinct task or workstream, produce a JSON array of notes:\n"
-            '[{"task_id": <int or null>, "note_type": '
-            '"investigation"|"decision"|"docs"|"learnings", '
-            '"content": "<what was done/found/changed>", '
-            '"mental_model": "<2-3 sentence snapshot>"}]\n\n'
+            "\nFor each distinct task or workstream, produce a JSON array of notes. "
+            "task_id must always be null — wizard handles task matching separately.\n\n"
             "Rules:\n"
             "- Focus on WHAT and WHY, not mechanical tool calls.\n"
             "- Reads followed by Edits = 'investigated X, changed Y because Z'.\n"
@@ -252,29 +210,25 @@ class CaptureSynthesiser:
         )
         return "\n".join(lines)
 
-    def _chunk_entries(self, entries, max_chars=50_000):
-        chunks: list[list[TranscriptEntry]] = []
-        current: list[TranscriptEntry] = []
-        current_size = 0
-        for entry in entries:
-            entry_size = len(entry.content) + len(entry.role) + 20
-            if current and current_size + entry_size > max_chars:
-                chunks.append(current)
-                current = []
-                current_size = 0
-            current.append(entry)
-            current_size += entry_size
-        if current:
-            chunks.append(current)
-        return chunks
-
-    def _synthetic_summary(self, entries):
-        tool_names = sorted({e.tool_name for e in entries if e.tool_name})
-        tools_str = ", ".join(tool_names) if tool_names else "none"
-        return (
-            f"Auto-synthesised: {len(entries)} transcript entries. "
-            f"Tools used: {tools_str}."
-        ), "synthetic"
+    def _save_notes(
+        self, db: Session, notes_data: list[SynthesisNote], wizard_session: WizardSession,
+    ) -> int:
+        count = 0
+        for nd in notes_data:
+            clean_content = self._security.scrub(nd.content).clean
+            clean_model = (
+                self._security.scrub(nd.mental_model).clean if nd.mental_model else None
+            )
+            note = Note(
+                note_type=self._resolve_note_type(nd.note_type),
+                content=clean_content,
+                mental_model=clean_model,
+                task_id=None,
+                session_id=wizard_session.id,
+            )
+            self._note_repo.save(db, note)
+            count += 1
+        return count
 
     def _resolve_note_type(self, raw: str) -> NoteType:
         mapping = {

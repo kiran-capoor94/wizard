@@ -11,7 +11,7 @@ from wizard.tools.task_tools import save_note
 async def test_resume_unclosed_session(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer,
 ):
     task = seed_task(name="Unclosed session task")
 
@@ -23,7 +23,6 @@ async def test_resume_unclosed_session(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     session_id = start_resp.session_id
 

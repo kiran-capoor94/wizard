@@ -98,7 +98,8 @@ async def test_get_task_returns_notes(db_session):
 
     result = await get_task(
         task_id=task.id,
-        t_repo=TaskRepository(), n_repo=NoteRepository(), db=db_session,
+        t_repo=TaskRepository(), n_repo=NoteRepository(),
+        ts_repo=TaskStateRepository(), db=db_session,
     )
 
     assert result.task.name == "My task"

@@ -61,4 +61,11 @@ class FakeSessionCloser:
     async def close_abandoned_background(self, current_session_id: int) -> None:
         pass
 
+    async def close_one(self, db, session, ctx=None):
+        from wizard.schemas import ClosedSessionSummary
+        return ClosedSessionSummary(
+            session_id=session.id, summary="fake", closed_via="synthetic",
+            task_ids=[], note_count=0,
+        )
+
 

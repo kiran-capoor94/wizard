@@ -16,7 +16,7 @@ from wizard.tools.task_tools import (
 async def test_task_creation_flow(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    session_closer, capture_synthesiser,
+    session_closer,
 ):
     # Start session
     await session_start(
@@ -26,7 +26,6 @@ async def test_task_creation_flow(
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
 
     # 1. create_task

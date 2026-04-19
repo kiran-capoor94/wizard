@@ -18,6 +18,9 @@ from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
 from wizard.models import WizardSession
+from wizard.repositories import NoteRepository
+from wizard.security import SecurityService
+from wizard.transcript import OllamaSynthesiser, TranscriptReader
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +98,17 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
     return ok, (result.stdout + result.stderr).strip()
 
 
+def _register_agents(agent_ids: list[str], verb: str = "Registered") -> None:
+    """Register + install hooks for each agent ID, echoing the result."""
+    for aid in agent_ids:
+        try:
+            agent_registration.register(aid)
+            hook_ok = agent_registration.register_hook(aid)
+            typer.echo(f"  {verb} {aid}" + (" + hook" if hook_ok else ""))
+        except Exception as exc:
+            typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
+
+
 def _prompt_and_register_agents(agent: str | None) -> list[str]:
     """Run agent selection prompt (or validate --agent flag) and register.
 
@@ -120,14 +134,7 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
     else:
         agents_to_register = [agent]
 
-    for aid in agents_to_register:
-        try:
-            agent_registration.register(aid)
-            hook_ok = agent_registration.register_hook(aid)
-            typer.echo(f"  Registered {aid}" + (" + hook" if hook_ok else ""))
-        except Exception as exc:
-            typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
-
+    _register_agents(agents_to_register, verb="Registered")
     agent_registration.write_registered_agents(agents_to_register)
     return agents_to_register
 
@@ -385,13 +392,7 @@ def update() -> None:
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
-    for aid in registered:
-        try:
-            agent_registration.register(aid)
-            hook_ok = agent_registration.register_hook(aid)
-            typer.echo(f"  Re-registered {aid}" + (" + hook" if hook_ok else ""))
-        except Exception as exc:
-            typer.echo(f"  Warning: could not re-register {aid}: {exc}", err=True)
+    _register_agents(registered, verb="Re-registered")
 
     typer.echo("Wizard updated.")
 
@@ -403,7 +404,7 @@ def capture(
     agent: str = typer.Option("", "--agent", help="Agent name"),
     session_id: int | None = typer.Option(None, "--session-id", help="Wizard session ID"),
 ) -> None:
-    """Capture agent session data for later synthesis."""
+    """Capture agent session data and synthesise transcript into notes via Ollama."""
     if not close:
         typer.echo("Only --close mode is supported.")
         raise typer.Exit(0)
@@ -412,22 +413,50 @@ def capture(
         if session_id is not None:
             session = db.get(WizardSession, session_id)
         else:
+            cutoff = datetime.datetime.now() - datetime.timedelta(hours=24)
             session = db.exec(
                 select(WizardSession)
-                .where(WizardSession.closed_by == None)  # noqa: E711
+                .where(
+                    WizardSession.is_synthesised == False,  # noqa: E712
+                    WizardSession.created_at >= cutoff,
+                )
                 .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
                 .limit(1)
             ).first()
 
         if session is None:
-            typer.echo("No open session found.")
+            typer.echo("No unsynthesised session found within 24h.")
             raise typer.Exit(0)
 
         if transcript:
             session.transcript_path = transcript
         if agent:
             session.agent = agent
-        session.closed_by = "hook"
+        if session.closed_by is None:
+            session.closed_by = "hook"
         db.add(session)
         db.flush()
-        typer.echo(f"Session {session.id} marked for synthesis.")
+
+        if not settings.synthesis.enabled:
+            typer.echo(f"Session {session.id} marked (synthesis disabled).")
+            return
+
+        if not session.transcript_path:
+            typer.echo(f"Session {session.id}: no transcript path, skipping synthesis.")
+            return
+
+        synthesiser = OllamaSynthesiser(
+            reader=TranscriptReader(),
+            note_repo=NoteRepository(),
+            security=SecurityService(
+                allowlist=settings.scrubbing.allowlist,
+                enabled=settings.scrubbing.enabled,
+            ),
+        )
+        try:
+            result = synthesiser.synthesise(db, session)
+            via = result.synthesised_via
+            typer.echo(f"Session {session.id}: {result.notes_created} note(s) via {via}.")
+        except Exception as e:
+            typer.echo(f"Synthesis failed: {e}", err=True)
+            raise typer.Exit(1) from e

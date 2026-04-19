@@ -16,7 +16,7 @@ quick-wins, and unblock.
 
 ## Quick Start
 
-**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/)
+**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com/) with `gemma4:latest-64k` pulled
 
 ```bash
 git clone https://github.com/kiran-capoor94/wizard.git
@@ -44,9 +44,12 @@ grounded across work sessions.
    surfaces automatically. The more you use Wizard, the less ramp-up each
    session costs.
 3. **Transcript synthesis** — When a session ends, a `SessionEnd` hook fires
-   and Wizard synthesises the agent's conversation transcript into structured
-   notes (investigation, decision, docs, learnings) via `CaptureSynthesiser`.
-   No manual `save_note` calls required.
+   and calls `wizard capture --close`, which reads the conversation transcript
+   and synthesises it into structured notes (investigation, decision, docs,
+   learnings) via a local [Ollama](https://ollama.com/) instance (default model:
+   `gemma4:latest-64k`). No manual `save_note` calls required. Synthesis runs
+   at hook time — fully decoupled from the MCP server, no round-trip cost to
+   the next session.
 4. **Session personalization** — A `SessionStart` hook refreshes
    `~/.claude/settings.json` in 80% of sessions with Wizard-aware content:
    task-signal announcements, rotating spinner verbs, sampled tips, and a
@@ -127,8 +130,10 @@ graph TD
     C --> G[Security / PII Scrubbing]
     C --> H[Repositories]
     H --> I[(SQLite)]
-    F --> J[CaptureSynthesiser]
-    J --> K[Transcript JSONL]
+    N[SessionEnd hook] --> O[wizard capture --close]
+    O --> P[OllamaSynthesiser]
+    P --> Q[Ollama / Gemma 4]
+    P --> I
     C -.->|optional write-back| L[Knowledge Store\nNotion / Obsidian]
 ```
 
@@ -142,9 +147,12 @@ recency, momentum, and simplicity signals with mode-based weight vectors
 for the top candidates.
 
 **Session Management** — `SessionCloser` auto-closes abandoned sessions at
-`session_start`. `CaptureSynthesiser` reads the agent's JSONL transcript
-and produces structured notes (investigation / decision / docs / learnings)
-via LLM sampling, with a synthetic fallback if sampling fails.
+`session_start`. Transcript synthesis is handled by `OllamaSynthesiser`
+inside `wizard capture --close`, which runs at hook time after each session
+ends. It calls a local Ollama instance (default: `gemma4:latest-64k`) with
+structured output, producing notes (investigation / decision / docs /
+learnings) and writing them directly to SQLite. Synthesis is fully decoupled
+from the MCP server — the next session pays no synthesis cost.
 
 **Security** — PII scrubbing on all ingested content before it touches
 disk. Regex-based with an allowlist for org-specific identifiers you want
@@ -177,6 +185,30 @@ After running `wizard setup`, edit `~/.wizard/config.json`:
 ```
 
 That's the minimal config. Wizard works without a knowledge store.
+
+### Transcript Synthesis (Ollama)
+
+Transcript synthesis runs locally via [Ollama](https://ollama.com/). Pull
+the model first:
+
+```bash
+ollama pull gemma4:latest-64k
+```
+
+The default config uses `http://localhost:11434`. Override in `config.json`:
+
+```json
+"synthesis": {
+  "provider": "ollama",
+  "model": "gemma4:latest-64k",
+  "base_url": "http://localhost:11434",
+  "enabled": true
+}
+```
+
+Set `"enabled": false` to disable synthesis (e.g. on machines without
+Ollama). The `wizard capture --close` command will mark the session and
+exit cleanly without synthesising.
 
 ### Knowledge Store (optional)
 
@@ -232,7 +264,7 @@ uv run wizard doctor [--all]                # Health check — config, database,
 uv run wizard analytics [--week]            # Session/task/note usage stats
 uv run wizard update                        # Pull latest, sync deps, migrate DB, re-register agents + hooks
 uv run wizard uninstall [--yes]             # Clean removal of all state, MCP, and hook registration
-uv run wizard capture --close               # (Called by hooks) Mark session for transcript synthesis
+uv run wizard capture --close               # (Called by hooks) Synthesise transcript into notes via Ollama
 ```
 
 **Supported agents for `--agent`:** `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `all`
@@ -267,7 +299,7 @@ src/wizard/
   resources.py               # 5 MCP read-only resources
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware
-  transcript.py              # TranscriptReader + CaptureSynthesiser (auto-capture)
+  transcript.py              # TranscriptReader + OllamaSynthesiser (auto-capture via local Ollama)
   models.py                  # SQLModel entities (task, note, meeting, wizardsession, toolcall, task_state)
   schemas.py                 # Pydantic response schemas
   repositories.py            # Query layer
