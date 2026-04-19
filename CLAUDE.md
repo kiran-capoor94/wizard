@@ -131,7 +131,6 @@ get_task_repo()            → TaskRepository
 get_meeting_repo()         → MeetingRepository
 get_note_repo()            → NoteRepository
 get_task_state_repo()      → TaskStateRepository
-get_capture_synthesiser()  → CaptureSynthesiser
 ```
 
 Tools and resources declare deps as typed default params:
@@ -203,6 +202,36 @@ MCP entry point:
 }
 ```
 
+## Session Continuity Tracking
+
+Wizard tracks three distinct session layers and links them explicitly:
+
+| Layer | ID type | Lifetime | Stored in |
+|-------|---------|---------|-----------|
+| Claude Code agent session | UUID string | Single conversation thread | `WizardSession.agent_session_id` |
+| Wizard session | Integer (SQLite PK) | Matches agent session 1:1 | `WizardSession.id` |
+| FastMCP session | Per-connection `ctx.state` | Transport lifetime | Not persisted |
+
+**Continuation detection** (`session_start` tool):
+
+1. If `~/.wizard/current_session_id` exists when `session_start` runs, the
+   previous wizard session was not cleanly ended (compaction, crash, or
+   abandon). The old integer ID is read and stored as `continued_from_id` on
+   the new session, forming an explicit chain.
+2. The `SessionStart` hook writes the agent's UUID to
+   `~/.wizard/pending_agent_session_id`. `session_start` reads and clears this
+   file, storing it as `agent_session_id` on the new wizard session.
+3. The `SessionEnd` hook passes `--agent-session-id <uuid>` to
+   `wizard capture`, which stores it on the session as a fallback if
+   `session_start` never ran (e.g. hook-only capture).
+
+**Key files:**
+- `hooks/session-start.sh` — extracts `session_id` UUID from stdin JSON, writes to `pending_agent_session_id`
+- `hooks/session-end.sh` — passes `--agent-session-id` to `wizard capture`
+- `tools/session_tools.py` — `_SESSION_ID_FILE`, `_AGENT_SESSION_ID_FILE`, continuation detection in `session_start`
+- `models.py` — `WizardSession.agent_session_id`, `WizardSession.continued_from_id`
+- `schemas.py` — `SessionStartResponse.continued_from_id`
+
 ## Auto-Capture (Transcript Synthesis)
 
 Wizard automatically generates structured notes from agent conversation
@@ -213,12 +242,13 @@ accumulate context as you work.
 
 1. A **SessionEnd hook** fires when the agent's session ends (installed by
    `wizard setup`).
-2. The hook calls `wizard capture --close --transcript <path> --agent <id>`.
-3. `wizard capture` finds the most recent unsynthesised session (within 24h),
-   sets `transcript_path` + `agent`, then calls `OllamaSynthesiser` which
-   POSTs the transcript to a local Ollama instance and saves the resulting
-   notes to SQLite. On success, `WizardSession.is_synthesised` is set to
-   `True`.
+2. The hook calls `wizard capture --close --transcript <path> --agent <id> --agent-session-id <uuid>`.
+3. `wizard capture` finds the wizard session matching `--session-id` (written
+   by `session_start`) or the most recent unsynthesised session within 24h,
+   sets `transcript_path`, `agent`, and `agent_session_id`, then calls
+   `OllamaSynthesiser` which POSTs the transcript to a local Ollama instance
+   and saves the resulting notes to SQLite. On success,
+   `WizardSession.is_synthesised` is set to `True`.
 
 **Synthesis is fully decoupled from the MCP server.** It runs at hook time,
 before the next session starts. No `ctx.sample()` involved — no round-trip

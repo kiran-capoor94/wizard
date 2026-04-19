@@ -48,6 +48,7 @@ from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_STAR
 logger = logging.getLogger(__name__)
 
 _SESSION_ID_FILE = Path.home() / ".wizard" / "current_session_id"
+_AGENT_SESSION_ID_FILE = Path.home() / ".wizard" / "pending_agent_session_id"
 
 
 def _build_wizard_context() -> dict | None:
@@ -79,8 +80,29 @@ async def session_start(
 ) -> SessionStartResponse:
     """Create a session, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start")
+
+    # Detect continuation: if the session ID file exists, the previous session
+    # was not cleanly ended (compaction, crash, or abandon).
+    continued_from_id: int | None = None
+    if _SESSION_ID_FILE.exists():
+        raw = _SESSION_ID_FILE.read_text().strip()
+        if raw.isdigit():
+            continued_from_id = int(raw)
+            logger.info("session_start: continuing from wizard session %s", continued_from_id)
+        else:
+            logger.warning("session_start: _SESSION_ID_FILE contained non-digit %r, ignoring", raw)
+
+    # Read agent session UUID written by the SessionStart hook (best-effort).
+    agent_session_id: str | None = None
+    if _AGENT_SESSION_ID_FILE.exists():
+        agent_session_id = _AGENT_SESSION_ID_FILE.read_text().strip() or None
+        _AGENT_SESSION_ID_FILE.unlink(missing_ok=True)
+
     with get_session() as db:
-        session = WizardSession()
+        session = WizardSession(
+            continued_from_id=continued_from_id,
+            agent_session_id=agent_session_id,
+        )
         db.add(session)
         db.flush()
         db.refresh(session)
@@ -104,6 +126,7 @@ async def session_start(
 
         response = SessionStartResponse(
             session_id=session.id,
+            continued_from_id=continued_from_id,
             open_tasks=open_tasks,
             open_tasks_total=open_tasks_total,
             blocked_tasks=t_repo.get_blocked_task_contexts(db),

@@ -195,6 +195,7 @@ class ClosedSessionSummary(BaseModel):
 
 class SessionStartResponse(BaseModel):
     session_id: int
+    continued_from_id: int | None = None
     open_tasks: list[TaskContext]
     blocked_tasks: list[TaskContext]
     unsummarised_meetings: list[MeetingContext]

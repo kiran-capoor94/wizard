@@ -147,6 +147,16 @@ class WizardSession(TimestampMixin, table=True):
             "Agent that produced this session: 'claude-code', 'codex', 'gemini', 'opencode'."
         ),
     )
+    agent_session_id: str | None = Field(
+        default=None,
+        index=True,
+        description="UUID assigned by the agent runtime (e.g. Claude Code session_id).",
+    )
+    continued_from_id: int | None = Field(
+        default=None,
+        index=True,
+        description="Wizard session ID this session continues from (unclean prior close).",
+    )
     is_synthesised: bool = Field(
         default=False,
         description="True once OllamaSynthesiser has processed transcript_path into notes.",
