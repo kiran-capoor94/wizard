@@ -15,7 +15,7 @@ import json
 import random
 import sqlite3
 import sys
-from datetime import datetime, UTC
+from datetime import datetime
 from pathlib import Path
 
 settings_path = Path(sys.argv[1])
@@ -32,7 +32,7 @@ except (json.JSONDecodeError, ValueError):
 # ── Query task signals ────────────────────────────────────────────────────────
 try:
     conn = sqlite3.connect(str(db_path))
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     overdue_row = conn.execute(
         "SELECT COUNT(*), MIN(name) FROM task "
