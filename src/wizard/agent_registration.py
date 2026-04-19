@@ -258,17 +258,23 @@ def register_hook(agent_id: str) -> bool:
     # Check if wizard hook already registered
     for entry in event_hooks:
         for h in entry.get("hooks", []):
-            if "wizard" in h.get("command", "") and "session-end" in h.get("command", ""):
+            if "wizard" in h.get("command", "") and "session-end" in h.get(
+                "command", ""
+            ):
                 return True  # already installed
 
     hook_command = f"bash {_HOOK_SCRIPT}"
-    event_hooks.append({
-        "hooks": [{
-            "type": "command",
-            "command": hook_command,
-            "timeout": 10,
-        }],
-    })
+    event_hooks.append(
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": hook_command,
+                    "timeout": 10,
+                }
+            ],
+        }
+    )
     config_path.write_text(json.dumps(data, indent=2))
     return True
 
@@ -295,7 +301,8 @@ def deregister_hook(agent_id: str) -> bool:
     event_hooks = hooks.get(event, [])
 
     filtered = [
-        entry for entry in event_hooks
+        entry
+        for entry in event_hooks
         if not any(
             "wizard" in h.get("command", "") and "session-end" in h.get("command", "")
             for h in entry.get("hooks", [])
