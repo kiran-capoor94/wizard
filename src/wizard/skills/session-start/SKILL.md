@@ -86,7 +86,20 @@ Before calling any tool:
 
 ### Step 2 — Call `session_start`
 
-Call `session_start` with no parameters. It creates a session and returns triage data.
+Call `session_start`. If the session boot context contains `agent_session_id=<value>`, pass it as the `agent_session_id` parameter. Example context: `agent_session_id=a8f3bc12-... source=startup. Begin this session by invoking the wizard:session-start skill.`
+
+```python
+# If additionalContext contains agent_session_id=<uuid>:
+session_start(agent_session_id="a8f3bc12-...")
+
+# If no agent_session_id in context (older hook or direct call):
+session_start()
+```
+
+The `source` value in the response indicates the session type:
+- `"startup"` — fresh session
+- `"compact"` — continuation of a compacted session (`continued_from_id` will be set)
+- `"resume"` — user explicitly resumed a prior session
 
 ### Step 3 — Verify and State Session ID
 
