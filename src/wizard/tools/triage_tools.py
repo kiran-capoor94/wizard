@@ -3,7 +3,16 @@
 import logging
 from typing import Literal
 
-from ..schemas import TaskContext
+from fastmcp import Context
+from fastmcp.dependencies import Depends
+from sqlmodel import Session
+
+from ..database import get_session
+from ..deps import get_task_repo
+from ..mcp_instance import mcp
+from ..repositories import TaskRepository
+from ..schemas import TaskContext, TaskRecommendation, WorkRecommendationResponse
+from ..skills import SKILL_TRIAGE, load_skill
 
 logger = logging.getLogger(__name__)
 
@@ -86,3 +95,122 @@ def _fallback_reason(task: TaskContext, dominant_signal: str) -> str:
     if dominant_signal == "recency":
         return f"Active {stale}d ago — good time to resume where you left off"
     return f"Building momentum ({task.note_count} notes) — context is warm"
+
+
+async def _sample_reason(
+    ctx: Context,
+    task: TaskContext,
+    mode: str,
+    time_budget: str | None,
+) -> str:
+    dominant = _dominant_signal(task, mode, time_budget)
+    momentum = _classify_momentum(task)
+    priority_val = task.priority.value if hasattr(task.priority, "value") else task.priority
+    status_val = task.status.value if hasattr(task.status, "value") else task.status
+    prompt = (
+        f"Task: {task.name!r}\n"
+        f"Priority: {priority_val}\n"
+        f"Status: {status_val}\n"
+        f"Momentum: {momentum} ({task.stale_days}d since last note,"
+        f" {task.note_count} notes total)\n"
+        f"Dominant scoring signal: {dominant}\n"
+        f"Last note preview: {task.last_note_preview or 'none'}\n\n"
+        "Write one sentence (max 25 words) explaining why this task should be worked on now. "
+        "Ground the reason in the note context if available. Be specific, not generic."
+    )
+    try:
+        result = await ctx.sample(messages=[{"role": "user", "content": prompt}], max_tokens=60)
+        return result.content.strip()
+    except Exception:
+        logger.warning("Reason sampling failed for task %d, using fallback", task.id)
+        return _fallback_reason(task, dominant)
+
+
+@mcp.tool()
+async def what_should_i_work_on(
+    session_id: int,
+    ctx: Context,
+    mode: Literal["focus", "quick-wins", "unblock"] = "focus",
+    time_budget: str | None = None,
+    t_repo: TaskRepository = Depends(get_task_repo),
+    db: Session = Depends(get_session),
+) -> WorkRecommendationResponse:
+    """Return a scored, justified recommendation for what to work on next.
+
+    Args:
+        session_id: Active session ID (from session_start).
+        mode: Scoring mode — 'focus' (default), 'quick-wins', or 'unblock'.
+        time_budget: Available time — '30m', '2h', 'half-day', 'full-day'.
+    """
+    include_blocked = mode == "unblock"
+    all_workable = t_repo.get_workable_task_contexts(db, include_blocked=True)
+
+    # In unblock mode, only surface blocked tasks; otherwise exclude them
+    if mode == "unblock":
+        tasks = [
+            t for t in all_workable
+            if (t.status.value if hasattr(t.status, "value") else t.status) == "blocked"
+        ]
+    else:
+        tasks = [
+            t for t in all_workable
+            if (t.status.value if hasattr(t.status, "value") else t.status) != "blocked"
+        ]
+
+    if not tasks:
+        return WorkRecommendationResponse(
+            recommended_task=None,
+            alternatives=[],
+            skipped_blocked=0,
+            message=(
+                "No open tasks — use session_start to check task list"
+                " or create_task to add one."
+            ),
+        )
+
+    # Count blocked tasks skipped in non-unblock mode
+    skipped_blocked = 0
+    if not include_blocked:
+        skipped_blocked = sum(
+            1 for t in all_workable
+            if (t.status.value if hasattr(t.status, "value") else t.status) == "blocked"
+        )
+
+    # Score and rank
+    scored = sorted(
+        tasks,
+        key=lambda t: (
+            -_score_task(t, mode=mode, time_budget=time_budget),
+            {"high": 0, "medium": 1, "low": 2}.get(
+                t.priority.value if hasattr(t.priority, "value") else t.priority, 2
+            ),
+            t.stale_days,
+        ),
+    )
+
+    shortlist = scored[:_MAX_SAMPLE_COUNT]
+
+    # Build recommendations with LLM-sampled reasons
+    recs: list[TaskRecommendation] = []
+    for task in shortlist:
+        reason = await _sample_reason(ctx, task, mode, time_budget)
+        recs.append(TaskRecommendation(
+            task_id=task.id,
+            name=task.name,
+            priority=task.priority.value if hasattr(task.priority, "value") else task.priority,
+            status=task.status.value if hasattr(task.status, "value") else task.status,
+            score=_score_task(task, mode=mode, time_budget=time_budget),
+            reason=reason,
+            momentum=_classify_momentum(task),
+            last_note_preview=task.last_note_preview,
+        ))
+
+    skill_content = load_skill(SKILL_TRIAGE)
+    if skill_content:
+        await ctx.info(f"[wizard skill]\n{skill_content}")
+
+    return WorkRecommendationResponse(
+        recommended_task=recs[0],
+        alternatives=recs[1:],
+        skipped_blocked=skipped_blocked,
+    )
