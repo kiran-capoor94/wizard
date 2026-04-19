@@ -116,38 +116,43 @@ a trigger phrase is detected, the agent loads and follows the skill.
 graph TD
     A[Claude Code / Claude Desktop / Gemini / OpenCode / Codex] --> B[FastMCP Server]
     B --> C[Tools]
-    B --> D[Prompts]
+    B --> D[Skills]
     B --> E[Resources]
-    C --> F[Services]
-    C --> G[Security]
-    F --> H[Repositories]
-    G --> I[PII Scrubbing]
-    H --> J[(Jira)]
-    H --> K[(Notion)]
-    H --> L[(SQLite)]
+    C --> F[SessionCloser]
+    C --> G[Security / PII Scrubbing]
+    C --> H[Repositories]
+    H --> I[(SQLite)]
+    F --> J[CaptureSynthesiser]
+    J --> K[Transcript JSONL]
+    C -.->|optional write-back| L[Knowledge Store\nNotion / Obsidian]
 ```
 
-**MCP Layer** — FastMCP server exposing tools, prompts, and resources.
-Tools are the write path, resources are the read path, prompts guide
-agent behaviour. A `ToolLoggingMiddleware` logs every tool invocation.
+**MCP Layer** — FastMCP server exposing tools, skills, and resources.
+Tools are the write path, resources are the read path, skills guide agent
+behaviour. A `ToolLoggingMiddleware` logs every tool invocation.
 
-**Services** — `SyncService` handles bidirectional upsert. External
-sources win on metadata (name, priority, due date), but local wins on
-status — you don't want a sync to overwrite a status you deliberately
-set to BLOCKED.
+**Triage** — `what_should_i_work_on` scores open tasks using priority,
+recency, momentum, and simplicity signals with mode-based weight vectors
+(`focus`, `quick-wins`, `unblock`). Reasons are generated via LLM sampling
+for the top candidates.
+
+**Session Management** — `SessionCloser` auto-closes abandoned sessions at
+`session_start`. `CaptureSynthesiser` reads the agent's JSONL transcript
+and produces structured notes (investigation / decision / docs / learnings)
+via LLM sampling, with a synthetic fallback if sampling fails.
 
 **Security** — PII scrubbing on all ingested content before it touches
-disk. Regex-based with an allowlist for org-specific identifiers you
-want to preserve. Scrub before storage, not on read — data at rest
-should never contain PII.
+disk. Regex-based with an allowlist for org-specific identifiers you want
+to preserve. Scrub before storage, not on read — data at rest should never
+contain PII.
 
-**Repositories** — Query layer over SQLModel/SQLite. Supports compounding
-context — prior notes are automatically retrieved when you revisit a task.
+**Repositories** — Query layer over SQLModel/SQLite. Prior notes are
+automatically retrieved when you revisit a task, producing compounding
+context across sessions.
 
-**Integrations** — Jira REST API (basic auth) and Notion SDK v3.0.
-Uses the `data_sources` API for all Notion database operations (query,
-retrieve schema, create pages). Graceful error handling so a single
-integration failure doesn't block the session.
+**Knowledge Store** — Optional write-back to Notion or Obsidian. Not
+required for core Wizard functionality. Configure with
+`wizard configure knowledge-store`.
 
 **Why SQLite?** Local-first, zero infrastructure, ships with Python.
 Wizard is a personal tool — it doesn't need Postgres.
