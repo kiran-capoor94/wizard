@@ -327,7 +327,7 @@ SQLite error or missing config file never blocks the session boot injection.
 
 | Tool | Key inputs | Key outputs |
 |------|-----------|------------|
-| `session_start` | — | session_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context |
+| `session_start` | agent_session_id? | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions |
 | `session_end` | session_id, summary, intent, working_set, state_delta, open_loops, next_actions, closure_status | note_id, session_state_saved |
 | `resume_session` | session_id? | session_id, resumed_from, session_state, working_set_tasks, prior_notes |
 | `task_start` | task_id | task, notes_by_type, prior_notes, latest_mental_model, compounding |
