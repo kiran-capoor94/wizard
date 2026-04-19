@@ -69,3 +69,48 @@ async def test_transcript_synthesis_on_abandoned_session(
     summary_notes = [n for n in notes if n.note_type == NoteType.SESSION_SUMMARY]
     # At least 1 from SessionCloser, potentially 1 more from CaptureSynthesiser
     assert len(summary_notes) >= 1
+
+
+@pytest.mark.asyncio
+async def test_transcript_synthesis_on_hook_closed_session(
+    db_session, fake_ctx,
+    task_repo, note_repo, meeting_repo, task_state_repo,
+    session_closer, capture_synthesiser, tmp_path,
+):
+    """A session already marked closed_by='hook' by the capture command
+    must be synthesised on the next session_start."""
+    transcript_file = tmp_path / "hook_transcript.jsonl"
+    with transcript_file.open("w") as f:
+        for entry in TRANSCRIPT:
+            f.write(json.dumps(entry) + "\n")
+
+    hook_session = WizardSession(
+        closed_by="hook",
+        transcript_path=str(transcript_file),
+        agent="claude-code",
+    )
+    db_session.add(hook_session)
+    db_session.flush()
+    db_session.refresh(hook_session)
+    hook_session_id = hook_session.id
+
+    fake_ctx.sample_error = Exception("No LLM in test")
+
+    start_resp = await session_start(
+        ctx=fake_ctx,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+        capture_synthesiser=capture_synthesiser,
+    )
+
+    assert start_resp.session_id != hook_session_id
+    closed_ids = [cs.session_id for cs in start_resp.closed_sessions]
+    assert hook_session_id in closed_ids
+
+    # _close_one set summary and preserved closed_by
+    db_session.refresh(hook_session)
+    assert hook_session.summary is not None
+    assert hook_session.closed_by == "hook"
