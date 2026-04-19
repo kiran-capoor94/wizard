@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from fastmcp import Context
@@ -29,10 +30,18 @@ class SessionCloser:
     async def close_abandoned(
         self, db: Session, ctx: Context, current_session_id: int,
     ) -> list[ClosedSessionSummary]:
-        abandoned = self._find_abandoned(db, current_session_id)
-        return [await self._close_one(db, ctx, s) for s in abandoned]
+        abandoned = self._find_recent_abandoned(db, current_session_id)
+        return [await self._close_one(db, s, ctx) for s in abandoned]
 
-    def _find_abandoned(self, db: Session, current_session_id: int) -> list[WizardSession]:
+    def _find_recent_abandoned(
+        self,
+        db: Session,
+        current_session_id: int,
+        max_age_hours: int = 2,
+        limit: int = 3,
+    ) -> list[WizardSession]:
+        """Sessions with no summary abandoned within the last max_age_hours."""
+        cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=max_age_hours)
         stmt = (
             select(WizardSession)
             .where(
@@ -42,13 +51,41 @@ class SessionCloser:
                     WizardSession.closed_by == "hook",
                 ),
                 WizardSession.id != current_session_id,
+                WizardSession.created_at >= cutoff,
+            )
+            .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
+            .limit(limit)
+        )
+        return list(db.execute(stmt).scalars().all())
+
+    def _find_old_abandoned(
+        self,
+        db: Session,
+        current_session_id: int,
+        min_age_hours: int = 2,
+    ) -> list[WizardSession]:
+        """Sessions with no summary older than min_age_hours."""
+        cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=min_age_hours)
+        stmt = (
+            select(WizardSession)
+            .where(
+                WizardSession.summary == None,  # noqa: E711
+                or_(
+                    WizardSession.closed_by == None,  # noqa: E711
+                    WizardSession.closed_by == "hook",
+                ),
+                WizardSession.id != current_session_id,
+                WizardSession.created_at < cutoff,
             )
             .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
         )
-        return list(db.exec(stmt).all())
+        return list(db.execute(stmt).scalars().all())
 
     async def _close_one(
-        self, db: Session, ctx: Context, session: WizardSession,
+        self,
+        db: Session,
+        session: WizardSession,
+        ctx: Context | None = None,
     ) -> ClosedSessionSummary:
         session_id = session.id
         assert session_id is not None
@@ -59,9 +96,10 @@ class SessionCloser:
             intent="", working_set=task_ids, state_delta="",
             open_loops=[], next_actions=[], closure_status="interrupted",
         )
-        # Tier 1: try LLM sampling
-        summary_text, closed_via = await self._try_sampling(ctx, notes)
-        # Tier 2: synthetic fallback
+        summary_text: str | None = None
+        closed_via = ""
+        if ctx is not None:
+            summary_text, closed_via = await self._try_sampling(ctx, notes)
         if summary_text is None:
             summary_text, closed_via = self._synthetic_summary(session, notes, task_ids)
         clean_summary = self._security.scrub(summary_text).clean
