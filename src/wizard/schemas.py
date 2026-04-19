@@ -351,3 +351,21 @@ class SessionDetailResponse(BaseModel):
     session: SessionSummary
     session_state: SessionState | None = None
     notes: list[NoteDetail]
+
+
+class TaskRecommendation(BaseModel):
+    task_id: int
+    name: str
+    priority: str
+    status: str
+    score: float
+    reason: str
+    momentum: Literal["new", "active", "cooling", "cold"]
+    last_note_preview: str | None
+
+
+class WorkRecommendationResponse(BaseModel):
+    recommended_task: TaskRecommendation | None
+    alternatives: list[TaskRecommendation]
+    skipped_blocked: int
+    message: str | None = None
