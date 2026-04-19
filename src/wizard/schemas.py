@@ -280,6 +280,7 @@ class ResumedTaskNotes(BaseModel):
 class ResumeSessionResponse(BaseModel):
     session_id: int
     resumed_from_session_id: int
+    continued_from_id: int | None = None
     session_state: SessionState | None
     working_set_tasks: list[TaskContext]
     prior_notes: list[ResumedTaskNotes]

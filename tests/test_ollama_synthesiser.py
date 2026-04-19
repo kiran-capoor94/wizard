@@ -3,7 +3,6 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 from sqlmodel import select
 
 from wizard.models import Note, NoteType, WizardSession
@@ -128,7 +127,7 @@ def test_synthesise_returns_fallback_when_empty_transcript(db_session):
     assert result.synthesised_via == "fallback"
 
 
-def test_synthesise_propagates_ollama_error(db_session):
+def test_synthesise_returns_fallback_on_ollama_error(db_session):
     session = WizardSession(transcript_path="/tmp/t.jsonl", agent="claude-code")
     db_session.add(session)
     db_session.flush()
@@ -137,10 +136,12 @@ def test_synthesise_propagates_ollama_error(db_session):
     with patch.object(TranscriptReader, "read", return_value=_FAKE_ENTRIES), \
          patch("wizard.transcript.ollama.Client") as mock_client_cls:
         mock_client_cls.return_value.chat.side_effect = Exception("connection refused")
-        with pytest.raises(Exception, match="connection refused"):
-            _make_synthesiser().synthesise(db_session, session)
+        result = _make_synthesiser().synthesise(db_session, session)
 
+    assert result.notes_created == 0
+    assert result.synthesised_via == "fallback"
     assert session.is_synthesised is False
+    assert session.summary is None
 
 
 def test_task_ids_always_null(db_session):

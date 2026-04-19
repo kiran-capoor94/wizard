@@ -13,7 +13,7 @@ from wizard.models import WizardSession
 runner = CliRunner()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def capture_engine():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)

@@ -170,7 +170,13 @@ class OllamaSynthesiser:
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
             )
-        notes_data = self._call_ollama(entries)
+        try:
+            notes_data = self._call_ollama(entries)
+        except Exception as e:
+            logger.warning("OllamaSynthesiser: Ollama call failed: %s", e)
+            return SynthesisResult(
+                notes_created=0, task_ids_touched=[], synthesised_via="fallback",
+            )
         saved = self._save_notes(db, notes_data, wizard_session)
         wizard_session.is_synthesised = True
         if wizard_session.summary is None:

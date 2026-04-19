@@ -180,9 +180,8 @@ async def test_close_one_without_ctx_uses_synthetic(db_session):
     db_session.refresh(session)
 
     closer = SessionCloser(note_repo=NoteRepository(), security=SecurityService())
-    result = await closer.close_one(db_session, session, ctx=None)
+    result = await closer._close_one(db_session, session, ctx=None)
 
     assert result.closed_via == "synthetic"
     assert result.session_id == session.id
-
 

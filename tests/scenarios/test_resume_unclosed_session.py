@@ -2,7 +2,7 @@
 
 import pytest
 
-from wizard.models import NoteType
+from wizard.models import NoteType, WizardSession
 from wizard.tools.session_tools import resume_session, session_start
 from wizard.tools.task_tools import save_note
 
@@ -43,5 +43,10 @@ async def test_resume_unclosed_session(
     # session_state is None because session_end was never called
     assert resume_resp.session_state is None
     assert resume_resp.resumed_from_session_id == session_id
+    assert resume_resp.continued_from_id == session_id
     # But prior notes are still returned
     assert len(resume_resp.prior_notes) > 0
+
+    resumed_session = db_session.get(WizardSession, resume_resp.session_id)
+    assert resumed_session is not None
+    assert resumed_session.continued_from_id == session_id

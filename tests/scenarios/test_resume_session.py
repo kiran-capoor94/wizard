@@ -2,7 +2,7 @@
 
 import pytest
 
-from wizard.models import NoteType
+from wizard.models import NoteType, WizardSession
 from wizard.tools.session_tools import resume_session, session_end, session_start
 from wizard.tools.task_tools import save_note
 
@@ -52,7 +52,12 @@ async def test_resume_session(
     )
     assert resume_resp.resumed_from_session_id == session_1_id
     assert resume_resp.session_id != session_1_id  # new session created
+    assert resume_resp.continued_from_id == session_1_id
     assert resume_resp.session_state is not None
     assert resume_resp.session_state.closure_status == "interrupted"
     assert len(resume_resp.session_state.open_loops) == 1
     assert len(resume_resp.prior_notes) > 0
+
+    resumed_session = db_session.get(WizardSession, resume_resp.session_id)
+    assert resumed_session is not None
+    assert resumed_session.continued_from_id == session_1_id
