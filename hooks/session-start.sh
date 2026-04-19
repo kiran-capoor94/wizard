@@ -9,11 +9,19 @@ INPUT=$(cat)
 SETTINGS="$HOME/.claude/settings.json"
 DB="$HOME/.wizard/wizard.db"
 
-# ── Capture agent session UUID for continuity tracking ────────────────────────
-AGENT_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
-if [ -n "$AGENT_SESSION_ID" ]; then
-    mkdir -p "$HOME/.wizard"
-    printf '%s' "$AGENT_SESSION_ID" > "$HOME/.wizard/pending_agent_session_id"
+# ── Sub-agent suppression ─────────────────────────────────────────────────────
+# Claude Code fires SessionStart for sub-agents too. agent_id is only present
+# on sub-agent payloads — top-level sessions never have it.
+AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null || true)
+[ -n "$AGENT_ID" ] && exit 0
+
+# ── Capture agent session UUID and source ────────────────────────────────────
+AGENT_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
+SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || true)
+
+if [ -n "$AGENT_UUID" ]; then
+    mkdir -p "$HOME/.wizard/sessions/$AGENT_UUID"
+    printf '%s' "$SOURCE" > "$HOME/.wizard/sessions/$AGENT_UUID/source"
 fi
 
 # ── Step 1: Personalization refresh (80% gate) ────────────────────────────────
@@ -137,4 +145,9 @@ PYEOF
 fi
 
 # ── Step 2: Session boot injection (always) ───────────────────────────────────
-printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Begin this session by invoking the wizard:session-start skill."}}'
+CONTEXT="Begin this session by invoking the wizard:session-start skill."
+if [ -n "$AGENT_UUID" ]; then
+    CONTEXT="agent_session_id=$AGENT_UUID source=$SOURCE. $CONTEXT"
+fi
+
+printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"$CONTEXT\"}}"
