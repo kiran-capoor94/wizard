@@ -69,19 +69,20 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
 ```json
 {
   "name": "wizard",
-  "version": "1.1.6",
+  "version": "2.1.0",
   "db": "~/.wizard/wizard.db",
-  "jira": {
-    "base_url": "",
-    "project_key": "",
-    "token": "",
-    "email": ""
-  },
-  "notion": {
-    "token": "",
-    "daily_page_parent_id": "",
-    "tasks_ds_id": "",
-    "meetings_ds_id": ""
+  "knowledge_store": {
+    "type": "",
+    "notion": {
+      "daily_parent_id": "",
+      "tasks_db_id": "",
+      "meetings_db_id": ""
+    },
+    "obsidian": {
+      "vault_path": "",
+      "daily_notes_folder": "Daily",
+      "tasks_folder": "Tasks"
+    }
   },
   "scrubbing": {
     "enabled": true,
@@ -90,55 +91,9 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
 }
 ```
 
-**Critical:** `tasks_ds_id` and `meetings_ds_id` are Notion **data source
-IDs**, not database page IDs. These are distinct — page IDs appear in
-Notion URLs; data source IDs are surfaced by the Notion API's
-`data_sources` field on a `databases.retrieve` response. The
-`notion_discovery` module and `wizard configure --notion` use the data
-source IDs directly.
-
-The `notion_schema` block is auto-populated by `wizard configure --notion`
-and maps wizard field names to actual Notion property names:
-
-```json
-"notion_schema": {
-  "task_name": "Task",
-  "task_status": "Status",
-  "task_priority": "Priority",
-  "task_due_date": "Due date",
-  "task_jira_key": "Jira",
-  "meeting_title": "Meeting name",
-  "meeting_category": "Category",
-  "meeting_date": "Date",
-  "meeting_url": "Krisp URL",
-  "meeting_summary": "Summary"
-}
-```
-
-## Notion API — Use `data_sources`, Not `databases`
-
-Wizard uses **notion-client v3.0** which exposes both the legacy
-`databases.*` endpoint and the new `data_sources.*` endpoint.
-
-**Always use `data_sources.*`:**
-
-| Operation | Call |
-|-----------|------|
-| Fetch schema | `client.data_sources.retrieve(data_source_id=ds_id)` |
-| Query rows | `client.data_sources.query(data_source_id=ds_id, ...)` |
-| Create page in DB | `client.pages.create(parent={"data_source_id": ds_id}, ...)` |
-
-**Never use for schema or data access:**
-- `client.databases.retrieve()` — returns empty `properties` for
-  multi-source databases (the new default in Notion). **Exception:** use it
-  at setup time to resolve a page ID to a data source ID by reading the
-  `data_sources` field — this is the only endpoint that provides that mapping.
-- `client.databases.query()` — removed in notion-client v3.0
-- `parent={"database_id": ...}` in `pages.create` — rejects data source
-  IDs with 404
-
-The config stores data source IDs specifically because all three operations
-above require them. No lookup or translation is needed at call time.
+`knowledge_store.type` is `"notion"`, `"obsidian"`, or `""` (disabled).
+Configure interactively with `wizard configure knowledge-store`.
+The knowledge store is optional — core Wizard works without it.
 
 ## Database Schema
 
