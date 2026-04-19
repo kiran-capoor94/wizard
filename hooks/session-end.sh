@@ -21,5 +21,5 @@ if [ -n "$SESSION_ID" ]; then
     ARGS+=(--session-id "$SESSION_ID")
 fi
 
-WIZARD_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+WIZARD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 uv --directory "$WIZARD_DIR" run wizard "${ARGS[@]}" 2>/dev/null || true
