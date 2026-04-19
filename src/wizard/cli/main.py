@@ -397,12 +397,48 @@ def update() -> None:
     typer.echo("Wizard updated.")
 
 
+def _find_capture_session(db, session_id: int | None) -> WizardSession | None:
+    """Return the target session for capture: by ID or latest unsynthesised within 24h."""
+    if session_id is not None:
+        return db.get(WizardSession, session_id)
+    cutoff = datetime.datetime.now() - datetime.timedelta(hours=24)
+    return db.exec(
+        select(WizardSession)
+        .where(
+            WizardSession.is_synthesised == False,  # noqa: E712
+            WizardSession.created_at >= cutoff,
+        )
+        .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
+        .limit(1)
+    ).first()
+
+
+def _apply_hook_metadata(
+    session: WizardSession,
+    transcript: str,
+    agent: str,
+    agent_session_id: str | None,
+) -> None:
+    """Stamp hook-supplied metadata onto a session (in-place). Does not flush."""
+    if transcript:
+        session.transcript_path = transcript
+    if agent:
+        session.agent = agent
+    if agent_session_id and not session.agent_session_id:
+        session.agent_session_id = agent_session_id
+    if session.closed_by is None:
+        session.closed_by = "hook"
+
+
 @app.command()
 def capture(
     close: bool = typer.Option(False, "--close", help="Mark session as closed by hook"),
     transcript: str = typer.Option("", "--transcript", help="Path to transcript file"),
     agent: str = typer.Option("", "--agent", help="Agent name"),
     session_id: int | None = typer.Option(None, "--session-id", help="Wizard session ID"),
+    agent_session_id: str | None = typer.Option(
+        None, "--agent-session-id", help="Agent-assigned session UUID"
+    ),
 ) -> None:
     """Capture agent session data and synthesise transcript into notes via Ollama."""
     if not close:
@@ -410,30 +446,13 @@ def capture(
         raise typer.Exit(0)
 
     with get_db_session() as db:
-        if session_id is not None:
-            session = db.get(WizardSession, session_id)
-        else:
-            cutoff = datetime.datetime.now() - datetime.timedelta(hours=24)
-            session = db.exec(
-                select(WizardSession)
-                .where(
-                    WizardSession.is_synthesised == False,  # noqa: E712
-                    WizardSession.created_at >= cutoff,
-                )
-                .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
-                .limit(1)
-            ).first()
+        session = _find_capture_session(db, session_id)
 
         if session is None:
             typer.echo("No unsynthesised session found within 24h.")
             raise typer.Exit(0)
 
-        if transcript:
-            session.transcript_path = transcript
-        if agent:
-            session.agent = agent
-        if session.closed_by is None:
-            session.closed_by = "hook"
+        _apply_hook_metadata(session, transcript, agent, agent_session_id)
         db.add(session)
         db.flush()
 

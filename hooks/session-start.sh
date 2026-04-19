@@ -5,8 +5,16 @@
 # Claude Code event: SessionStart
 set -euo pipefail
 
+INPUT=$(cat)
 SETTINGS="$HOME/.claude/settings.json"
 DB="$HOME/.wizard/wizard.db"
+
+# ── Capture agent session UUID for continuity tracking ────────────────────────
+AGENT_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
+if [ -n "$AGENT_SESSION_ID" ]; then
+    mkdir -p "$HOME/.wizard"
+    printf '%s' "$AGENT_SESSION_ID" > "$HOME/.wizard/pending_agent_session_id"
+fi
 
 # ── Step 1: Personalization refresh (80% gate) ────────────────────────────────
 if [ $((RANDOM % 10)) -lt 8 ]; then

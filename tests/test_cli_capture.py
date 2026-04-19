@@ -147,3 +147,61 @@ class TestCaptureClose:
         with _session_for(capture_engine) as db:
             s = db.get(WizardSession, sid)
             assert s.closed_by == "user"
+
+    def test_stores_agent_session_id_when_not_already_set(self, open_session, capture_engine, tmp_path):
+        """--agent-session-id is stored on session when not already set."""
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("{}\n")
+
+        def fake_get_session():
+            return _session_for(capture_engine)
+
+        with patch("wizard.cli.main.get_db_session", fake_get_session), \
+             patch("wizard.cli.main.settings") as mock_settings:
+            mock_settings.synthesis.enabled = False
+            mock_settings.scrubbing.allowlist = []
+            mock_settings.scrubbing.enabled = True
+            result = runner.invoke(app, [
+                "capture", "--close",
+                "--transcript", str(transcript),
+                "--agent", "claude-code",
+                "--session-id", str(open_session),
+                "--agent-session-id", "test-uuid-1234",
+            ])
+
+        assert result.exit_code == 0, result.output
+        with _session_for(capture_engine) as db:
+            s = db.get(WizardSession, open_session)
+            assert s.agent_session_id == "test-uuid-1234"
+
+    def test_does_not_overwrite_existing_agent_session_id(self, capture_engine, tmp_path):
+        """--agent-session-id does not overwrite a value already set by session_start."""
+        with _session_for(capture_engine) as db:
+            s = WizardSession(agent_session_id="original-uuid")
+            db.add(s)
+            db.flush()
+            db.refresh(s)
+            sid = s.id
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("{}\n")
+
+        def fake_get_session():
+            return _session_for(capture_engine)
+
+        with patch("wizard.cli.main.get_db_session", fake_get_session), \
+             patch("wizard.cli.main.settings") as mock_settings:
+            mock_settings.synthesis.enabled = False
+            mock_settings.scrubbing.allowlist = []
+            mock_settings.scrubbing.enabled = True
+            runner.invoke(app, [
+                "capture", "--close",
+                "--transcript", str(transcript),
+                "--agent", "claude-code",
+                "--session-id", str(sid),
+                "--agent-session-id", "new-uuid-should-not-overwrite",
+            ])
+
+        with _session_for(capture_engine) as db:
+            s = db.get(WizardSession, sid)
+            assert s.agent_session_id == "original-uuid"
