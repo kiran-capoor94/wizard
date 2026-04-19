@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from pathlib import Path
 from typing import Literal
 
 from fastmcp import Context
@@ -46,6 +47,8 @@ from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_STAR
 
 logger = logging.getLogger(__name__)
 
+_SESSION_ID_FILE = Path.home() / ".wizard" / "current_session_id"
+
 
 def _build_wizard_context() -> dict | None:
     ks = settings.knowledge_store
@@ -85,6 +88,7 @@ async def session_start(
             raise ToolError("Internal error: session was not assigned an id after flush")
 
         await ctx.set_state("current_session_id", session.id)
+        _SESSION_ID_FILE.write_text(str(session.id))
         await ctx.info(f"Session {session.id} started.")
 
         closed_sessions = await session_closer.close_recent_abandoned(db, ctx, session.id)
@@ -172,6 +176,7 @@ async def session_end(
                 raise ToolError("Internal error: note was not assigned an id after flush")
 
             await ctx.delete_state("current_session_id")
+            _SESSION_ID_FILE.unlink(missing_ok=True)
             await ctx.info(
                 f"Session {session.id} closed. Status: {closure_status}. "
                 f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
