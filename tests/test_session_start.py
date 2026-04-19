@@ -1,5 +1,7 @@
 """Tests for session_start behavioral invariants."""
 
+from unittest.mock import patch
+
 import pytest
 
 import wizard.tools.session_tools as session_tools_mod
@@ -79,24 +81,30 @@ async def test_session_start_open_tasks_total_reflects_full_count(db_session):
 
 
 @pytest.mark.asyncio
-async def test_session_start_detects_continuation(db_session, tmp_path, monkeypatch):
-    """If current_session_id file exists, continued_from_id is set on the new session."""
-    prior_id = 42
-    session_id_file = tmp_path / "current_session_id"
-    session_id_file.write_text(str(prior_id))
-    monkeypatch.setattr(session_tools_mod, "_SESSION_ID_FILE", session_id_file)
-    monkeypatch.setattr(
-        session_tools_mod, "_AGENT_SESSION_ID_FILE", tmp_path / "pending_agent_session_id"
-    )
+async def test_session_start_detects_continuation_via_compact(db_session, tmp_path):
+    """If source file contains 'compact', continued_from_id links to the prior session."""
+    # Create a prior session in the DB so _find_previous_session_id can find it.
+    prior = WizardSession()
+    db_session.add(prior)
+    db_session.flush()
+    db_session.refresh(prior)
+    prior_id = prior.id
 
-    result = await session_start(
-        ctx=FakeContext(),
-        t_repo=TaskRepository(),
-        n_repo=NoteRepository(),
-        m_repo=MeetingRepository(),
-        ts_repo=TaskStateRepository(),
-        session_closer=FakeSessionCloser(),
-    )
+    uuid = "compact-uuid-xyz"
+    sessions_dir = tmp_path / "sessions"
+    (sessions_dir / uuid).mkdir(parents=True)
+    (sessions_dir / uuid / "source").write_text("compact")
+
+    with patch.object(session_tools_mod, "SESSIONS_DIR", sessions_dir):
+        result = await session_start(
+            ctx=FakeContext(),
+            agent_session_id=uuid,
+            t_repo=TaskRepository(),
+            n_repo=NoteRepository(),
+            m_repo=MeetingRepository(),
+            ts_repo=TaskStateRepository(),
+            session_closer=FakeSessionCloser(),
+        )
 
     assert result.continued_from_id == prior_id
     session = db_session.get(WizardSession, result.session_id)
@@ -104,27 +112,21 @@ async def test_session_start_detects_continuation(db_session, tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_session_start_reads_and_clears_agent_session_id_file(
-    db_session, tmp_path, monkeypatch
-):
-    """pending_agent_session_id is read, stored on the session, and the file is deleted."""
+async def test_session_start_stores_agent_session_id_param(db_session, tmp_path):
+    """agent_session_id parameter is stored on the WizardSession record."""
     agent_uuid = "abc123-agent-uuid"
-    agent_file = tmp_path / "pending_agent_session_id"
-    agent_file.write_text(agent_uuid)
-    monkeypatch.setattr(
-        session_tools_mod, "_SESSION_ID_FILE", tmp_path / "current_session_id"
-    )
-    monkeypatch.setattr(session_tools_mod, "_AGENT_SESSION_ID_FILE", agent_file)
+    sessions_dir = tmp_path / "sessions"
 
-    result = await session_start(
-        ctx=FakeContext(),
-        t_repo=TaskRepository(),
-        n_repo=NoteRepository(),
-        m_repo=MeetingRepository(),
-        ts_repo=TaskStateRepository(),
-        session_closer=FakeSessionCloser(),
-    )
+    with patch.object(session_tools_mod, "SESSIONS_DIR", sessions_dir):
+        result = await session_start(
+            ctx=FakeContext(),
+            agent_session_id=agent_uuid,
+            t_repo=TaskRepository(),
+            n_repo=NoteRepository(),
+            m_repo=MeetingRepository(),
+            ts_repo=TaskStateRepository(),
+            session_closer=FakeSessionCloser(),
+        )
 
     session = db_session.get(WizardSession, result.session_id)
     assert session.agent_session_id == agent_uuid
-    assert not agent_file.exists()
