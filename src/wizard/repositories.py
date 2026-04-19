@@ -88,6 +88,18 @@ class TaskRepository:
         """Blocked tasks sorted by priority then last-worked desc."""
         return self._query_task_contexts(db, Task.status == TaskStatus.BLOCKED)
 
+    def get_workable_task_contexts(
+        self, db: Session, include_blocked: bool = False
+    ) -> list[TaskContext]:
+        """Open + in_progress tasks with task_state joined. Optionally includes blocked."""
+        statuses = [TaskStatus.TODO, TaskStatus.IN_PROGRESS]
+        if include_blocked:
+            statuses.append(TaskStatus.BLOCKED)
+        return self._query_task_contexts(
+            db,
+            col(Task.status).in_(statuses),  # pyright: ignore[reportAttributeAccessIssue]
+        )
+
     def _query_task_contexts(self, db: Session, *where) -> list[TaskContext]:
         last_worked = self._latest_note_subquery()
         stmt = (
