@@ -15,6 +15,7 @@ SKILL_MEETING = "meeting"
 SKILL_ARCHITECTURE_DEBATE = "architecture-debate"
 SKILL_CODE_REVIEW = "code-review"
 SKILL_NOTE = "note"
+SKILL_TRIAGE = "what-should-i-work-on"
 
 
 def load_skill(name: str) -> str | None:

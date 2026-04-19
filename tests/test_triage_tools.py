@@ -1,3 +1,6 @@
+import pytest
+
+from tests.fakes import FakeContext
 from wizard.models import (
     Task,
     TaskCategory,
@@ -20,6 +23,7 @@ from wizard.tools.triage_tools import (
     _classify_momentum,
     _fallback_reason,
     _score_task,
+    what_should_i_work_on,
 )
 
 
@@ -162,3 +166,80 @@ def test_fallback_reason_recency_dominant():
     ctx = _make_ctx(stale_days=3)
     reason = _fallback_reason(ctx, dominant_signal="recency")
     assert "3" in reason or "ago" in reason.lower() or "resume" in reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_what_should_i_work_on_returns_recommendation(db_session):
+    t1 = Task(name="Fix auth", status=ModelTaskStatus.IN_PROGRESS, priority=ModelTaskPriority.HIGH, category=TaskCategory.ISSUE)
+    t2 = Task(name="Write docs", status=ModelTaskStatus.TODO, priority=ModelTaskPriority.LOW, category=TaskCategory.ISSUE)
+    db_session.add_all([t1, t2])
+    db_session.flush()
+
+    ctx = FakeContext()
+    ctx.sample_result = type("R", (), {"content": "High priority in-progress task with active context."})()
+
+    result = await what_should_i_work_on(
+        session_id=1,
+        ctx=ctx,
+        t_repo=TaskRepository(),
+        db=db_session,
+    )
+
+    assert result.recommended_task is not None
+    assert result.recommended_task.name == "Fix auth"
+    assert len(result.alternatives) >= 1
+
+
+@pytest.mark.asyncio
+async def test_what_should_i_work_on_no_tasks_returns_none(db_session):
+    ctx = FakeContext()
+    result = await what_should_i_work_on(
+        session_id=1,
+        ctx=ctx,
+        t_repo=TaskRepository(),
+        db=db_session,
+    )
+    assert result.recommended_task is None
+    assert result.message is not None
+
+
+@pytest.mark.asyncio
+async def test_what_should_i_work_on_unblock_mode_filters_to_blocked(db_session):
+    t1 = Task(name="Open task", status=ModelTaskStatus.TODO, priority=ModelTaskPriority.HIGH, category=TaskCategory.ISSUE)
+    t2 = Task(name="Blocked task", status=ModelTaskStatus.BLOCKED, priority=ModelTaskPriority.MEDIUM, category=TaskCategory.ISSUE)
+    db_session.add_all([t1, t2])
+    db_session.flush()
+
+    ctx = FakeContext()
+    ctx.sample_result = type("R", (), {"content": "Blocked and needs attention."})()
+
+    result = await what_should_i_work_on(
+        session_id=1,
+        mode="unblock",
+        ctx=ctx,
+        t_repo=TaskRepository(),
+        db=db_session,
+    )
+
+    assert result.recommended_task is not None
+    assert result.recommended_task.name == "Blocked task"
+
+
+@pytest.mark.asyncio
+async def test_what_should_i_work_on_sampling_failure_uses_fallback(db_session):
+    t1 = Task(name="Fix bug", status=ModelTaskStatus.TODO, priority=ModelTaskPriority.HIGH, category=TaskCategory.ISSUE)
+    db_session.add(t1)
+    db_session.flush()
+
+    ctx = FakeContext()
+    ctx.sample_error = RuntimeError("LLM unavailable")
+
+    result = await what_should_i_work_on(
+        session_id=1,
+        ctx=ctx,
+        t_repo=TaskRepository(),
+        db=db_session,
+    )
+
+    assert result.recommended_task is not None
+    assert len(result.recommended_task.reason) > 0
