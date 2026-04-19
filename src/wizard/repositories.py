@@ -75,21 +75,22 @@ class TaskRepository:
     def get_by_source_id(self, db: Session, source_id: str) -> Task | None:
         return db.exec(select(Task).where(Task.source_id == source_id)).first()
 
-    def get_open_task_contexts(self, db: Session) -> list[TaskContext]:
+    def get_open_task_contexts(self, db: Session, limit: int | None = None) -> list[TaskContext]:
         """Open tasks (TODO / IN_PROGRESS) sorted by priority then last-worked desc."""
         return self._query_task_contexts(
             db,
             col(Task.status).in_(
                 [TaskStatus.TODO, TaskStatus.IN_PROGRESS]
             ),  # pyright: ignore[reportAttributeAccessIssue]
+            limit=limit,
         )
 
-    def get_blocked_task_contexts(self, db: Session) -> list[TaskContext]:
+    def get_blocked_task_contexts(self, db: Session, limit: int | None = None) -> list[TaskContext]:
         """Blocked tasks sorted by priority then last-worked desc."""
-        return self._query_task_contexts(db, Task.status == TaskStatus.BLOCKED)
+        return self._query_task_contexts(db, Task.status == TaskStatus.BLOCKED, limit=limit)
 
     def get_workable_task_contexts(
-        self, db: Session, include_blocked: bool = False
+        self, db: Session, include_blocked: bool = False, limit: int | None = None
     ) -> list[TaskContext]:
         """Open + in_progress tasks with task_state joined. Optionally includes blocked."""
         statuses = [TaskStatus.TODO, TaskStatus.IN_PROGRESS]
@@ -98,15 +99,29 @@ class TaskRepository:
         return self._query_task_contexts(
             db,
             col(Task.status).in_(statuses),  # pyright: ignore[reportAttributeAccessIssue]
+            limit=limit,
         )
 
-    def _query_task_contexts(self, db: Session, *where) -> list[TaskContext]:
+    def count_open_tasks(self, db: Session) -> int:
+        """Total count of TODO and IN_PROGRESS tasks."""
+        stmt = (
+            select(func.count())
+            .select_from(Task)
+            .where(col(Task.status).in_([TaskStatus.TODO, TaskStatus.IN_PROGRESS]))
+        )
+        return db.execute(stmt).scalar_one()
+
+    def _query_task_contexts(
+        self, db: Session, *where, limit: int | None = None
+    ) -> list[TaskContext]:
         last_worked = self._latest_note_subquery()
         stmt = (
             select(Task, last_worked)
             .where(*where)
             .order_by(_PRIORITY_ORDER, func.coalesce(last_worked, 0).desc())
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
         rows = db.execute(stmt).all()
         if not rows:
             return []

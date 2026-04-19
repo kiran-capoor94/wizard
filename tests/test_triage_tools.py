@@ -243,3 +243,59 @@ async def test_what_should_i_work_on_sampling_failure_uses_fallback(db_session):
 
     assert result.recommended_task is not None
     assert len(result.recommended_task.reason) > 0
+
+
+def test_get_open_task_contexts_respects_limit(db_session):
+    from wizard.models import Task, TaskCategory, TaskPriority, TaskStatus
+    from wizard.repositories import TaskRepository
+
+    for i in range(5):
+        t = Task(
+            name=f"Task {i}",
+            status=TaskStatus.TODO,
+            priority=TaskPriority.MEDIUM,
+            category=TaskCategory.ISSUE,
+        )
+        db_session.add(t)
+    db_session.flush()
+
+    repo = TaskRepository()
+    results = repo.get_open_task_contexts(db_session, limit=3)
+    assert len(results) == 3
+
+
+def test_get_open_task_contexts_no_limit_returns_all(db_session):
+    from wizard.models import Task, TaskCategory, TaskPriority, TaskStatus
+    from wizard.repositories import TaskRepository
+
+    for i in range(5):
+        t = Task(
+            name=f"Task {i}",
+            status=TaskStatus.TODO,
+            priority=TaskPriority.MEDIUM,
+            category=TaskCategory.ISSUE,
+        )
+        db_session.add(t)
+    db_session.flush()
+
+    repo = TaskRepository()
+    results = repo.get_open_task_contexts(db_session)
+    assert len(results) == 5
+
+
+def test_count_open_tasks_returns_full_count(db_session):
+    from wizard.models import Task, TaskCategory, TaskPriority, TaskStatus
+    from wizard.repositories import TaskRepository
+
+    for i in range(4):
+        t = Task(
+            name=f"Task {i}",
+            status=TaskStatus.TODO,
+            priority=TaskPriority.MEDIUM,
+            category=TaskCategory.ISSUE,
+        )
+        db_session.add(t)
+    db_session.flush()
+
+    repo = TaskRepository()
+    assert repo.count_open_tasks(db_session) == 4
