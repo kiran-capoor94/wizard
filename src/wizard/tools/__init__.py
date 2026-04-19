@@ -9,6 +9,7 @@ from .task_tools import (
     update_task,
     what_am_i_missing,
 )
+from .triage_tools import what_should_i_work_on
 
 __all__ = [
     "session_start", "session_end", "resume_session",
@@ -16,4 +17,5 @@ __all__ = [
     "rewind_task", "what_am_i_missing",
     "get_meeting", "save_meeting_summary", "ingest_meeting",
     "get_tasks", "get_task", "get_sessions", "get_session",
+    "what_should_i_work_on",
 ]
