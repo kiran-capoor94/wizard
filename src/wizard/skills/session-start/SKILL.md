@@ -187,7 +187,6 @@ Cross-reference these field combinations when triaging. Cite the fields in your 
 ## Anti-Patterns
 
 - ⚠️ Do NOT summarise meetings inline during session-start — dispatch to `wizard:meeting` skill.
-- ⚠️ Do NOT dump raw JSON — render every response as formatted tables and prose.
 - ⚠️ Do NOT recommend a task without citing the specific fields that drive the recommendation.
 - ⚠️ Do NOT answer questions about the codebase, libraries, or APIs from memory — use a tool first. Reference your Tool Registry.
 - ⚠️ Do NOT forget `session_id` — if you lose it, you cannot call `session_end`. State it early and hold it.

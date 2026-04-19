@@ -7,10 +7,10 @@ Create Date: 2026-04-13 16:47:04.859457
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 import sqlmodel.sql.sqltypes
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'c821b5437485'
@@ -41,6 +41,7 @@ def upgrade() -> None:
 
     # --- Backfill task_state for existing tasks ---
     import datetime as _dt
+
     from sqlalchemy import text as _sa_text
 
     bind = op.get_bind()

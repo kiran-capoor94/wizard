@@ -28,15 +28,20 @@ uv run alembic upgrade head   # run pending DB migrations
 server.py                    # Entry point — imports mcp_instance, tools, resources, prompts
 src/wizard/
   cli/
-    main.py                  # Typer app: setup, configure, sync, doctor, analytics, update, uninstall, capture
+    main.py                  # Typer app: setup, configure, doctor, analytics, update, uninstall, capture
+    configure.py             # configure knowledge-store subcommand (Notion/Obsidian)
     doctor.py                # 8-point health checks (wizard doctor)
     analytics.py             # Session/note/task usage stats (wizard analytics)
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
+  skills.py                  # Skill loader (reads ~/.wizard/skills/ at startup)
   tools/                       # MCP tools package (split by domain)
     __init__.py                # Re-exports all tool functions
     session_tools.py           # session_start, session_end, resume_session
     task_tools.py              # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
+    task_helpers.py            # Shared helpers for task tools
+    triage_tools.py            # what_should_i_work_on (mode-based scoring + LLM reasons)
     meeting_tools.py           # get_meeting, save_meeting_summary, ingest_meeting
+    query_tools.py             # get_tasks, get_task, get_sessions, get_session (paginated, no session required)
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
@@ -44,12 +49,9 @@ src/wizard/
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, MeetingRepo, etc.)
-  services.py                # SyncService (bidirectional upsert) + WriteBackService + SessionCloser
-  integrations.py            # JiraClient (httpx) + NotionClient (notion-client v3.0)
-  notion_discovery.py        # 3-pass Notion property auto-matching for wizard configure --notion
+  services.py                # SessionCloser — auto-closes abandoned sessions
   security.py                # SecurityService — regex PII scrubbing with allowlist
   config.py                  # Pydantic Settings + JsonConfigSettingsSource
-  mappers.py                 # Jira/Notion → TaskStatus/TaskPriority/MeetingCategory
   database.py                # SQLite session factory (SQLModel engine)
   deps.py                    # FastMCP Depends() provider functions
   agent_registration.py      # Write MCP + hook config into agent JSON/TOML files
@@ -67,19 +69,20 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
 ```json
 {
   "name": "wizard",
-  "version": "1.1.6",
+  "version": "2.1.0",
   "db": "~/.wizard/wizard.db",
-  "jira": {
-    "base_url": "",
-    "project_key": "",
-    "token": "",
-    "email": ""
-  },
-  "notion": {
-    "token": "",
-    "daily_page_parent_id": "",
-    "tasks_ds_id": "",
-    "meetings_ds_id": ""
+  "knowledge_store": {
+    "type": "",
+    "notion": {
+      "daily_parent_id": "",
+      "tasks_db_id": "",
+      "meetings_db_id": ""
+    },
+    "obsidian": {
+      "vault_path": "",
+      "daily_notes_folder": "Daily",
+      "tasks_folder": "Tasks"
+    }
   },
   "scrubbing": {
     "enabled": true,
@@ -88,55 +91,9 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
 }
 ```
 
-**Critical:** `tasks_ds_id` and `meetings_ds_id` are Notion **data source
-IDs**, not database page IDs. These are distinct — page IDs appear in
-Notion URLs; data source IDs are surfaced by the Notion API's
-`data_sources` field on a `databases.retrieve` response. The
-`notion_discovery` module and `wizard configure --notion` use the data
-source IDs directly.
-
-The `notion_schema` block is auto-populated by `wizard configure --notion`
-and maps wizard field names to actual Notion property names:
-
-```json
-"notion_schema": {
-  "task_name": "Task",
-  "task_status": "Status",
-  "task_priority": "Priority",
-  "task_due_date": "Due date",
-  "task_jira_key": "Jira",
-  "meeting_title": "Meeting name",
-  "meeting_category": "Category",
-  "meeting_date": "Date",
-  "meeting_url": "Krisp URL",
-  "meeting_summary": "Summary"
-}
-```
-
-## Notion API — Use `data_sources`, Not `databases`
-
-Wizard uses **notion-client v3.0** which exposes both the legacy
-`databases.*` endpoint and the new `data_sources.*` endpoint.
-
-**Always use `data_sources.*`:**
-
-| Operation | Call |
-|-----------|------|
-| Fetch schema | `client.data_sources.retrieve(data_source_id=ds_id)` |
-| Query rows | `client.data_sources.query(data_source_id=ds_id, ...)` |
-| Create page in DB | `client.pages.create(parent={"data_source_id": ds_id}, ...)` |
-
-**Never use for schema or data access:**
-- `client.databases.retrieve()` — returns empty `properties` for
-  multi-source databases (the new default in Notion). **Exception:** use it
-  at setup time to resolve a page ID to a data source ID by reading the
-  `data_sources` field — this is the only endpoint that provides that mapping.
-- `client.databases.query()` — removed in notion-client v3.0
-- `parent={"database_id": ...}` in `pages.create` — rejects data source
-  IDs with 404
-
-The config stores data source IDs specifically because all three operations
-above require them. No lookup or translation is needed at call time.
+`knowledge_store.type` is `"notion"`, `"obsidian"`, or `""` (disabled).
+Configure interactively with `wizard configure knowledge-store`.
+The knowledge store is optional — core Wizard works without it.
 
 ## Database Schema
 
@@ -162,11 +119,7 @@ New tables use snake_case (e.g. `task_state`, `meeting_tasks`).
 via FastMCP's `Depends()` system (identical in spirit to FastAPI's):
 
 ```python
-get_jira_client()          → JiraClient
-get_notion_client()        → NotionClient
 get_security()             → SecurityService
-get_sync_service()         → SyncService
-get_writeback()            → WriteBackService
 get_task_repo()            → TaskRepository
 get_meeting_repo()         → MeetingRepository
 get_note_repo()            → NoteRepository
@@ -282,22 +235,25 @@ accumulate context as you work.
 
 ## MCP Tools — Quick Reference
 
-13 tools, all async, all return Pydantic response schemas:
-
 | Tool | Key inputs | Key outputs |
 |------|-----------|------------|
-| `session_start` | — | session_id, open_tasks, blocked_tasks, unsummarised_meetings |
-| `session_end` | session_id, summary, intent, working_set, state_delta, open_loops, next_actions, closure_status | note_id, notion_write_back, session_state_saved |
+| `session_start` | — | session_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context |
+| `session_end` | session_id, summary, intent, working_set, state_delta, open_loops, next_actions, closure_status | note_id, session_state_saved |
 | `resume_session` | session_id? | session_id, resumed_from, session_state, working_set_tasks, prior_notes |
 | `task_start` | task_id | task, notes_by_type, prior_notes, latest_mental_model, compounding |
-| `create_task` | name, priority, category, source_url?, meeting_id? | task_id, notion_write_back |
-| `update_task` | task_id + optional fields | updated_fields, writebacks |
+| `create_task` | name, priority, category, source_url?, meeting_id? | task_id, already_existed |
+| `update_task` | task_id + optional fields | updated_fields |
 | `rewind_task` | task_id | task, timeline (oldest→newest), summary |
 | `save_note` | task_id, note_type, content, mental_model? | note_id, mental_model_saved |
 | `what_am_i_missing` | task_id | list of Signal(type, severity, message) |
+| `what_should_i_work_on` | session_id, mode, time_budget? | recommended_task, alternatives, skipped_blocked |
 | `get_meeting` | meeting_id | title, content, open_tasks, already_summarised |
-| `save_meeting_summary` | meeting_id, summary, task_ids? | note_id, tasks_linked, notion_write_back |
-| `ingest_meeting` | title, content, source_url?, category? | meeting_id, already_existed, notion_write_back |
+| `save_meeting_summary` | meeting_id, summary, task_ids? | note_id, tasks_linked |
+| `ingest_meeting` | title, content, source_url?, category? | meeting_id, already_existed |
+| `get_tasks` | status?, source_type?, limit, cursor? | items, next_cursor, total |
+| `get_task` | task_id | task, notes, task_state |
+| `get_sessions` | limit, cursor? | items, next_cursor |
+| `get_session` | session_id | session, state, notes |
 
 ## PII Scrubbing
 
@@ -315,26 +271,11 @@ accumulate context as you work.
 Configure `scrubbing.allowlist` with regex patterns for identifiers that
 should pass through unchanged (e.g. `"ENG-\\d+"` preserves Jira keys).
 
-## Sync Rules
-
-External sources (Jira/Notion) win on metadata; local wins on status:
-
-- **Jira/Notion overwrite:** name, priority, due_date
-- **Local preserved:** status (a deliberate BLOCKED shouldn't be undone by sync)
-- **Dedup order:** Jira key → Notion notion_id → source_id
-
 ## Key Invariants
 
 - Scrub PII **before** writing to SQLite, not on read.
 - `session_start` must be called before `task_start` or `save_note`.
 - `update_task_status` is deprecated; always use `update_task`.
-- `tasks_ds_id` / `meetings_ds_id` are data source IDs. Never store page
-  IDs in those fields or the Notion API calls will 404.
-- Never call `databases.retrieve` for schema or data access — it returns
-  empty `properties` for multi-source databases. The one allowed use is
-  `resolve_ds_id` in `cli/configure.py`, which calls it solely to read the
-  `data_sources` field during setup.
-- Never call `databases.query` — removed in notion-client v3.0.
 
 ## Coding Principles
 
@@ -413,7 +354,7 @@ opportunities:
 
 | Function | File | Complexity | Extraction candidates |
 |----------|------|-----------|----------------------|
-| `update_task` | `tools/task_tools.py` | 18 | writeback dispatch, field-update loop |
+| `update_task` | `tools/task_tools.py` | 18 | field-update loop, status validation |
 | `setup` | `cli/main.py` | 18 | agent registration, config validation |
 | `uninstall` | `cli/main.py` | 14 | file cleanup, agent deregistration |
 | `resume_session` | `tools/session_tools.py` | 13 | state deserialization, note grouping |
