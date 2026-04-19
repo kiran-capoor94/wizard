@@ -116,6 +116,24 @@ def test_deregister_hook_removes_both_events(tmp_settings, tmp_path):
     assert data["hooks"].get("SessionStart", []) == []
 
 
+def test_deregister_hook_nothing_to_remove_returns_false(tmp_settings, tmp_path):
+    """deregister_hook returns False when no wizard hooks are present."""
+    with (
+        patch("wizard.agent_registration._HOOK_CONFIGS", {
+            "claude-code": (tmp_settings, "hooks"),
+        }),
+        patch("wizard.agent_registration._HOOK_SCRIPTS", {
+            "claude-code": {
+                "SessionEnd": tmp_path / "session-end.sh",
+                "SessionStart": tmp_path / "session-start.sh",
+            }
+        }),
+    ):
+        result = deregister_hook("claude-code")
+
+    assert result is False
+
+
 def test_register_hook_unknown_agent_returns_false():
     result = register_hook("unknown-agent")
     assert result is False
