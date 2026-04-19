@@ -1,29 +1,24 @@
+import asyncio
 import logging
 from typing import Literal
 
-import httpx
-import sqlalchemy.exc
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
-from notion_client.errors import APIResponseError
 from pydantic import ValidationError
 from sqlmodel import Session
 
+from ..config import settings
 from ..database import get_session
 from ..deps import (
     get_capture_synthesiser,
     get_meeting_repo,
     get_note_repo,
-    get_notion_client,
     get_security,
     get_session_closer,
-    get_sync_service,
     get_task_repo,
     get_task_state_repo,
-    get_writeback,
 )
-from ..integrations import NotionClient
 from ..mcp_instance import mcp
 from ..models import (
     Note,
@@ -47,60 +42,61 @@ from ..schemas import (
     TaskContext,
 )
 from ..security import SecurityService
-from ..services import SessionCloser, SyncService, WriteBackService
+from ..services import SessionCloser
 from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_START, load_skill
 from ..transcript import CaptureSynthesiser
 
 logger = logging.getLogger(__name__)
 
 
-def _init_session(db: Session, notion: NotionClient) -> "tuple[WizardSession, object]":
-    """Create a new WizardSession and attach the daily page if available."""
-    session = WizardSession()
-    db.add(session)
-    db.flush()
-    db.refresh(session)
-    if session.id is None:
-        raise ToolError("Internal error: session was not assigned an id after flush")
-    daily_page = None
-    try:
-        daily_page = notion.ensure_daily_page()
-        session.daily_page_id = daily_page.page_id
-        db.add(session)
-        db.flush()
-    except (APIResponseError, httpx.HTTPError, KeyError, TypeError) as e:
-        logger.warning("ensure_daily_page failed: %s", e)
-    return session, daily_page
+def _build_wizard_context() -> dict | None:
+    ks = settings.knowledge_store
+    if ks.type == "notion":
+        return {
+            "knowledge_store_type": "notion",
+            "tasks_db_id": ks.notion.tasks_db_id or None,
+            "meetings_db_id": ks.notion.meetings_db_id or None,
+            "daily_parent_id": ks.notion.daily_parent_id or None,
+        }
+    if ks.type == "obsidian":
+        return {
+            "knowledge_store_type": "obsidian",
+            "vault_path": ks.obsidian.vault_path or None,
+            "daily_notes_folder": ks.obsidian.daily_notes_folder,
+            "tasks_folder": ks.obsidian.tasks_folder,
+        }
+    return None
 
 
 async def session_start(
     ctx: Context,
-    sync_svc: SyncService = Depends(get_sync_service),
-    notion: NotionClient = Depends(get_notion_client),
-    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
     t_repo: TaskRepository = Depends(get_task_repo),
+    n_repo: NoteRepository = Depends(get_note_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
-    closer: SessionCloser = Depends(get_session_closer),
-    synthesiser: CaptureSynthesiser = Depends(get_capture_synthesiser),
+    ts_repo: TaskStateRepository = Depends(get_task_state_repo),
+    session_closer: SessionCloser = Depends(get_session_closer),
+    capture_synthesiser: CaptureSynthesiser = Depends(get_capture_synthesiser),
 ) -> SessionStartResponse:
-    """Create a session, sync Jira/Notion, return open/blocked tasks + unsummarised meetings."""
+    """Create a session, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start")
     with get_session() as db:
-        session, daily_page = _init_session(db, notion)
-
-        sync_results = sync_svc.sync_all(db)
-        await ctx.report_progress(1, 1, "Sync complete.")
+        session = WizardSession()
+        db.add(session)
+        db.flush()
+        db.refresh(session)
+        if session.id is None:
+            raise ToolError("Internal error: session was not assigned an id after flush")
 
         await ctx.set_state("current_session_id", session.id)
         await ctx.info(f"Session {session.id} started.")
 
-        closed_sessions = await closer.close_abandoned(db, ctx, session.id)
+        closed_sessions = await session_closer.close_recent_abandoned(db, ctx, session.id)
 
         for cs_summary in closed_sessions:
             cs = db.get(WizardSession, cs_summary.session_id)
             if cs and cs.transcript_path:
                 try:
-                    await synthesiser.synthesise(db, ctx, cs)
+                    await capture_synthesiser.synthesise(db, ctx, cs)
                 except Exception as e:
                     logger.warning(
                         "Transcript synthesis failed for session %d: %s",
@@ -108,20 +104,28 @@ async def session_start(
                     )
 
         try:
-            t_state_repo.refresh_stale_days(db)
-        except sqlalchemy.exc.SQLAlchemyError as e:
+            ts_repo.refresh_stale_days(db)
+        except Exception as e:
             logger.warning("refresh_stale_days failed: %s", e)
 
-        return SessionStartResponse(
+        open_tasks_total = t_repo.count_open_tasks(db)
+        open_tasks = t_repo.get_open_task_contexts(db, limit=20)
+
+        response = SessionStartResponse(
             session_id=session.id,
-            open_tasks=t_repo.get_open_task_contexts(db),
+            open_tasks=open_tasks,
+            open_tasks_total=open_tasks_total,
             blocked_tasks=t_repo.get_blocked_task_contexts(db),
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
-            sync_results=sync_results,
-            daily_page=daily_page,
+            wizard_context=_build_wizard_context(),
             skill_instructions=load_skill(SKILL_SESSION_START),
             closed_sessions=closed_sessions,
         )
+
+    # Background task dispatched AFTER db context closes so it gets its own clean session
+    asyncio.create_task(session_closer.close_abandoned_background(response.session_id))
+
+    return response
 
 
 async def session_end(
@@ -137,10 +141,9 @@ async def session_end(
     tool_registry: str | None = None,
     sec: SecurityService = Depends(get_security),
     n_repo: NoteRepository = Depends(get_note_repo),
-    wb: WriteBackService = Depends(get_writeback),
     synthesiser: CaptureSynthesiser = Depends(get_capture_synthesiser),
 ) -> SessionEndResponse:
-    """Persists session summary + SessionState to WizardSession. Writes Notion daily page."""
+    """Persists session summary + SessionState to WizardSession."""
     logger.info("session_end session_id=%d", session_id)
     try:
         with get_session() as db:
@@ -183,8 +186,6 @@ async def session_end(
             if saved.id is None:
                 raise ToolError("Internal error: note was not assigned an id after flush")
 
-            wb_result = wb.push_session_summary(session)
-
             if session.transcript_path:
                 try:
                     await synthesiser.synthesise(db, ctx, session)
@@ -199,7 +200,6 @@ async def session_end(
 
             return SessionEndResponse(
                 note_id=saved.id,
-                notion_write_back=wb_result,
                 session_state_saved=session_state_saved,
                 closure_status=closure_status,
                 open_loops_count=len(open_loops),
@@ -265,13 +265,11 @@ def _group_prior_notes(
 async def resume_session(
     ctx: Context,
     session_id: int | None = None,
-    sync_svc: SyncService = Depends(get_sync_service),
-    notion: NotionClient = Depends(get_notion_client),
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
 ) -> ResumeSessionResponse:
-    """Resume a prior session in a new thread. Creates a new session and syncs."""
+    """Resume a prior session in a new thread. Creates a new session."""
     logger.info("resume_session session_id=%s", session_id)
     with get_session() as db:
         # Find prior session
@@ -288,10 +286,11 @@ async def resume_session(
             raise ToolError("Internal error: session was not assigned an id after flush")
 
         # Create new session
-        new_session, daily_page = _init_session(db, notion)
-
-        # Sync
-        sync_results = sync_svc.sync_all(db)
+        new_session = WizardSession()
+        db.add(new_session)
+        db.flush()
+        db.refresh(new_session)
+        await ctx.set_state("current_session_id", new_session.id)
 
         session_state, working_set_tasks = _deserialise_session_state(db, prior, t_repo)
 
@@ -304,8 +303,6 @@ async def resume_session(
             working_set_tasks=working_set_tasks,
             prior_notes=prior_notes,
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
-            sync_results=sync_results,
-            daily_page=daily_page,
             skill_instructions=load_skill(SKILL_SESSION_RESUME),
         )
 

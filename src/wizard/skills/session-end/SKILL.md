@@ -30,7 +30,6 @@ You are **closing a shift**. Your job: collect a structured summary of what happ
 > **`SessionEndResponse`** — returned:
 >
 > - `note_id: int` — the saved session summary note
-> - `notion_write_back: WriteBackStatus` — Notion daily page update result
 > - `session_state_saved: bool` — whether SessionState JSON was persisted
 > - `closure_status: str`, `open_loops_count: int`, `next_actions_count: int`
 > - `intent: str | None` — echoed back
@@ -137,12 +136,25 @@ Check the response fields. Render:
 > | Open loops | {open_loops_count} |
 > | Next actions | {next_actions_count} |
 > | Session state saved | {session_state_saved} |
-> | Notion write-back | {notion_write_back status} |
 > | Summary note | #{note_id} |
 
 If `session_state_saved == false`: warn the engineer — the next `resume_session` will not have structured state.
 
-If `notion_write_back` failed: warn the engineer — the daily page was not updated.
+### Step 7 — Push session summary to knowledge store (conditional)
+
+Read `wizard_context` from your session_start response (held in context).
+
+**If `knowledge_store_type = "notion"`:**
+Append the session summary to the Notion daily page.
+Use `daily_parent_id` from `wizard_context` to find or create today's page.
+Use Notion MCP to append the summary text.
+
+**If `knowledge_store_type = "obsidian"`:**
+Append the summary to today's daily note at:
+`vault_path/daily_notes_folder/YYYY-MM-DD.md`
+Use filesystem MCP or Obsidian MCP.
+
+**If `wizard_context` is null:** summary is saved locally only. No action needed.
 
 ---
 
@@ -192,5 +204,5 @@ Call immediately on confirmation. Do not belabour the process.
 - ⚠️ Do NOT pass `tool_registry = None` if you still have it — always pass the current version.
 - ⚠️ Do NOT call `session_end` with placeholder values like "TBD" or empty summary — every field should reflect actual session work.
 - ⚠️ Do NOT forget the PII warning — `open_loops` and `next_actions` are stored unscrubbed.
-- ⚠️ Do NOT ignore a failed `session_state_saved` or `notion_write_back` — these affect the next session. Warn the engineer.
+- ⚠️ Do NOT ignore a failed `session_state_saved` — it affects the next session. Warn the engineer.
 - ⚠️ Do NOT skip the Tool Registry parameter — it enables the next session to restore tool context.

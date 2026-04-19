@@ -9,7 +9,7 @@ from wizard.tools.task_tools import save_note
 
 @pytest.mark.asyncio
 async def test_concurrent_sessions(
-    db_session, fake_ctx, fake_sync, fake_notion, fake_writeback,
+    db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     seed_task, session_closer, capture_synthesiser,
 ):
@@ -18,20 +18,26 @@ async def test_concurrent_sessions(
     # Session A
     ctx_a = type(fake_ctx)()
     start_a = await session_start(
-        ctx=ctx_a, sync_svc=fake_sync, notion=fake_notion,
-        t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
-        closer=session_closer,
-        synthesiser=capture_synthesiser,
+        ctx=ctx_a,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+        capture_synthesiser=capture_synthesiser,
     )
     session_a_id = start_a.session_id
 
     # Session B (without ending A)
     ctx_b = type(fake_ctx)()
     start_b = await session_start(
-        ctx=ctx_b, sync_svc=fake_sync, notion=fake_notion,
-        t_state_repo=task_state_repo, t_repo=task_repo, m_repo=meeting_repo,
-        closer=session_closer,
-        synthesiser=capture_synthesiser,
+        ctx=ctx_b,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+        capture_synthesiser=capture_synthesiser,
     )
     session_b_id = start_b.session_id
     assert session_b_id != session_a_id
@@ -56,7 +62,7 @@ async def test_concurrent_sessions(
         working_set=[task.id], state_delta="B done",
         open_loops=[], next_actions=[],
         closure_status="clean",
-        sec=security, n_repo=note_repo, wb=fake_writeback,
+        sec=security, n_repo=note_repo,
         synthesiser=capture_synthesiser,
     )
 
@@ -67,6 +73,6 @@ async def test_concurrent_sessions(
         working_set=[], state_delta="nothing",
         open_loops=[], next_actions=[],
         closure_status="clean",
-        sec=security, n_repo=note_repo, wb=fake_writeback,
+        sec=security, n_repo=note_repo,
         synthesiser=capture_synthesiser,
     )
