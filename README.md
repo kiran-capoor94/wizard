@@ -47,6 +47,11 @@ grounded across work sessions.
    and Wizard synthesises the agent's conversation transcript into structured
    notes (investigation, decision, docs, learnings) via `CaptureSynthesiser`.
    No manual `save_note` calls required.
+4. **Session personalization** — A `SessionStart` hook refreshes
+   `~/.claude/settings.json` in 80% of sessions with Wizard-aware content:
+   task-signal announcements, rotating spinner verbs, sampled tips, and a
+   live status line. It also auto-injects the `wizard:session-start` skill
+   so sessions boot without manual invocation.
 4. **Work triage** — `what_should_i_work_on` scores your open tasks by
    priority, recency, and momentum in three modes: `focus` (weighted toward
    high-priority active work), `quick-wins` (simplicity-weighted), and
@@ -274,7 +279,8 @@ src/wizard/
   agent_registration.py      # Register MCP + hooks in agent configs
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ on setup)
 hooks/
-  session-end.sh             # Claude Code SessionEnd hook script
+  session-end.sh             # Claude Code SessionEnd hook — transcript synthesis trigger
+  session-start.sh           # Claude Code SessionStart hook — personalization + session boot injection
 ```
 
 ## License
