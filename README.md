@@ -5,12 +5,14 @@
 [![Built with FastMCP](https://img.shields.io/badge/built%20with-FastMCP-purple)](https://github.com/jlowin/fastmcp)
 [![SQLite](https://img.shields.io/badge/database-SQLite-lightblue)](https://www.sqlite.org/)
 
-_A local memory layer for AI agents. Syncs Jira and Notion, scrubs PII,
-and surfaces structured context across sessions._
+_A local memory layer for AI agents — persistent context across sessions,
+compounding knowledge over time, and on-demand work triage._
 
 AI coding agents forget everything between sessions. Wizard gives them
-persistent memory — tasks, meetings, notes, and decisions — synced from
-the tools you already use, with PII scrubbed before anything touches disk.
+persistent memory — tasks, notes, meetings, and decisions that accumulate
+and compound over time. It also tells them what to work on next, scoring
+open tasks by priority, momentum, and recency across three modes: focus,
+quick-wins, and unblock.
 
 ## Quick Start
 
@@ -25,9 +27,8 @@ uv run wizard setup --agent claude-code
 
 `wizard setup` creates `~/.wizard/`, scaffolds `config.json`, installs
 skills, registers the MCP server with your chosen agent, and installs
-the auto-capture hook for automatic note generation.
-
-See [Configuration](#configuration) for Jira and Notion setup.
+the auto-capture hook. For optional write-back to Notion or Obsidian,
+run `uv run wizard configure knowledge-store` after setup.
 
 ## How It Works
 
