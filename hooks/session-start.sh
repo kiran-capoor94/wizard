@@ -15,7 +15,7 @@ import json
 import random
 import sqlite3
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 settings_path = Path(sys.argv[1])
@@ -32,7 +32,7 @@ except (json.JSONDecodeError, ValueError):
 # ── Query task signals ────────────────────────────────────────────────────────
 try:
     conn = sqlite3.connect(str(db_path))
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(UTC).isoformat()
 
     overdue_row = conn.execute(
         "SELECT COUNT(*), MIN(name) FROM task "
@@ -45,13 +45,14 @@ try:
         "SELECT COUNT(*), t.name, ts.note_count "
         "FROM task t JOIN task_state ts ON t.id = ts.task_id "
         "WHERE ts.note_count > 3 AND ts.decision_count = 0 "
+        "AND t.status NOT IN ('done', 'archived') "
         "LIMIT 1",
     ).fetchone()
 
     stale_row = conn.execute(
         "SELECT MAX(ts.stale_days), t.name "
         "FROM task t JOIN task_state ts ON t.id = ts.task_id "
-        "WHERE ts.stale_days > 14",
+        "WHERE ts.stale_days > 14 AND t.status NOT IN ('done', 'archived')",
     ).fetchone()
 
     open_count = conn.execute(
