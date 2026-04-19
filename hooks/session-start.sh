@@ -65,7 +65,6 @@ except Exception:
 
 # ── Pick announcement (first matching signal wins) ────────────────────────────
 overdue_count = overdue_row[0] or 0
-overdue_name = overdue_row[1] or ""
 loop_count = loop_row[0] or 0
 loop_name = loop_row[1] or ""
 loop_notes = loop_row[2] or 0
