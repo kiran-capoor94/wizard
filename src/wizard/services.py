@@ -1,7 +1,7 @@
 import logging
 
 from fastmcp import Context
-from sqlmodel import Session, select
+from sqlmodel import Session, or_, select
 
 from .models import Note, NoteType, WizardSession
 from .repositories import NoteRepository
@@ -37,7 +37,10 @@ class SessionCloser:
             select(WizardSession)
             .where(
                 WizardSession.summary == None,  # noqa: E711
-                WizardSession.closed_by == None,  # noqa: E711
+                or_(
+                    WizardSession.closed_by == None,  # noqa: E711
+                    WizardSession.closed_by == "hook",
+                ),
                 WizardSession.id != current_session_id,
             )
             .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
@@ -64,7 +67,8 @@ class SessionCloser:
         clean_summary = self._security.scrub(summary_text).clean
         session.summary = clean_summary
         session.session_state = state.model_dump_json()
-        session.closed_by = "auto"
+        if session.closed_by is None:
+            session.closed_by = "auto"
         db.add(session)
         db.flush()
         note = Note(
