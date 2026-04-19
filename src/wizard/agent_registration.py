@@ -259,10 +259,10 @@ def register_hook(agent_id: str) -> bool:
 
     for event, script in _HOOK_SCRIPTS[agent_id].items():
         event_hooks = hooks.setdefault(event, [])
-        stem = script.stem  # e.g. "session-end" or "session-start"
+        name = script.name  # e.g. "session-end.sh" or "session-start.sh"
 
         already = any(
-            stem in h.get("command", "")
+            name in h.get("command", "")
             for entry in event_hooks
             for h in entry.get("hooks", [])
         )
@@ -304,12 +304,12 @@ def deregister_hook(agent_id: str) -> bool:
     removed_any = False
 
     for event, script in _HOOK_SCRIPTS[agent_id].items():
-        stem = script.stem
+        name = script.name  # e.g. "session-end.sh" or "session-start.sh"
         event_hooks = hooks.get(event, [])
         filtered = [
             entry
             for entry in event_hooks
-            if not any(stem in h.get("command", "") for h in entry.get("hooks", []))
+            if not any(name in h.get("command", "") for h in entry.get("hooks", []))
         ]
         if len(filtered) < len(event_hooks):
             hooks[event] = filtered
