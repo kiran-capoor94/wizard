@@ -7,7 +7,7 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from pydantic import ValidationError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from ..config import settings
 from ..database import get_session
@@ -47,8 +47,7 @@ from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_STAR
 
 logger = logging.getLogger(__name__)
 
-_SESSION_ID_FILE = Path.home() / ".wizard" / "current_session_id"
-_AGENT_SESSION_ID_FILE = Path.home() / ".wizard" / "pending_agent_session_id"
+SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
 
 
 def _build_wizard_context() -> dict | None:
@@ -70,8 +69,18 @@ def _build_wizard_context() -> dict | None:
     return None
 
 
+def _find_previous_session_id() -> int | None:
+    """Return the most recently created WizardSession id, or None if none exists."""
+    with get_session() as db:
+        result = db.execute(
+            select(WizardSession.id).order_by(WizardSession.created_at.desc()).limit(1)
+        ).scalar()
+        return result
+
+
 async def session_start(
     ctx: Context,
+    agent_session_id: str | None = None,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
@@ -79,24 +88,19 @@ async def session_start(
     session_closer: SessionCloser = Depends(get_session_closer),
 ) -> SessionStartResponse:
     """Create a session, return open/blocked tasks + unsummarised meetings."""
-    logger.info("session_start")
+    logger.info("session_start agent_session_id=%s", agent_session_id)
 
-    # Detect continuation: if the session ID file exists, the previous session
-    # was not cleanly ended (compaction, crash, or abandon).
+    # Read session source from hook-written keyed directory.
+    source = "startup"
+    if agent_session_id:
+        source_file = SESSIONS_DIR / agent_session_id / "source"
+        if source_file.exists():
+            source = source_file.read_text().strip() or "startup"
+
+    # Compaction: link to the session that was compacted.
     continued_from_id: int | None = None
-    if _SESSION_ID_FILE.exists():
-        raw = _SESSION_ID_FILE.read_text().strip()
-        if raw.isdigit():
-            continued_from_id = int(raw)
-            logger.info("session_start: continuing from wizard session %s", continued_from_id)
-        else:
-            logger.warning("session_start: _SESSION_ID_FILE contained non-digit %r, ignoring", raw)
-
-    # Read agent session UUID written by the SessionStart hook (best-effort).
-    agent_session_id: str | None = None
-    if _AGENT_SESSION_ID_FILE.exists():
-        agent_session_id = _AGENT_SESSION_ID_FILE.read_text().strip() or None
-        _AGENT_SESSION_ID_FILE.unlink(missing_ok=True)
+    if source == "compact":
+        continued_from_id = _find_previous_session_id()
 
     with get_session() as db:
         session = WizardSession(
@@ -110,8 +114,13 @@ async def session_start(
             raise ToolError("Internal error: session was not assigned an id after flush")
 
         await ctx.set_state("current_session_id", session.id)
-        _SESSION_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SESSION_ID_FILE.write_text(str(session.id))
+
+        # Write wizard integer ID to the agent-session keyed directory.
+        if agent_session_id:
+            keyed_dir = SESSIONS_DIR / agent_session_id
+            keyed_dir.mkdir(parents=True, exist_ok=True)
+            (keyed_dir / "wizard_id").write_text(str(session.id))
+
         await ctx.info(f"Session {session.id} started.")
 
         closed_sessions = await session_closer.close_recent_abandoned(db, ctx, session.id)
@@ -127,6 +136,7 @@ async def session_start(
         response = SessionStartResponse(
             session_id=session.id,
             continued_from_id=continued_from_id,
+            source=source,
             open_tasks=open_tasks,
             open_tasks_total=open_tasks_total,
             blocked_tasks=t_repo.get_blocked_task_contexts(db),
@@ -200,7 +210,6 @@ async def session_end(
                 raise ToolError("Internal error: note was not assigned an id after flush")
 
             await ctx.delete_state("current_session_id")
-            _SESSION_ID_FILE.unlink(missing_ok=True)
             await ctx.info(
                 f"Session {session.id} closed. Status: {closure_status}. "
                 f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
@@ -293,23 +302,14 @@ async def resume_session(
         if prior.id is None:
             raise ToolError("Internal error: session was not assigned an id after flush")
 
-        # Read agent session UUID written by the SessionStart hook (best-effort).
-        agent_session_id: str | None = None
-        if _AGENT_SESSION_ID_FILE.exists():
-            agent_session_id = _AGENT_SESSION_ID_FILE.read_text().strip() or None
-            _AGENT_SESSION_ID_FILE.unlink(missing_ok=True)
-
         # Resumed sessions explicitly continue from the source session.
         new_session = WizardSession(
-            agent_session_id=agent_session_id,
             continued_from_id=prior.id,
         )
         db.add(new_session)
         db.flush()
         db.refresh(new_session)
         await ctx.set_state("current_session_id", new_session.id)
-        _SESSION_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SESSION_ID_FILE.write_text(str(new_session.id))
 
         session_state, working_set_tasks = _deserialise_session_state(db, prior, t_repo)
 

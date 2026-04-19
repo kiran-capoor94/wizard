@@ -1,5 +1,7 @@
 """Scenario: full session lifecycle -- start, task_start, save_note, end."""
 
+from unittest.mock import patch
+
 import pytest
 
 from wizard.models import NoteType
@@ -27,6 +29,7 @@ async def test_session_lifecycle(
     )
     assert start_resp.session_id is not None
     assert isinstance(start_resp.open_tasks, list)
+    assert start_resp.source == "startup"
     session_id = start_resp.session_id
 
     # 2. task_start
@@ -89,3 +92,31 @@ async def test_session_lifecycle(
     assert end_resp.note_id is not None
     assert end_resp.session_state_saved is True
     assert end_resp.closure_status == "clean"
+
+
+@pytest.mark.asyncio
+async def test_session_start_writes_wizard_id_to_keyed_dir(
+    tmp_path, db_session, fake_ctx,
+    task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
+):
+    """session_start must write wizard_id to SESSIONS_DIR/<uuid>/wizard_id."""
+    uuid = "test-uuid-abc123"
+    sessions_dir = tmp_path / "sessions"
+    (sessions_dir / uuid).mkdir(parents=True)
+    (sessions_dir / uuid / "source").write_text("startup")
+
+    with patch("wizard.tools.session_tools.SESSIONS_DIR", sessions_dir):
+        resp = await session_start(
+            ctx=fake_ctx,
+            agent_session_id=uuid,
+            t_repo=task_repo,
+            n_repo=note_repo,
+            m_repo=meeting_repo,
+            ts_repo=task_state_repo,
+            session_closer=session_closer,
+        )
+
+    wizard_id_file = sessions_dir / uuid / "wizard_id"
+    assert wizard_id_file.exists()
+    assert wizard_id_file.read_text().strip() == str(resp.session_id)
+    assert resp.source == "startup"
