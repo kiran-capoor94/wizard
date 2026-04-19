@@ -221,14 +221,13 @@ Override the config path with the `WIZARD_CONFIG_FILE` environment variable.
 ## CLI
 
 ```bash
-uv run wizard setup [--agent AGENT]  # Initialize ~/.wizard/, config, skills, MCP + hook registration
-uv run wizard configure --notion     # Auto-discover Notion schema
-uv run wizard sync                   # Manual sync from Jira/Notion
-uv run wizard doctor [--all]         # Health check — config, database, integrations, skills
-uv run wizard analytics [--week]     # Session/task/note usage stats
-uv run wizard update                 # Pull latest, sync deps, migrate DB, re-register agents + hooks
-uv run wizard uninstall [--yes]      # Clean removal of all state, MCP, and hook registration
-uv run wizard capture --close        # (Called by hooks) Mark session for transcript synthesis
+uv run wizard setup [--agent AGENT]         # Initialize ~/.wizard/, config, skills, MCP + hook registration
+uv run wizard configure knowledge-store     # Configure optional Notion/Obsidian write-back
+uv run wizard doctor [--all]                # Health check — config, database, skills, migrations
+uv run wizard analytics [--week]            # Session/task/note usage stats
+uv run wizard update                        # Pull latest, sync deps, migrate DB, re-register agents + hooks
+uv run wizard uninstall [--yes]             # Clean removal of all state, MCP, and hook registration
+uv run wizard capture --close               # (Called by hooks) Mark session for transcript synthesis
 ```
 
 **Supported agents for `--agent`:** `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `all`
@@ -247,31 +246,33 @@ uv run alembic upgrade head    # Run migrations
 server.py                    # FastMCP server entry point (stdio)
 src/wizard/
   cli/
-    main.py                  # Typer CLI (setup, configure, sync, doctor, analytics, update, uninstall, capture)
-    doctor.py                # 10-point health checks
+    main.py                  # Typer CLI (setup, configure, doctor, analytics, update, uninstall, capture)
+    configure.py             # configure knowledge-store subcommand
+    doctor.py                # 8-point health checks
     analytics.py             # Session/note/task analytics
   mcp_instance.py            # FastMCP app factory + ToolLoggingMiddleware
+  skills.py                  # Skill loader (reads ~/.wizard/skills/)
   tools/                     # MCP tools (split by domain)
     session_tools.py         # session_start, session_end, resume_session
     task_tools.py            # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
+    task_helpers.py          # Shared helpers for task tools
+    triage_tools.py          # what_should_i_work_on (mode-based scoring + LLM reasons)
     meeting_tools.py         # get_meeting, save_meeting_summary, ingest_meeting
+    query_tools.py           # get_tasks, get_task, get_sessions, get_session (paginated)
   resources.py               # 5 MCP read-only resources
   prompts.py                 # MCP prompt templates
-  middleware.py              # ToolLoggingMiddleware + SessionStateMiddleware
+  middleware.py              # ToolLoggingMiddleware
   transcript.py              # TranscriptReader + CaptureSynthesiser (auto-capture)
   models.py                  # SQLModel entities (task, note, meeting, wizardsession, toolcall, task_state)
   schemas.py                 # Pydantic response schemas
   repositories.py            # Query layer
-  services.py                # SyncService + WriteBackService + SessionCloser
-  integrations.py            # JiraClient + NotionClient (Notion SDK v3.0)
-  notion_discovery.py        # 3-pass Notion property auto-matching
+  services.py                # SessionCloser
   security.py                # PII scrubbing (regex + allowlist)
   config.py                  # Pydantic settings + JsonConfigSettingsSource
-  mappers.py                 # External-to-internal data mapping
   database.py                # SQLite connection management
   deps.py                    # FastMCP Depends() provider functions
   agent_registration.py      # Register MCP + hooks in agent configs
-  skills/                    # FastMCP skills (installed to ~/.wizard/skills/ on setup)
+  skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ on setup)
 hooks/
   session-end.sh             # Claude Code SessionEnd hook script
 ```
