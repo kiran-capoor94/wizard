@@ -129,7 +129,65 @@ class TranscriptReader:
         return entries
 
     def _read_codex(self, path: Path) -> list[TranscriptEntry]:
-        raise NotImplementedError("Codex transcript parser not yet implemented")
+        entries: list[TranscriptEntry] = []
+        with path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                timestamp = raw.get("timestamp")
+                if raw.get("type") != "response_item":
+                    continue
+
+                payload = raw.get("payload", {})
+                payload_type = payload.get("type")
+                if payload_type == "message":
+                    role = payload.get("role")
+                    if role not in {"user", "assistant"}:
+                        continue
+                    entries.extend(
+                        self._parse_codex_message(
+                            payload.get("content", []),
+                            role,
+                            timestamp,
+                        )
+                    )
+                elif payload_type == "function_call":
+                    entries.append(TranscriptEntry(
+                        role="tool_call",
+                        content=payload.get("arguments", ""),
+                        tool_name=payload.get("name"),
+                        timestamp=timestamp,
+                    ))
+                elif payload_type == "function_call_output":
+                    entries.append(TranscriptEntry(
+                        role="tool_result",
+                        content=str(payload.get("output", "")),
+                        timestamp=timestamp,
+                    ))
+        return entries
+
+    def _parse_codex_message(
+        self, content: list, role: str, timestamp: str | None,
+    ) -> list[TranscriptEntry]:
+        entries: list[TranscriptEntry] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type", "")
+            text = block.get("text")
+            if block_type in {"input_text", "output_text", "text"} and isinstance(text, str):
+                entries.append(TranscriptEntry(
+                    role=role,
+                    content=text,
+                    timestamp=timestamp,
+                ))
+        return entries
 
     def _read_gemini(self, path: Path) -> list[TranscriptEntry]:
         raise NotImplementedError("Gemini transcript parser not yet implemented")
@@ -156,13 +214,19 @@ class OllamaSynthesiser:
         self._note_repo = note_repo
         self._security = security
 
-    def synthesise(self, db: Session, wizard_session: WizardSession) -> SynthesisResult:
-        if not wizard_session.transcript_path or not wizard_session.agent:
+    def synthesise_path(
+        self,
+        db: Session,
+        wizard_session: WizardSession,
+        transcript_path: Path,
+    ) -> SynthesisResult:
+        """Synthesise a specific transcript file into notes. Core implementation."""
+        if not wizard_session.agent:
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
             )
         try:
-            entries = self._reader.read(wizard_session.transcript_path, wizard_session.agent)
+            entries = self._reader.read(str(transcript_path), wizard_session.agent)
         except (FileNotFoundError, NotImplementedError, ValueError) as e:
             logger.warning("OllamaSynthesiser: cannot read transcript: %s", e)
             return SynthesisResult(notes_created=0, task_ids_touched=[], synthesised_via="fallback")
@@ -186,6 +250,14 @@ class OllamaSynthesiser:
         return SynthesisResult(
             notes_created=saved, task_ids_touched=[], synthesised_via="ollama",
         )
+
+    def synthesise(self, db: Session, wizard_session: WizardSession) -> SynthesisResult:
+        """Synthesise session.transcript_path. Delegates to synthesise_path."""
+        if not wizard_session.transcript_path:
+            return SynthesisResult(
+                notes_created=0, task_ids_touched=[], synthesised_via="fallback",
+            )
+        return self.synthesise_path(db, wizard_session, Path(wizard_session.transcript_path))
 
     def _call_ollama(self, entries: list[TranscriptEntry]) -> list[SynthesisNote]:
         client = ollama.Client(host=settings.synthesis.base_url)
