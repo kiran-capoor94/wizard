@@ -230,3 +230,22 @@ async def test_session_start_sets_agent_claude_code(
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+@pytest.mark.asyncio
+async def test_session_start_without_agent_session_id_leaves_agent_none(
+    db_session, fake_ctx,
+    task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
+):
+    """session_start without agent_session_id must not stamp agent='claude-code'."""
+    response = await session_start(
+        ctx=fake_ctx,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+    )
+    session = db_session.get(WizardSession, response.session_id)
+    assert session is not None
+    assert session.agent is None

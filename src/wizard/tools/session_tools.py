@@ -204,7 +204,7 @@ async def session_start(
         session = WizardSession(
             continued_from_id=continued_from_id,
             agent_session_id=agent_session_id,
-            agent="claude-code",
+            agent="claude-code" if agent_session_id else None,
         )
         db.add(session)
         db.flush()
