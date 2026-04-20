@@ -46,7 +46,11 @@ def read_new_lines(path: Path, skip: int) -> list[str]:
     while the transcript is actively being written. The dropped line is picked
     up on the next poll once the following line has been written.
     """
-    lines = path.read_text(encoding="utf-8").splitlines()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as e:
+        logger.debug("read_new_lines: failed to read %s: %s", path, e)
+        return []
     new = lines[skip:]
     return new[:-1] if len(new) > 1 else []
 
@@ -346,14 +350,37 @@ class OllamaSynthesiser:
         raw = response.message.content
         return [SynthesisNote.model_validate(item) for item in json.loads(raw)]
 
+    # ~50k tokens of content budget; leaves headroom for system prompt + generation.
+    # Rough estimate: 4 chars/token → 200k chars ≈ 50k tokens.
+    _MAX_PROMPT_CHARS = 200_000
+
     def _build_prompt(self, entries: list[TranscriptEntry], task_table: str = "") -> str:
         lines = ["Session transcript (chronological):\n"]
+
+        # Build entry lines, truncating each to 2000 chars.
+        entry_lines = []
         for e in entries:
             prefix = e.role.upper()
             if e.tool_name:
                 prefix = f"{prefix} [{e.tool_name}]"
             content = e.content[:2000] if len(e.content) > 2000 else e.content
-            lines.append(f"  {prefix}: {content}")
+            entry_lines.append(f"  {prefix}: {content}")
+
+        # Keep the tail of the transcript within budget — recent work is more
+        # valuable than early setup. Walk backwards and stop when full.
+        budget = self._MAX_PROMPT_CHARS
+        kept: list[str] = []
+        for line in reversed(entry_lines):
+            if budget <= 0:
+                break
+            kept.append(line)
+            budget -= len(line)
+        kept.reverse()
+
+        dropped = len(entry_lines) - len(kept)
+        if dropped:
+            lines.append(f"  [... {dropped} earlier entries omitted to fit context window ...]")
+        lines.extend(kept)
         if task_table:
             lines.append(
                 f"\nAvailable tasks (id<TAB>name):\n{task_table}\n\n"
