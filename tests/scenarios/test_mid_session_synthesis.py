@@ -7,9 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
+from wizard.mid_session import MID_SESSION_TASKS
 from wizard.models import WizardSession
 from wizard.schemas import SynthesisResult
-from wizard.tools.session_tools import MID_SESSION_TASKS, session_end, session_start
+from wizard.tools.session_tools import session_end, session_start
 from wizard.transcript import (
     OllamaSynthesiser,
     TranscriptReader,
@@ -168,7 +169,7 @@ async def test_auto_close_cancels_mid_session_task(
     agent_id = "aaaabbbb-cccc-dddd-eeee-000000000001"
 
     # Session 1: start with agent_session_id — registers a task in MID_SESSION_TASKS
-    await session_start(
+    start1 = await session_start(
         ctx=fake_ctx,
         agent_session_id=agent_id,
         t_repo=task_repo,
@@ -178,6 +179,7 @@ async def test_auto_close_cancels_mid_session_task(
         session_closer=session_closer,
     )
     assert agent_id in MID_SESSION_TASKS
+    start1_session_id = start1.session_id
 
     # Session 2: new start without ending session 1 — triggers auto-close of session 1
     fresh_ctx = type(fake_ctx)()
@@ -193,3 +195,9 @@ async def test_auto_close_cancels_mid_session_task(
 
     # Mid-session task for the abandoned session must have been cleaned up
     assert agent_id not in MID_SESSION_TASKS
+
+    # The abandoned session must have been auto-closed by SessionCloser
+    session1 = db_session.get(WizardSession, start1_session_id)
+    assert session1 is not None
+    db_session.refresh(session1)
+    assert session1.closed_by == "auto"
