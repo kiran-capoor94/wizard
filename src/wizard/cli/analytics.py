@@ -215,7 +215,9 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
         health_messages.append(
             "  Most sessions are abandoned — call session_end before closing"
         )
-    if tasks.get("worked", 0) > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5:
+    # Default 2.0 is above the 1.5 threshold so missing data suppresses nudge.
+    low_note_density = tasks.get("worked", 0) > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5
+    if low_note_density:
         health_messages.append(
             "  Low note density — investigation and decision notes build compounding"
         )
