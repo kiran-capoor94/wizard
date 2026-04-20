@@ -21,14 +21,18 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
 
     total_tool_calls = len(calls)
 
-    starts = {
-        c.session_id: c.called_at
-        for c in calls if c.tool_name == "session_start" and c.session_id
-    }
-    ends = {
-        c.session_id: c.called_at
-        for c in calls if c.tool_name == "session_end" and c.session_id
-    }
+    # Keep earliest session_start and latest session_end per session to ensure
+    # duration is always non-negative and spans the true wall-clock window.
+    starts: dict[int, datetime.datetime] = {}
+    ends: dict[int, datetime.datetime] = {}
+    for c in calls:
+        if c.tool_name == "session_start" and c.session_id:
+            if c.session_id not in starts or c.called_at < starts[c.session_id]:
+                starts[c.session_id] = c.called_at
+        elif c.tool_name == "session_end" and c.session_id and (
+            c.session_id not in ends or c.called_at > ends[c.session_id]
+        ):
+            ends[c.session_id] = c.called_at
 
     session_count = len(starts)
 
@@ -39,15 +43,15 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
             delta = (ends[sid] - start_time).total_seconds() / 60
             durations.append(delta)
 
-    # Query WizardSession for abandoned metrics and their durations
-    sessions_in_range = db.exec(
+    # Query WizardSession records for the same sessions counted in session_count
+    # so that abandoned_count / session_count is a coherent rate.
+    sessions_by_id = db.exec(
         select(WizardSession).where(
-            WizardSession.created_at >= start_dt,
-            WizardSession.created_at <= end_dt,
+            WizardSession.id.in_(list(starts.keys()))
         )
     ).all()
 
-    abandoned = [s for s in sessions_in_range if s.closed_by == "auto"]
+    abandoned = [s for s in sessions_by_id if s.closed_by == "auto"]
     abandoned_count = len(abandoned)
 
     for s in abandoned:
@@ -158,18 +162,34 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
     if not session_starts:
         return 0.0
 
-    earliest_session_start = min(tc.called_at for tc in session_starts)
+    # Build earliest session_start time per session (same min logic as query_sessions).
+    session_start_times: dict[int, datetime.datetime] = {}
+    for tc in session_starts:
+        if tc.session_id and (
+            tc.session_id not in session_start_times
+            or tc.called_at < session_start_times[tc.session_id]
+        ):
+            session_start_times[tc.session_id] = tc.called_at
 
-    prior_context_exists = (
-        db.exec(select(Note).where(Note.created_at < earliest_session_start)).first()
-        is not None
-    )
+    # For each session that had a task_start call, check whether any note existed
+    # before that session began. ToolCall has no task_id, so we use the session
+    # as the prior-context boundary.
+    task_start_session_ids = {tc.session_id for tc in task_starts if tc.session_id}
 
-    if not prior_context_exists:
-        return 0.0
+    sessions_with_prior_notes: set[int] = set()
+    for sid in task_start_session_ids:
+        if sid not in session_start_times:
+            continue
+        has_prior = (
+            db.exec(
+                select(Note).where(Note.created_at < session_start_times[sid]).limit(1)
+            ).first()
+            is not None
+        )
+        if has_prior:
+            sessions_with_prior_notes.add(sid)
 
-    compounding_count = sum(1 for tc in task_starts if tc.session_id is not None)
-    return round(compounding_count / len(task_starts), 2)
+    return round(len(sessions_with_prior_notes) / len(task_start_session_ids), 2)
 
 
 def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
@@ -209,7 +229,7 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
         f"  Stale tasks (>3d):    {tasks.get('stale_count', 0)}",
         "",
         "Compounding",
-        f"  Ratio:                {compounding:.0%}",
+        f"  Sessions with context:{compounding:.0%}",
         "",
     ]
     return "\n".join(lines)
