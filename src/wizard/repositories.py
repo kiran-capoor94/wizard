@@ -102,6 +102,16 @@ class TaskRepository:
         )
         return db.execute(stmt).scalar_one()
 
+    def get_open_tasks_compact(self, db: Session, limit: int = 40) -> list[tuple[int, str]]:
+        """Return (id, name) pairs for open tasks. Used by synthesis for task matching."""
+        stmt = (
+            select(Task.id, Task.name)
+            .where(col(Task.status).in_([TaskStatus.TODO, TaskStatus.IN_PROGRESS]))
+            .order_by(_PRIORITY_ORDER)
+            .limit(limit)
+        )
+        return [(row[0], row[1]) for row in db.execute(stmt).all()]
+
     def _query_task_contexts(
         self, db: Session, *where, limit: int | None = None
     ) -> list[TaskContext]:
