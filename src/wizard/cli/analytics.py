@@ -149,15 +149,20 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
         if s.id is not None
     }
 
+    # Proxy: "at least one note existed anywhere in the DB before this session started."
+    # This is intentional per spec — not task-specific. On a DB with any historical
+    # notes, sessions that started after those notes will count. The metric answers
+    # "did you have accumulated context when you started?" not "were those notes
+    # about the specific task you worked on?"
     earliest_note_dt = db.exec(select(func.min(Note.created_at))).one_or_none()
 
-    sessions_with_prior_notes = {
+    sessions_with_any_prior_notes = {
         sid
         for sid, session in sessions_map.items()
         if earliest_note_dt is not None and earliest_note_dt < session.created_at
     }
 
-    return round(len(sessions_with_prior_notes) / len(task_start_session_ids), 2)
+    return round(len(sessions_with_any_prior_notes) / len(task_start_session_ids), 2)
 
 
 def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
