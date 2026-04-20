@@ -8,6 +8,7 @@ set -euo pipefail
 INPUT=$(cat)
 SETTINGS="$HOME/.claude/settings.json"
 DB="$HOME/.wizard/wizard.db"
+LOG_FILE="$HOME/.wizard/session-start.log"
 
 # ── Sub-agent suppression ─────────────────────────────────────────────────────
 # Claude Code fires SessionStart for sub-agents too. agent_id is only present
@@ -24,9 +25,11 @@ if [ -n "$AGENT_UUID" ]; then
     printf '%s' "$SOURCE" > "$HOME/.wizard/sessions/$AGENT_UUID/source"
 fi
 
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] session-start: uuid=${AGENT_UUID:-none} source=${SOURCE}" >> "$LOG_FILE"
+
 # ── Step 1: Personalization refresh (80% gate) ────────────────────────────────
 if [ $((RANDOM % 10)) -lt 8 ]; then
-    python3 - "$SETTINGS" "$DB" <<'PYEOF' 2>/dev/null || true
+    python3 - "$SETTINGS" "$DB" >> "$LOG_FILE" 2>&1 <<'PYEOF' || true
 import json
 import random
 import sqlite3
@@ -36,16 +39,20 @@ from pathlib import Path
 
 settings_path = Path(sys.argv[1])
 db_path = Path(sys.argv[2])
+tag = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} personalization]"
 
 if not settings_path.exists() or not db_path.exists():
+    print(f"{tag} SKIP: settings_exists={settings_path.exists()} db_exists={db_path.exists()}", flush=True)
     sys.exit(0)
 
 try:
     data = json.loads(settings_path.read_text())
-except (json.JSONDecodeError, ValueError):
+except (json.JSONDecodeError, ValueError) as e:
+    print(f"{tag} SKIP: settings.json parse error: {e}", flush=True)
     sys.exit(0)
 
 # ── Query task signals ────────────────────────────────────────────────────────
+# Use LOWER(status) so queries work regardless of case stored in the DB.
 try:
     conn = sqlite3.connect(str(db_path))
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -53,7 +60,7 @@ try:
     overdue_row = conn.execute(
         "SELECT COUNT(*), MIN(name) FROM task "
         "WHERE due_date IS NOT NULL AND due_date < ? "
-        "AND status NOT IN ('done', 'archived')",
+        "AND LOWER(status) NOT IN ('done', 'archived')",
         (now,),
     ).fetchone()
 
@@ -61,22 +68,23 @@ try:
         "SELECT COUNT(*), t.name, ts.note_count "
         "FROM task t JOIN task_state ts ON t.id = ts.task_id "
         "WHERE ts.note_count > 3 AND ts.decision_count = 0 "
-        "AND t.status NOT IN ('done', 'archived') "
+        "AND LOWER(t.status) NOT IN ('done', 'archived') "
         "LIMIT 1",
     ).fetchone()
 
     stale_row = conn.execute(
         "SELECT MAX(ts.stale_days), t.name "
         "FROM task t JOIN task_state ts ON t.id = ts.task_id "
-        "WHERE ts.stale_days > 14 AND t.status NOT IN ('done', 'archived')",
+        "WHERE ts.stale_days > 14 AND LOWER(t.status) NOT IN ('done', 'archived')",
     ).fetchone()
 
     open_count = conn.execute(
-        "SELECT COUNT(*) FROM task WHERE status IN ('todo', 'in_progress', 'blocked')",
+        "SELECT COUNT(*) FROM task WHERE LOWER(status) IN ('todo', 'in_progress', 'blocked')",
     ).fetchone()[0]
 
     conn.close()
-except Exception:
+except Exception as e:
+    print(f"{tag} ERROR: db query failed: {e}", flush=True)
     sys.exit(0)
 
 # ── Pick announcement (first matching signal wins) ────────────────────────────
@@ -86,6 +94,8 @@ loop_name = loop_row[1] or ""
 loop_notes = loop_row[2] or 0
 stale_days = stale_row[0] or 0
 stale_name = stale_row[1] or ""
+
+print(f"{tag} signals: overdue={overdue_count} loop={loop_count} stale_days={stale_days} open={open_count}", flush=True)
 
 if overdue_count:
     msg = (
@@ -135,12 +145,13 @@ data["spinnerTipsOverride"] = {"tips": tips, "excludeDefault": True}
 if "statusLine" not in data:
     status_cmd = (
         "sqlite3 ~/.wizard/wizard.db "
-        "\"SELECT COUNT(*) FROM task WHERE status IN ('todo','in_progress','blocked')\" "
+        "\"SELECT COUNT(*) FROM task WHERE LOWER(status) IN ('todo','in_progress','blocked')\" "
         "2>/dev/null | awk '{print \"\U0001F9D9 \" $1 \" tasks | \" ENVIRON[\"MODEL_NAME\"]}'"
     )
     data["statusLine"] = {"type": "command", "command": status_cmd}
 
 settings_path.write_text(json.dumps(data, indent=2))
+print(f"{tag} OK: announcement='{msg[:80]}' verbs={verbs}", flush=True)
 PYEOF
 fi
 

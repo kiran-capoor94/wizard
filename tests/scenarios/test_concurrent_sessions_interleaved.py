@@ -2,7 +2,8 @@
 
 import pytest
 
-from wizard.models import Note, NoteType
+from wizard.models import NoteType
+from wizard.tools.query_tools import get_session
 from wizard.tools.session_tools import session_end, session_start
 from wizard.tools.task_tools import save_note
 
@@ -11,9 +12,9 @@ from wizard.tools.task_tools import save_note
 async def test_concurrent_sessions(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer,
+    seed_task, session_closer, session_repo,
 ):
-    task = seed_task(name="Shared task")
+    task = await seed_task(name="Shared task")
 
     # Session A
     ctx_a = type(fake_ctx)()
@@ -48,10 +49,9 @@ async def test_concurrent_sessions(
         t_state_repo=task_state_repo,
     )
 
-    # Verify note is attached to session B
-    note = db_session.get(Note, note_resp.note_id)
-    assert note is not None
-    assert note.session_id == session_b_id
+    # Note appears in session B's note list
+    s_b_detail = await get_session(session_id=session_b_id, s_repo=session_repo, n_repo=note_repo, db=db_session)
+    assert any(n.id == note_resp.note_id for n in s_b_detail.notes)
 
     # End session B
     await session_end(

@@ -435,6 +435,8 @@ def _collect_transcripts(session: WizardSession) -> list[Path]:
     if not session.transcript_path:
         return []
     main_path = Path(session.transcript_path)
+    if not main_path.exists():
+        return []
     project_dir = main_path.parent
     session_start_ts = session.created_at.timestamp() if session.created_at else 0.0
     siblings = []

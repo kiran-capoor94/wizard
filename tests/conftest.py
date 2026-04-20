@@ -14,6 +14,7 @@ from tests.fakes import (
 from wizard.repositories import (
     MeetingRepository,
     NoteRepository,
+    SessionRepository,
     TaskRepository,
     TaskStateRepository,
 )
@@ -86,6 +87,11 @@ def meeting_repo():
 @pytest.fixture
 def session_closer(security):
     return SessionCloser(security=security)
+
+
+@pytest.fixture
+def session_repo():
+    return SessionRepository()
 
 
 @pytest.fixture

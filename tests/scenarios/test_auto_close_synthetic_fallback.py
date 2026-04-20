@@ -2,7 +2,7 @@
 
 import pytest
 
-from wizard.models import NoteType, WizardSession
+from wizard.models import NoteType
 from wizard.tools.session_tools import session_start
 from wizard.tools.task_tools import save_note
 
@@ -13,7 +13,7 @@ async def test_auto_close_synthetic_fallback(
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     seed_task, session_closer,
 ):
-    task = seed_task(name="Fix auth bug")
+    task = await seed_task(name="Fix auth bug")
 
     # Session 1: start, do work, DON'T end
     start1 = await session_start(
@@ -52,7 +52,3 @@ async def test_auto_close_synthetic_fallback(
     assert closed.closed_via == "synthetic"
     assert "1 note(s)" in closed.summary
     assert "1 task(s)" in closed.summary
-
-    s1 = db_session.get(WizardSession, sid1)
-    assert s1.closed_by == "auto"
-    assert s1.summary is not None

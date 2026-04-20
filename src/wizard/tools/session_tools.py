@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -91,6 +92,12 @@ async def session_start(
 ) -> SessionStartResponse:
     """Create a session, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start agent_session_id=%s", agent_session_id)
+
+    if agent_session_id:
+        try:
+            uuid.UUID(agent_session_id)
+        except ValueError:
+            raise ToolError("Invalid agent_session_id") from None
 
     # Read session source from hook-written keyed directory.
     source = "startup"
@@ -291,6 +298,13 @@ async def resume_session(
 ) -> ResumeSessionResponse:
     """Resume a prior session in a new thread. Creates a new session."""
     logger.info("resume_session session_id=%s", session_id)
+
+    if agent_session_id:
+        try:
+            uuid.UUID(agent_session_id)
+        except ValueError:
+            raise ToolError("Invalid agent_session_id") from None
+
     with get_session() as db:
         # Find prior session
         if session_id is not None:
