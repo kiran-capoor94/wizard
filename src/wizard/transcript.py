@@ -12,7 +12,12 @@ from sqlmodel import Session
 
 from wizard.config import settings
 from wizard.models import Note, NoteType, WizardSession
-from wizard.repositories import NoteRepository, TaskStateRepository, _build_rolling_summary
+from wizard.repositories import (
+    NoteRepository,
+    TaskRepository,
+    TaskStateRepository,
+    _build_rolling_summary,
+)
 from wizard.schemas import SynthesisNote, SynthesisResult
 from wizard.security import SecurityService
 
@@ -222,11 +227,13 @@ class OllamaSynthesiser:
         note_repo: NoteRepository,
         security: SecurityService,
         task_state_repo: TaskStateRepository | None = None,
+        t_repo: TaskRepository | None = None,
     ):
         self._reader = reader
         self._note_repo = note_repo
         self._security = security
         self._task_state_repo = task_state_repo or TaskStateRepository()
+        self._t_repo = t_repo or TaskRepository()
 
     def synthesise_path(
         self,
@@ -248,14 +255,17 @@ class OllamaSynthesiser:
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
             )
+        open_tasks = self._t_repo.get_open_tasks_compact(db)
+        valid_task_ids = {tid for tid, _ in open_tasks}
+        task_table = "\n".join(f"{tid}\t{name}" for tid, name in open_tasks)
         try:
-            notes_data = self._call_ollama(entries)
+            notes_data = self._call_ollama(entries, task_table)
         except Exception as e:
             logger.warning("OllamaSynthesiser: Ollama call failed: %s", e)
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
             )
-        saved = self._save_notes(db, notes_data, wizard_session)
+        saved = self._save_notes(db, notes_data, wizard_session, valid_task_ids)
         wizard_session.is_synthesised = True
         if wizard_session.summary is None:
             wizard_session.summary = f"Synthesised {saved} note(s) from transcript."
@@ -276,20 +286,22 @@ class OllamaSynthesiser:
             )
         return self.synthesise_path(db, wizard_session, Path(wizard_session.transcript_path))
 
-    def _call_ollama(self, entries: list[TranscriptEntry]) -> list[SynthesisNote]:
+    def _call_ollama(
+        self, entries: list[TranscriptEntry], task_table: str = ""
+    ) -> list[SynthesisNote]:
         client = ollama.Client(host=settings.synthesis.base_url)
         response = client.chat(
             model=settings.synthesis.model,
             messages=[
                 {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
-                {"role": "user", "content": self._build_prompt(entries)},
+                {"role": "user", "content": self._build_prompt(entries, task_table)},
             ],
             format=_OLLAMA_SCHEMA,
         )
         raw = response.message.content
         return [SynthesisNote.model_validate(item) for item in json.loads(raw)]
 
-    def _build_prompt(self, entries: list[TranscriptEntry]) -> str:
+    def _build_prompt(self, entries: list[TranscriptEntry], task_table: str = "") -> str:
         lines = ["Session transcript (chronological):\n"]
         for e in entries:
             prefix = e.role.upper()
@@ -297,9 +309,16 @@ class OllamaSynthesiser:
                 prefix = f"{prefix} [{e.tool_name}]"
             content = e.content[:2000] if len(e.content) > 2000 else e.content
             lines.append(f"  {prefix}: {content}")
+        if task_table:
+            lines.append(
+                f"\nAvailable tasks (id<TAB>name):\n{task_table}\n\n"
+                "Set task_id to the matching integer ID if the note clearly relates to a task. "
+                "Set task_id to null if uncertain or if no task matches."
+            )
+        else:
+            lines.append("\ntask_id must always be null — no task list available.")
         lines.append(
-            "\nFor each distinct task or workstream, produce a JSON array of notes. "
-            "task_id must always be null — wizard handles task matching separately.\n\n"
+            "\n\nFor each distinct task or workstream, produce a JSON array of notes. "
             "Rules:\n"
             "- Focus on WHAT and WHY, not mechanical tool calls.\n"
             "- Reads followed by Edits = 'investigated X, changed Y because Z'.\n"
@@ -311,7 +330,11 @@ class OllamaSynthesiser:
         return "\n".join(lines)
 
     def _save_notes(
-        self, db: Session, notes_data: list[SynthesisNote], wizard_session: WizardSession,
+        self,
+        db: Session,
+        notes_data: list[SynthesisNote],
+        wizard_session: WizardSession,
+        valid_task_ids: set[int] | None = None,
     ) -> int:
         count = 0
         for nd in notes_data:
@@ -319,11 +342,17 @@ class OllamaSynthesiser:
             clean_model = (
                 self._security.scrub(nd.mental_model).clean if nd.mental_model else None
             )
+            matched_task_id = (
+                nd.task_id
+                if nd.task_id is not None
+                and (valid_task_ids is None or nd.task_id in valid_task_ids)
+                else None
+            )
             note = Note(
                 note_type=self._resolve_note_type(nd.note_type),
                 content=clean_content,
                 mental_model=clean_model,
-                task_id=None,
+                task_id=matched_task_id,
                 session_id=wizard_session.id,
             )
             self._note_repo.save(db, note)
@@ -342,10 +371,10 @@ class OllamaSynthesiser:
     def _refresh_rolling_summaries(
         self, db: Session, wizard_session: WizardSession
     ) -> list[int]:
-        """Rebuild rolling_summary for every task that had notes saved during this session.
+        """Rebuild rolling_summary for tasks that received notes during this session.
 
-        Synthesis notes have task_id=None, so we identify touched tasks via notes
-        the agent wrote directly (save_note calls) — those have both session_id and task_id set.
+        Queries notes with both session_id and task_id set. This includes save_note
+        calls from the agent and synthesis notes where task matching found a match.
         """
         from sqlmodel import col as _col
         from sqlmodel import select as _select
@@ -354,7 +383,7 @@ class OllamaSynthesiser:
             return []
 
         task_ids: list[int] = list({
-            n.task_id
+            n
             for n in db.execute(
                 _select(Note.task_id)
                 .where(Note.session_id == wizard_session.id)
