@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Retroactively synthesise all unsynthesised wizard sessions.
 
-Finds every session where is_synthesised=False and summary IS NULL,
-locates its transcript (from the stored path or by searching ~/.claude/projects/),
-and runs `wizard capture --close` for each one.
+Finds every session where is_synthesised=False and a transcript is available
+(either stored in transcript_path or locatable via agent_session_id), and runs
+`wizard capture --close` for each one. Sessions that already have a summary are
+included — synthesis generates structured notes even when a summary exists.
 
 Usage:
     uv run python scripts/backfill_synthesis.py
@@ -42,7 +43,7 @@ def backfill(dry_run: bool = False) -> None:
         SELECT id, transcript_path, agent_session_id
         FROM wizardsession
         WHERE is_synthesised = 0
-          AND summary IS NULL
+          AND (transcript_path IS NOT NULL OR agent_session_id IS NOT NULL)
         ORDER BY created_at ASC
         """
     ).fetchall()
