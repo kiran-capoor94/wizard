@@ -73,7 +73,9 @@ def _find_previous_session_id() -> int | None:
     """Return the most recently created WizardSession id, or None if none exists."""
     with get_session() as db:
         result = db.execute(
-            select(WizardSession.id).order_by(WizardSession.created_at.desc()).limit(1)
+            select(WizardSession.id)
+            .order_by(WizardSession.created_at.desc(), WizardSession.id.desc())
+            .limit(1)
         ).scalar()
         return result
 
@@ -282,6 +284,7 @@ def _group_prior_notes(
 async def resume_session(
     ctx: Context,
     session_id: int | None = None,
+    agent_session_id: str | None = None,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
@@ -310,6 +313,12 @@ async def resume_session(
         db.flush()
         db.refresh(new_session)
         await ctx.set_state("current_session_id", new_session.id)
+
+        # Write wizard integer ID to the agent-session keyed directory (mirrors session_start).
+        if agent_session_id and new_session.id is not None:
+            keyed_dir = SESSIONS_DIR / agent_session_id
+            keyed_dir.mkdir(parents=True, exist_ok=True)
+            (keyed_dir / "wizard_id").write_text(str(new_session.id))
 
         session_state, working_set_tasks = _deserialise_session_state(db, prior, t_repo)
 

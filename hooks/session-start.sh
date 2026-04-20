@@ -150,4 +150,4 @@ if [ -n "$AGENT_UUID" ]; then
     CONTEXT="agent_session_id=$AGENT_UUID source=$SOURCE. $CONTEXT"
 fi
 
-printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"$CONTEXT\"}}"
+jq -n --arg ctx "$CONTEXT" '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":$ctx}}'

@@ -107,3 +107,44 @@ class TestTranscriptReader:
         reader = TranscriptReader()
         with pytest.raises(FileNotFoundError):
             reader.read("/nonexistent/path.jsonl", agent="claude-code")
+
+    def test_read_codex_parses_message_and_tool_calls(self, tmp_path: Path):
+        lines = [
+            {"type": "response_item", "timestamp": "2026-04-18T10:00:00Z", "payload": {
+                "type": "message", "role": "user",
+                "content": [{"type": "input_text", "text": "Fix the bug"}],
+            }},
+            {"type": "response_item", "timestamp": "2026-04-18T10:00:01Z", "payload": {
+                "type": "function_call", "name": "bash", "arguments": '{"cmd": "ls"}',
+            }},
+            {"type": "response_item", "timestamp": "2026-04-18T10:00:02Z", "payload": {
+                "type": "function_call_output", "output": "src/  tests/",
+            }},
+        ]
+        p = tmp_path / "codex.jsonl"
+        p.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+        reader = TranscriptReader()
+        entries = reader.read(str(p), agent="codex")
+        assert len(entries) == 3
+        assert entries[0].role == "user"
+        assert entries[0].content == "Fix the bug"
+        assert entries[1].role == "tool_call"
+        assert entries[1].tool_name == "bash"
+        assert entries[2].role == "tool_result"
+        assert "src/" in entries[2].content
+
+    def test_read_codex_skips_non_response_item(self, tmp_path: Path):
+        lines = [
+            {"type": "session_start", "payload": {"type": "message", "role": "user",
+                "content": [{"type": "text", "text": "ignored"}]}},
+            {"type": "response_item", "timestamp": "2026-04-18T10:00:00Z", "payload": {
+                "type": "message", "role": "assistant",
+                "content": [{"type": "output_text", "text": "Hello"}],
+            }},
+        ]
+        p = tmp_path / "codex2.jsonl"
+        p.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+        reader = TranscriptReader()
+        entries = reader.read(str(p), agent="codex")
+        assert len(entries) == 1
+        assert entries[0].content == "Hello"
