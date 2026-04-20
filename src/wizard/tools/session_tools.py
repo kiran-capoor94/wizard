@@ -46,8 +46,11 @@ from ..security import SecurityService
 from ..services import SessionCloser
 from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_START, load_skill
 from ..toon import encode_task_contexts
+from ..transcript import OllamaSynthesiser, TranscriptReader, find_transcript, read_new_lines
 
 logger = logging.getLogger(__name__)
+
+_MID_SESSION_TASKS: dict[str, asyncio.Task] = {}
 
 SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
 
@@ -69,6 +72,54 @@ def _build_wizard_context() -> dict | None:
             "tasks_folder": ks.obsidian.tasks_folder,
         }
     return None
+
+
+def _make_synthesiser() -> OllamaSynthesiser:
+    """Construct a fully-wired OllamaSynthesiser for background mid-session synthesis."""
+    security = SecurityService(
+        allowlist=settings.scrubbing.allowlist,
+        enabled=settings.scrubbing.enabled,
+    )
+    return OllamaSynthesiser(
+        reader=TranscriptReader(),
+        note_repo=NoteRepository(),
+        security=security,
+        t_repo=TaskRepository(),
+    )
+
+
+async def _mid_session_synthesis_loop(
+    agent_session_id: str,
+    wizard_session_id: int,
+    interval_seconds: int = 300,
+) -> None:
+    """Poll the transcript file every `interval_seconds` and synthesise new lines.
+
+    Tracks processed line count in a local variable — ctx.state is not used
+    since this runs outside any request context. On failure, logs and retries
+    next poll; SessionEnd synthesis is the guaranteed full-synthesis path.
+    """
+    synthesiser = _make_synthesiser()
+    processed = 0
+    while True:
+        await asyncio.sleep(interval_seconds)
+        transcript_path = find_transcript(agent_session_id)
+        if not transcript_path:
+            continue
+        new_lines = read_new_lines(transcript_path, processed)
+        if not new_lines:
+            continue
+        try:
+            with get_session() as db:
+                session = db.get(WizardSession, wizard_session_id)
+                if session is not None:
+                    synthesiser.synthesise_lines(db, session, new_lines)
+            processed += len(new_lines)
+        except Exception:
+            logger.debug(
+                "mid_session_synthesis: poll failed, will retry next interval",
+                exc_info=True,
+            )
 
 
 def _find_previous_session_id() -> int | None:
@@ -160,6 +211,15 @@ async def session_start(
     # Background task dispatched AFTER db context closes so it gets its own clean session
     asyncio.create_task(session_closer.close_abandoned_background(response.session_id))
 
+    if agent_session_id and settings.synthesis.enabled:
+        mid_task = asyncio.create_task(
+            _mid_session_synthesis_loop(
+                agent_session_id=agent_session_id,
+                wizard_session_id=response.session_id,
+            )
+        )
+        _MID_SESSION_TASKS[agent_session_id] = mid_task
+
     return response
 
 
@@ -185,6 +245,11 @@ async def session_end(
             if session is None:
                 await ctx.error(f"Session {session_id} not found")
                 raise ToolError(f"Session {session_id} not found")
+
+            agent_id = session.agent_session_id
+            mid_task = _MID_SESSION_TASKS.pop(agent_id, None) if agent_id else None
+            if mid_task:
+                mid_task.cancel()
 
             state = SessionState(
                 intent=sec.scrub(intent).clean,
