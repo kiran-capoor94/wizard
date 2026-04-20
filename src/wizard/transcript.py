@@ -28,6 +28,7 @@ _CLAUDE_CODE_SKIP_TYPES = frozenset({
     "progress", "file-history-snapshot", "system", "last-prompt",
 })
 
+
 def find_transcript(agent_session_id: str) -> Path | None:
     """Locate the Claude Code transcript JSONL file for an agent session UUID.
 
