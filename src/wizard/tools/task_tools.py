@@ -51,13 +51,53 @@ _VALID_STATUSES = {s.value for s in TaskStatus}
 logger = logging.getLogger(__name__)
 
 
+_KEY_NOTES_CAP = 5  # max notes returned by task_start
+
+
+def _select_key_notes(notes_desc: list) -> list:
+    """Select the most informative notes for task_start context.
+
+    Priority (hard-ordered, total capped at _KEY_NOTES_CAP):
+    1. All decision notes — resolved choices are always load-bearing.
+    2. Notes with mental_models — explicit understanding captures; already
+       distilled into rolling_summary but useful as anchors.
+    3. Fill remaining slots with most recent notes not already selected.
+
+    Returns notes sorted oldest-first for readability.
+    """
+    selected = []
+    seen: set[int] = set()
+
+    for n in notes_desc:
+        if n.note_type == NoteType.DECISION and n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+    for n in notes_desc:
+        if n.mental_model is not None and n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+    for n in notes_desc:
+        if len(selected) >= _KEY_NOTES_CAP:
+            break
+        if n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+    return sorted(selected, key=lambda x: x.created_at)
+
+
 async def task_start(
     ctx: Context,
     task_id: int,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
 ) -> TaskStartResponse:
-    """Returns full task context + all prior notes for compounding context.
+    """Returns task context + rolling_summary + key notes (decisions, mental models, recent).
+
+    Returns at most 5 notes, prioritising decisions and notes with mental models.
+    For full note history use rewind_task.
 
     task_id: integer task ID from the open_tasks or blocked_tasks list
     returned by session_start. Call session_start first to get available IDs.
@@ -68,26 +108,41 @@ async def task_start(
             task = t_repo.get_by_id(db, task_id)
             task_ctx = t_repo.get_task_context(db, task)
 
-            notes = n_repo.get_for_task(db, task_id=task.id)
+            # All notes descending: used for counts, selection, and rolling_summary lookup.
+            all_notes = n_repo.get_for_task(db, task_id=task.id)
             notes_by_type: dict[str, int] = {}
-            for note in notes:
+            for note in all_notes:
                 key = note.note_type.value
                 notes_by_type[key] = notes_by_type.get(key, 0) + 1
 
-            prior_notes = [NoteDetail.from_model(n) for n in reversed(notes) if n.id is not None]
+            key_notes = _select_key_notes(all_notes)
+            prior_notes = [NoteDetail.from_model(n) for n in key_notes if n.id is not None]
 
             latest_mental_model = next(
-                (n.mental_model for n in notes if n.mental_model is not None),
+                (n.mental_model for n in all_notes if n.mental_model is not None),
                 None,
             )
 
+            task_state = db.get(TaskState, task.id)
+            rolling_summary = task_state.rolling_summary if task_state else None
+            total_notes = len(all_notes)
+
+            # Dedup skill_instructions within the session: send only on first task_start call
+            skill_delivered = await ctx.get_state("task_start_skill_delivered")
+            skill = None if skill_delivered else load_skill(SKILL_TASK_START)
+            if not skill_delivered:
+                await ctx.set_state("task_start_skill_delivered", True)
+
             return TaskStartResponse(
                 task=task_ctx,
-                compounding=len(notes) > 0,
+                compounding=total_notes > 0,
                 notes_by_type=notes_by_type,
                 prior_notes=prior_notes,
+                total_notes=total_notes,
+                older_notes_available=len(key_notes) < total_notes,
+                rolling_summary=rolling_summary,
                 latest_mental_model=latest_mental_model,
-                skill_instructions=load_skill(SKILL_TASK_START),
+                skill_instructions=skill,
             )
     except ValueError as e:
         logger.warning("task_start failed: %s", e)
