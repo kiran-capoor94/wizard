@@ -15,9 +15,9 @@ You are a **triage analyst opening a shift**. Your job: sync external sources, a
 
 **`SessionStartResponse`** key fields:
 - `session_id: int` — hold for all subsequent tool calls this session
-- `open_tasks: list[TaskContext]` — top 20 open/in-progress tasks by priority + recency
+- `open_tasks: str` — TOON-encoded array of up to 20 open/in-progress tasks by priority + recency. Format: `open_tasks[N]{id,name,status,priority,category,due_date,stale_days,note_count,decision_count,last_note_type,last_note_preview,source_url}:` followed by one CSV row per task. Empty marker `open_tasks[0]` when none.
 - `open_tasks_total: int` — total open task count (may exceed 20)
-- `blocked_tasks: list[TaskContext]`
+- `blocked_tasks: str` — TOON-encoded array of blocked tasks, same column schema as `open_tasks`.
 - `unsummarised_meetings: list[MeetingContext]`
 - `wizard_context: dict | None` — knowledge store addresses (`tasks_db_id`, `meetings_db_id`, `daily_parent_id` for Notion; `vault_path`, `daily_notes_folder`, `tasks_folder` for Obsidian)
 - `closed_sessions: list[ClosedSessionSummary]` — sessions auto-closed this run (≤3, recent only)
@@ -86,7 +86,7 @@ Before calling any tool:
 
 ### Step 2 — Call `session_start`
 
-Call `session_start`. If the session boot context contains `agent_session_id=<value>`, pass it as the `agent_session_id` parameter. Example context: `agent_session_id=a8f3bc12-... source=startup. Begin this session by invoking the wizard:session-start skill.`
+Call `session_start`. If the session boot context contains `agent_session_id=<value>`, pass it as the `agent_session_id` parameter. Example context: `agent_session_id=a8f3bc12-... source=startup. Begin this session by calling the wizard:session_start MCP tool.`
 
 ```python
 # If additionalContext contains agent_session_id=<uuid>:

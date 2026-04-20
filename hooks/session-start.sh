@@ -156,7 +156,7 @@ PYEOF
 fi
 
 # ── Step 2: Session boot injection (always) ───────────────────────────────────
-CONTEXT="Begin this session by invoking the wizard:session-start skill."
+CONTEXT="Begin this session by calling the wizard:session_start MCP tool."
 if [ -n "$AGENT_UUID" ]; then
     CONTEXT="agent_session_id=$AGENT_UUID source=$SOURCE. $CONTEXT"
 fi
