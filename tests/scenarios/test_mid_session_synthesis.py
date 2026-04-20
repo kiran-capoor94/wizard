@@ -1,10 +1,15 @@
 """Scenario: mid-session background synthesis."""
 
+import asyncio
+import contextlib
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from wizard.models import WizardSession
 from wizard.schemas import SynthesisResult
+from wizard.tools.session_tools import _MID_SESSION_TASKS, session_end, session_start
 from wizard.transcript import (
     OllamaSynthesiser,
     TranscriptReader,
@@ -79,3 +84,76 @@ def test_synthesise_lines_calls_synthesise_path(db_session, note_repo, security)
     assert len(received_paths) == 1
     assert isinstance(received_paths[0], Path)
     assert not received_paths[0].exists()  # temp file cleaned up
+
+
+@pytest.mark.asyncio
+async def test_mid_session_task_registered_when_agent_session_id_provided(
+    db_session, fake_ctx,
+    task_repo, note_repo, meeting_repo, task_state_repo, security, session_closer,
+):
+    agent_id = "aaaabbbb-cccc-dddd-eeee-ffff00001111"
+    await session_start(
+        ctx=fake_ctx,
+        agent_session_id=agent_id,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+    )
+    task = _MID_SESSION_TASKS.get(agent_id)
+    assert task is not None
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    _MID_SESSION_TASKS.pop(agent_id, None)
+
+
+@pytest.mark.asyncio
+async def test_mid_session_task_not_registered_without_agent_session_id(
+    db_session, fake_ctx,
+    task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
+):
+    before = set(_MID_SESSION_TASKS.keys())
+    await session_start(
+        ctx=fake_ctx,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+    )
+    assert set(_MID_SESSION_TASKS.keys()) == before
+
+
+@pytest.mark.asyncio
+async def test_mid_session_task_cancelled_on_session_end(
+    db_session, fake_ctx,
+    task_repo, note_repo, meeting_repo, task_state_repo, security, session_closer,
+):
+    agent_id = "aaaabbbb-cccc-dddd-eeee-ffff00001112"
+    start = await session_start(
+        ctx=fake_ctx,
+        agent_session_id=agent_id,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+    )
+    assert agent_id in _MID_SESSION_TASKS
+
+    await session_end(
+        ctx=fake_ctx,
+        session_id=start.session_id,
+        summary="Done",
+        intent="Test",
+        working_set=[],
+        state_delta="",
+        open_loops=[],
+        next_actions=[],
+        closure_status="clean",
+        sec=security,
+        n_repo=note_repo,
+    )
+    assert agent_id not in _MID_SESSION_TASKS
