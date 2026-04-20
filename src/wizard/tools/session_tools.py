@@ -110,12 +110,16 @@ async def _mid_session_synthesis_loop(
         if not new_lines:
             continue
         try:
-            with get_session() as db:
-                session = db.get(WizardSession, wizard_session_id)
-                if session is None:
-                    continue
-                synthesiser.synthesise_lines(db, session, new_lines)
-            processed += len(new_lines)
+            def _run_synthesis(lines: list[str]) -> int:
+                with get_session() as db:
+                    session = db.get(WizardSession, wizard_session_id)
+                    if session is None:
+                        return 0
+                    synthesiser.synthesise_lines(db, session, lines)
+                    return len(lines)
+
+            delta = await asyncio.to_thread(_run_synthesis, new_lines)
+            processed += delta
         except Exception:
             logger.debug(
                 "mid_session_synthesis: poll failed, will retry next interval",
