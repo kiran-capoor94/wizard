@@ -193,6 +193,15 @@ class ClosedSessionSummary(BaseModel):
     note_count: int
 
 
+class PriorSessionSummary(BaseModel):
+    """A recently-closed session surfaced as prior context in session_start."""
+
+    session_id: int
+    summary: str
+    closed_at: UTCDateTime
+    task_ids: list[int] = Field(default_factory=list)
+
+
 class SessionStartResponse(BaseModel):
     session_id: int
     continued_from_id: int | None = None
@@ -204,6 +213,7 @@ class SessionStartResponse(BaseModel):
     closed_sessions: list[ClosedSessionSummary] = Field(default_factory=list)
     open_tasks_total: int = 0
     source: str = "startup"
+    prior_summaries: list[PriorSessionSummary] = Field(default_factory=list)
 
 
 class TaskStartResponse(BaseModel):
