@@ -53,6 +53,13 @@ logger = logging.getLogger(__name__)
 
 MID_SESSION_TASKS: dict[str, asyncio.Task] = {}
 
+
+def cancel_mid_session_synthesis(agent_session_id: str) -> None:
+    task = MID_SESSION_TASKS.pop(agent_session_id, None)
+    if task:
+        task.cancel()
+
+
 SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
 
 
@@ -288,9 +295,8 @@ async def session_end(
                 raise ToolError(f"Session {session_id} not found")
 
             agent_id = session.agent_session_id
-            mid_task = MID_SESSION_TASKS.pop(agent_id, None) if agent_id else None
-            if mid_task:
-                mid_task.cancel()
+            if agent_id:
+                cancel_mid_session_synthesis(agent_id)
 
             state = SessionState(
                 intent=sec.scrub(intent).clean,

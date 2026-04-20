@@ -157,3 +157,39 @@ async def test_mid_session_task_cancelled_on_session_end(
         n_repo=note_repo,
     )
     assert agent_id not in MID_SESSION_TASKS
+
+
+@pytest.mark.asyncio
+async def test_auto_close_cancels_mid_session_task(
+    db_session, fake_ctx,
+    task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
+):
+    """Auto-closing an abandoned session must clean up its mid-session task."""
+    agent_id = "aaaabbbb-cccc-dddd-eeee-000000000001"
+
+    # Session 1: start with agent_session_id — registers a task in MID_SESSION_TASKS
+    await session_start(
+        ctx=fake_ctx,
+        agent_session_id=agent_id,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+    )
+    assert agent_id in MID_SESSION_TASKS
+
+    # Session 2: new start without ending session 1 — triggers auto-close of session 1
+    fresh_ctx = type(fake_ctx)()
+    start2 = await session_start(
+        ctx=fresh_ctx,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+    )
+    assert start2.session_id is not None
+
+    # Mid-session task for the abandoned session must have been cleaned up
+    assert agent_id not in MID_SESSION_TASKS
