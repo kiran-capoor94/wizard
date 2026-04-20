@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,28 @@ logger = logging.getLogger(__name__)
 _CLAUDE_CODE_SKIP_TYPES = frozenset({
     "progress", "file-history-snapshot", "system", "last-prompt",
 })
+
+def find_transcript(agent_session_id: str) -> Path | None:
+    """Locate the Claude Code transcript JSONL file for an agent session UUID.
+
+    Globs ~/.claude/projects/*/<uuid>.jsonl — the path Claude Code uses for
+    per-project transcripts. Returns the first match, or None if not found.
+    """
+    matches = list(Path.home().glob(f".claude/projects/*/{agent_session_id}.jsonl"))
+    return matches[0] if matches else None
+
+
+def read_new_lines(path: Path, skip: int) -> list[str]:
+    """Read lines from a JSONL file, skipping the first `skip` lines.
+
+    Drops the last line of new content to guard against partial JSON objects
+    while the transcript is actively being written. The dropped line is picked
+    up on the next poll once the following line has been written.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    new = lines[skip:]
+    return new[:-1] if len(new) > 1 else []
+
 
 _SYNTHESIS_SYSTEM_PROMPT = (
     "You are synthesising a coding session transcript into structured notes "
@@ -285,6 +308,27 @@ class OllamaSynthesiser:
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback",
             )
         return self.synthesise_path(db, wizard_session, Path(wizard_session.transcript_path))
+
+    def synthesise_lines(
+        self,
+        db: Session,
+        wizard_session: WizardSession,
+        lines: list[str],
+    ) -> SynthesisResult:
+        """Synthesise a slice of JSONL lines as a partial transcript.
+
+        Writes lines to a NamedTemporaryFile, delegates to synthesise_path,
+        then deletes the temp file.
+        """
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write("\n".join(lines) + "\n")
+            tmp_path = Path(tmp.name)
+        try:
+            return self.synthesise_path(db, wizard_session, tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     def _call_ollama(
         self, entries: list[TranscriptEntry], task_table: str = ""
