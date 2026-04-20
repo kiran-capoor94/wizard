@@ -196,8 +196,8 @@ class ClosedSessionSummary(BaseModel):
 class SessionStartResponse(BaseModel):
     session_id: int
     continued_from_id: int | None = None
-    open_tasks: list[TaskContext]
-    blocked_tasks: list[TaskContext]
+    open_tasks: str = ""        # TOON-encoded; see encode_task_contexts
+    blocked_tasks: str = ""     # TOON-encoded; see encode_task_contexts
     unsummarised_meetings: list[MeetingContext]
     wizard_context: dict | None = None
     skill_instructions: str | None = None
@@ -210,7 +210,10 @@ class TaskStartResponse(BaseModel):
     task: TaskContext
     compounding: bool  # True if prior notes exist for this task
     notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
-    prior_notes: list[NoteDetail]  # all notes, oldest first
+    prior_notes: list[NoteDetail]  # 3 most recent notes, oldest first
+    total_notes: int = 0  # total note count including older notes not returned
+    older_notes_available: bool = False  # True if note_count > 3; use rewind_task for full history
+    rolling_summary: str | None = None  # synthesised from mental_models of all notes
     latest_mental_model: str | None = None
     skill_instructions: str | None = None
 
