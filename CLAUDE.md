@@ -303,7 +303,7 @@ on every `SessionStart` event.
    `~/.claude/settings.json`. Keys written: `companyAnnouncements`,
    `spinnerVerbs`, `spinnerTipsOverride`, and `statusLine` (only if absent).
 3. **Always**: outputs `additionalContext` JSON instructing the agent to
-   invoke the `wizard:session-start` skill — no manual trigger needed.
+   call the `wizard:session_start` MCP tool — no manual trigger needed.
 
 **Announcement priority** (first match wins):
 - Overdue tasks
