@@ -70,7 +70,7 @@ def _build_wizard_context() -> dict | None:
     return None
 
 
-def _build_prior_summaries(db, current_session_id: int) -> list[PriorSessionSummary]:
+def _build_prior_summaries(db: Session, current_session_id: int) -> list[PriorSessionSummary]:
     """Return the 3 most recent closed sessions with summaries for prior-context surfacing."""
     prior_sessions = db.exec(
         select(WizardSession)
@@ -91,8 +91,8 @@ def _build_prior_summaries(db, current_session_id: int) -> list[PriorSessionSumm
             try:
                 state_obj = SessionState.model_validate_json(s.session_state)
                 task_ids = state_obj.working_set
-            except Exception:
-                pass
+            except (ValueError, ValidationError) as e:
+                logger.warning("prior_summaries: bad session_state sid=%s: %s", s.id, e)
         result.append(PriorSessionSummary(
             session_id=s.id,
             summary=s.summary,
