@@ -220,3 +220,10 @@ class TaskState(TimestampMixin, table=True):
     last_status_change_at: datetime.datetime | None = Field(default=None)
     last_touched_at: datetime.datetime = Field(nullable=False)
     stale_days: int = Field(default=0, nullable=False)
+    rolling_summary: str | None = Field(
+        default=None,
+        description=(
+            "Synthesised overview of all prior notes, built from mental_models. "
+            "Updated on every note save. Used by task_start for tiered context delivery."
+        ),
+    )

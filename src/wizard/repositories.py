@@ -239,11 +239,15 @@ class NoteRepository:
         db: Session,
         task_id: int | None,
         ascending: bool = False,
+        limit: int | None = None,
     ) -> list[Note]:
         if task_id is None:
             return []
         order = col(Note.created_at).asc() if ascending else col(Note.created_at).desc()
-        return list(db.exec(select(Note).where(Note.task_id == task_id).order_by(order)).all())
+        stmt = select(Note).where(Note.task_id == task_id).order_by(order)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(db.exec(stmt).all())
 
     def get_notes_grouped_by_task(
         self, db: Session, session_id: int
@@ -303,6 +307,20 @@ class NoteRepository:
         )
         return {row[0]: row[1] for row in db.execute(stmt).all()}
 
+def _build_rolling_summary(notes: list[Note]) -> str | None:
+    """Build a rolling summary from mental_models across all task notes.
+
+    Produces a chronological digest (newest first) of captured mental models.
+    Returns None if no notes have mental_models recorded.
+    """
+    entries = []
+    for n in sorted(notes, key=lambda x: x.created_at, reverse=True):
+        if n.mental_model:
+            dt = n.created_at.strftime("%Y-%m-%d")
+            entries.append(f"[{dt} {n.note_type.value}] {n.mental_model}")
+    return "\n".join(entries) if entries else None
+
+
 class TaskStateRepository:
     """Pre-computes derived signals per Task. Updated synchronously by
     create_task / save_note / update_task tools — never lazily on read.
@@ -332,7 +350,8 @@ class TaskStateRepository:
 
     def on_note_saved(self, db: Session, task_id: int) -> TaskState:
         """Re-query notes for the task and recompute note_count, decision_count,
-        last_note_at, last_touched_at, stale_days. Does NOT touch last_status_change_at."""
+        last_note_at, last_touched_at, stale_days, rolling_summary.
+        Does NOT touch last_status_change_at."""
         task = db.get(Task, task_id)
         if task is None:
             raise ValueError(f"Task {task_id} not found")
@@ -352,10 +371,21 @@ class TaskStateRepository:
             state.last_note_at if state.last_note_at is not None else task.created_at
         )
         state.stale_days = (_dt.datetime.now() - state.last_touched_at).days
+        state.rolling_summary = _build_rolling_summary(notes)
         db.add(state)
         db.flush()
         db.refresh(state)
         return state
+
+    def update_rolling_summary(self, db: Session, task_id: int, summary: str) -> None:
+        """Overwrite rolling_summary for a task. Used by synthesis after transcript processing."""
+        state = db.get(TaskState, task_id)
+        if state is None:
+            logger.warning("update_rolling_summary: TaskState missing for task %d", task_id)
+            return
+        state.rolling_summary = summary
+        db.add(state)
+        db.flush()
 
     def on_status_changed(self, db: Session, task_id: int) -> TaskState:
         """Set last_status_change_at = now. Touches NO other field —

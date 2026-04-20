@@ -12,7 +12,7 @@ from sqlmodel import Session
 
 from wizard.config import settings
 from wizard.models import Note, NoteType, WizardSession
-from wizard.repositories import NoteRepository
+from wizard.repositories import NoteRepository, TaskStateRepository, _build_rolling_summary
 from wizard.schemas import SynthesisNote, SynthesisResult
 from wizard.security import SecurityService
 
@@ -221,10 +221,12 @@ class OllamaSynthesiser:
         reader: TranscriptReader,
         note_repo: NoteRepository,
         security: SecurityService,
+        task_state_repo: TaskStateRepository | None = None,
     ):
         self._reader = reader
         self._note_repo = note_repo
         self._security = security
+        self._task_state_repo = task_state_repo or TaskStateRepository()
 
     def synthesise_path(
         self,
@@ -259,8 +261,11 @@ class OllamaSynthesiser:
             wizard_session.summary = f"Synthesised {saved} note(s) from transcript."
         db.add(wizard_session)
         db.flush()
+        task_ids_touched = self._refresh_rolling_summaries(db, wizard_session)
         return SynthesisResult(
-            notes_created=saved, task_ids_touched=[], synthesised_via="ollama",
+            notes_created=saved,
+            task_ids_touched=task_ids_touched,
+            synthesised_via="ollama",
         )
 
     def synthesise(self, db: Session, wizard_session: WizardSession) -> SynthesisResult:
@@ -333,3 +338,42 @@ class OllamaSynthesiser:
             "learnings": NoteType.LEARNINGS,
         }
         return mapping.get(raw, NoteType.INVESTIGATION)
+
+    def _refresh_rolling_summaries(
+        self, db: Session, wizard_session: WizardSession
+    ) -> list[int]:
+        """Rebuild rolling_summary for every task that had notes saved during this session.
+
+        Synthesis notes have task_id=None, so we identify touched tasks via notes
+        the agent wrote directly (save_note calls) — those have both session_id and task_id set.
+        """
+        from sqlmodel import col as _col
+        from sqlmodel import select as _select
+
+        if wizard_session.id is None:
+            return []
+
+        task_ids: list[int] = list({
+            n.task_id
+            for n in db.execute(
+                _select(Note.task_id)
+                .where(Note.session_id == wizard_session.id)
+                .where(Note.task_id.is_not(None))  # type: ignore[union-attr]
+            ).scalars().all()
+            if n is not None
+        })
+
+        if not task_ids:
+            return []
+
+        for task_id in task_ids:
+            all_notes = list(
+                db.execute(
+                    _select(Note).where(_col(Note.task_id) == task_id)
+                ).scalars().all()
+            )
+            summary = _build_rolling_summary(all_notes)
+            if summary is not None:
+                self._task_state_repo.update_rolling_summary(db, task_id, summary)
+
+        return task_ids
