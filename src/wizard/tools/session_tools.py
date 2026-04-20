@@ -34,6 +34,7 @@ from ..repositories import (
 )
 from ..schemas import (
     NoteDetail,
+    PriorSessionSummary,
     ResumedTaskNotes,
     ResumeSessionResponse,
     SessionEndResponse,
@@ -67,6 +68,38 @@ def _build_wizard_context() -> dict | None:
             "tasks_folder": ks.obsidian.tasks_folder,
         }
     return None
+
+
+def _build_prior_summaries(db, current_session_id: int) -> list[PriorSessionSummary]:
+    """Return the 3 most recent closed sessions with summaries for prior-context surfacing."""
+    prior_sessions = db.exec(
+        select(WizardSession)
+        .where(
+            WizardSession.summary != None,  # noqa: E711
+            WizardSession.id != current_session_id,
+        )
+        .order_by(WizardSession.created_at.desc())
+        .limit(3)
+    ).all()
+
+    result = []
+    for s in prior_sessions:
+        if s.id is None or s.summary is None:
+            continue
+        task_ids: list[int] = []
+        if s.session_state:
+            try:
+                state_obj = SessionState.model_validate_json(s.session_state)
+                task_ids = state_obj.working_set
+            except Exception:
+                pass
+        result.append(PriorSessionSummary(
+            session_id=s.id,
+            summary=s.summary,
+            closed_at=s.updated_at,
+            task_ids=task_ids,
+        ))
+    return result
 
 
 def _find_previous_session_id() -> int | None:
@@ -135,6 +168,8 @@ async def session_start(
         open_tasks_total = t_repo.count_open_tasks(db)
         open_tasks = t_repo.get_open_task_contexts(db, limit=20)
 
+        prior_summaries = _build_prior_summaries(db, session.id)
+
         response = SessionStartResponse(
             session_id=session.id,
             continued_from_id=continued_from_id,
@@ -146,6 +181,7 @@ async def session_start(
             wizard_context=_build_wizard_context(),
             skill_instructions=load_skill(SKILL_SESSION_START),
             closed_sessions=closed_sessions,
+            prior_summaries=prior_summaries,
         )
 
     # Background task dispatched AFTER db context closes so it gets its own clean session
