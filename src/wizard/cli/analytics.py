@@ -204,6 +204,25 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
         "",
         "Compounding",
         f"  Sessions with context:{compounding:.0%}",
-        "",
     ]
+
+    health_messages = []
+    if notes.get("manual_notes", 0) > 0 and notes.get("mental_model_coverage", 1.0) < 0.25:
+        health_messages.append(
+            "  Mental model coverage is low — add mental_model to save_note calls"
+        )
+    if sessions.get("abandoned_rate", 0.0) > 0.5:
+        health_messages.append(
+            "  Most sessions are abandoned — call session_end before closing"
+        )
+    if tasks.get("worked", 0) > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5:
+        health_messages.append(
+            "  Low note density — investigation and decision notes build compounding"
+        )
+
+    if health_messages:
+        lines += ["", "Health"]
+        lines += health_messages
+
+    lines.append("")
     return "\n".join(lines)
