@@ -1,7 +1,7 @@
 import datetime
 import logging
 
-from sqlmodel import col, select
+from sqlmodel import func, select
 
 from wizard.models import Note, NoteType, TaskState, ToolCall, WizardSession
 
@@ -18,48 +18,29 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
             ToolCall.called_at <= end_dt,
         )
     ).all()
-
     total_tool_calls = len(calls)
 
-    # Keep earliest session_start and latest session_end per session to ensure
-    # duration is always non-negative and spans the true wall-clock window.
-    starts: dict[int, datetime.datetime] = {}
-    ends: dict[int, datetime.datetime] = {}
-    for c in calls:
-        if c.tool_name == "session_start" and c.session_id:
-            if c.session_id not in starts or c.called_at < starts[c.session_id]:
-                starts[c.session_id] = c.called_at
-        elif c.tool_name == "session_end" and c.session_id and (
-            c.session_id not in ends or c.called_at > ends[c.session_id]
-        ):
-            ends[c.session_id] = c.called_at
-
-    session_count = len(starts)
-
-    # Durations: user-closed sessions use session_end ToolCall timestamp
-    durations = []
-    for sid, start_time in starts.items():
-        if sid in ends:
-            delta = (ends[sid] - start_time).total_seconds() / 60
-            durations.append(delta)
-
-    # Query WizardSession records for the same sessions counted in session_count
-    # so that abandoned_count / session_count is a coherent rate.
-    sessions_by_id = db.exec(
+    sessions = db.exec(
         select(WizardSession).where(
-            WizardSession.id.in_(list(starts.keys()))
+            WizardSession.created_at >= start_dt,
+            WizardSession.created_at <= end_dt,
         )
     ).all()
+    session_count = len(sessions)
 
-    abandoned = [s for s in sessions_by_id if s.closed_by == "auto"]
-    abandoned_count = len(abandoned)
-
-    for s in abandoned:
-        if s.last_active_at is not None and s.id in starts:
-            delta = (s.last_active_at - starts[s.id]).total_seconds() / 60
+    durations = []
+    for s in sessions:
+        if s.closed_by in ("user", "hook"):
+            delta = (s.updated_at - s.created_at).total_seconds() / 60
             durations.append(delta)
+        elif s.closed_by == "auto" and s.last_active_at is not None:
+            delta = (s.last_active_at - s.created_at).total_seconds() / 60
+            durations.append(delta)
+        # open sessions: excluded from average
 
     avg_duration = sum(durations) / len(durations) if durations else 0.0
+    abandoned = [s for s in sessions if s.closed_by == "auto"]
+    abandoned_count = len(abandoned)
 
     return {
         "session_count": session_count,
@@ -92,7 +73,7 @@ def query_notes(db, start: datetime.date, end: datetime.date) -> dict:
         by_type[type_name] = by_type.get(type_name, 0) + 1
         if note.note_type == NoteType.SESSION_SUMMARY:
             session_summaries += 1
-        if note.mental_model:
+        elif note.mental_model:
             mental_models += 1
 
     manual_notes = total - session_summaries
@@ -154,50 +135,34 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
     if not task_starts:
         return 0.0
 
-    # Find the earliest session_start in the window to use as the prior-context boundary.
-    # Any note before this timestamp came from a previous session.
-    session_starts = db.exec(
-        select(ToolCall).where(
-            ToolCall.tool_name == "session_start",
-            ToolCall.called_at >= start_dt,
-            ToolCall.called_at <= end_dt,
-        )
-    ).all()
-
-    if not session_starts:
-        return 0.0
-
-    # Build earliest session_start time per session (same min logic as query_sessions).
-    session_start_times: dict[int, datetime.datetime] = {}
-    for tc in session_starts:
-        if tc.session_id and (
-            tc.session_id not in session_start_times
-            or tc.called_at < session_start_times[tc.session_id]
-        ):
-            session_start_times[tc.session_id] = tc.called_at
-
-    # For each session that had a task_start call, check whether any note existed
-    # before that session began. ToolCall has no task_id, so we use the session
-    # as the prior-context boundary.
     task_start_session_ids = {tc.session_id for tc in task_starts if tc.session_id}
-
     if not task_start_session_ids:
         return 0.0
 
-    # Single query: the earliest note ever in the DB.
-    # If it predates a session's start time, that session had prior context.
-    # This avoids one query per session (N+1).
-    earliest_note_time = db.exec(
-        select(Note.created_at).order_by(col(Note.created_at)).limit(1)
-    ).first()
+    sessions_map = {
+        s.id: s
+        for s in db.exec(
+            select(WizardSession).where(
+                WizardSession.id.in_(list(task_start_session_ids))
+            )
+        ).all()
+        if s.id is not None
+    }
 
-    sessions_with_prior_notes: set[int] = set()
-    if earliest_note_time is not None:
-        for sid in task_start_session_ids:
-            if sid in session_start_times and earliest_note_time < session_start_times[sid]:
-                sessions_with_prior_notes.add(sid)
+    # Proxy: "at least one note existed anywhere in the DB before this session started."
+    # This is intentional per spec — not task-specific. On a DB with any historical
+    # notes, sessions that started after those notes will count. The metric answers
+    # "did you have accumulated context when you started?" not "were those notes
+    # about the specific task you worked on?"
+    earliest_note_dt = db.exec(select(func.min(Note.created_at))).one_or_none()
 
-    return round(len(sessions_with_prior_notes) / len(task_start_session_ids), 2)
+    sessions_with_any_prior_notes = {
+        sid
+        for sid, session in sessions_map.items()
+        if earliest_note_dt is not None and earliest_note_dt < session.created_at
+    }
+
+    return round(len(sessions_with_any_prior_notes) / len(task_start_session_ids), 2)
 
 
 def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
@@ -244,6 +209,27 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
         "",
         "Compounding",
         f"  Sessions with context:{compounding:.0%}",
-        "",
     ]
+
+    health_messages = []
+    if notes.get("manual_notes", 0) > 0 and notes.get("mental_model_coverage", 1.0) < 0.25:
+        health_messages.append(
+            "  Mental model coverage is low — add mental_model to save_note calls"
+        )
+    if sessions.get("abandoned_rate", 0.0) > 0.5:
+        health_messages.append(
+            "  Most sessions are abandoned — call session_end before closing"
+        )
+    # Default 2.0 is above the 1.5 threshold so missing data suppresses nudge.
+    low_note_density = tasks.get("worked", 0) > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5
+    if low_note_density:
+        health_messages.append(
+            "  Low note density — investigation and decision notes build compounding"
+        )
+
+    if health_messages:
+        lines += ["", "Health"]
+        lines += health_messages
+
+    lines.append("")
     return "\n".join(lines)

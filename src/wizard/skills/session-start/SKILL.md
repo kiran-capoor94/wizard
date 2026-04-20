@@ -21,6 +21,7 @@ You are a **triage analyst opening a shift**. Your job: sync external sources, a
 - `unsummarised_meetings: list[MeetingContext]`
 - `wizard_context: dict | None` — knowledge store addresses (`tasks_db_id`, `meetings_db_id`, `daily_parent_id` for Notion; `vault_path`, `daily_notes_folder`, `tasks_folder` for Obsidian)
 - `closed_sessions: list[ClosedSessionSummary]` — sessions auto-closed this run (≤3, recent only)
+- `prior_summaries: list[PriorSessionSummary]` — up to 3 most recent closed sessions with summaries, for prior-context loading
 
 **`TaskContext`** key fields: `id`, `name`, `status`, `priority`, `category`, `due_date`, `stale_days`, `note_count`, `decision_count`, `last_note_type`, `last_note_preview` (300 chars), `source_url`
 
@@ -106,6 +107,20 @@ The `source` value in the response indicates the session type:
 Confirm `session_id` is an integer. Output:
 
 > **Session `{session_id}` started.**
+
+### Step 3b — Prior Context (conditional)
+
+**Run this step only when `prior_summaries` is non-empty.**
+
+Render a **Prior context** block before task triage so the engineer knows what was in flight:
+
+| Session | Closed | Summary | Tasks |
+|---------|--------|---------|-------|
+| `{session_id}` | `{closed_at}` | `{summary[:200]}` | `{task_ids or "—"}` |
+
+Sort by `closed_at` descending (most recent first). Truncate summary to 200 characters.
+
+This is context loading — do not recommend actions based on prior summaries. Triage comes in Steps 4–7.
 
 ### Step 4 — Triage Blocked Tasks
 
