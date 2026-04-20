@@ -481,20 +481,18 @@ def capture(
             typer.echo(f"Session {session.id}: no transcript path, skipping synthesis.")
             return
 
+        security = SecurityService(
+            allowlist=settings.scrubbing.allowlist, enabled=settings.scrubbing.enabled)
         synthesiser = OllamaSynthesiser(
-            reader=TranscriptReader(),
-            note_repo=NoteRepository(),
-            security=SecurityService(
-                allowlist=settings.scrubbing.allowlist,
-                enabled=settings.scrubbing.enabled,
-            ),
-        )
+            reader=TranscriptReader(), note_repo=NoteRepository(), security=security)
         total_notes, synthesised_via = 0, "fallback"
-        for path in transcripts:
+        for i, path in enumerate(transcripts):
             try:
                 result = synthesiser.synthesise_path(db, session, path)
                 total_notes += result.notes_created
                 synthesised_via = result.synthesised_via
             except Exception as e:
                 typer.echo(f"Synthesis failed for {path}: {e}", err=True)
+                if i == 0:
+                    raise typer.Exit(1) from None
         typer.echo(f"Session {session.id}: {total_notes} note(s) via {synthesised_via}.")

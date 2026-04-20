@@ -79,7 +79,7 @@ class TestCollectTranscripts:
             # Session created 5 seconds ago, sibling has current mtime
             s = WizardSession(
                 transcript_path=str(transcript),
-                created_at=datetime.datetime.utcnow() - datetime.timedelta(seconds=5),
+                created_at=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=5),
             )
             db.add(s)
             db.flush()
@@ -103,7 +103,7 @@ class TestCollectTranscripts:
         with _session_for(capture_engine) as db:
             s = WizardSession(
                 transcript_path=str(transcript),
-                created_at=datetime.datetime.utcnow(),
+                created_at=datetime.datetime.now(datetime.timezone.utc),
             )
             db.add(s)
             db.flush()
@@ -291,7 +291,7 @@ class TestCaptureClose:
         with patch("wizard.cli.main.get_db_session", fake_get_session), \
              patch("wizard.cli.main.settings") as mock_settings, \
              patch("wizard.cli.main._collect_transcripts", return_value=[transcript]) as mock_collect, \
-             patch("wizard.cli.main.OllamaSynthesiser.synthesise_path", return_value=fake_result):
+             patch("wizard.cli.main.OllamaSynthesiser.synthesise_path", return_value=fake_result) as mock_sp:
             mock_settings.synthesis.enabled = True
             mock_settings.synthesis.base_url = "http://localhost:11434"
             mock_settings.synthesis.model = "gemma4:latest-64k"
@@ -306,3 +306,4 @@ class TestCaptureClose:
 
         assert result.exit_code == 0, result.output
         mock_collect.assert_called_once()
+        mock_sp.assert_called_once()
