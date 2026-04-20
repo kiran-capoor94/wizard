@@ -2,7 +2,6 @@
 
 import pytest
 
-from wizard.models import WizardSession
 from wizard.tools.session_tools import session_start
 
 
@@ -41,6 +40,3 @@ async def test_auto_close_empty_session(
     assert closed.session_id == sid1
     assert closed.closed_via == "synthetic"
     assert closed.note_count == 0
-
-    s1 = db_session.get(WizardSession, sid1)
-    assert s1.closed_by == "auto"

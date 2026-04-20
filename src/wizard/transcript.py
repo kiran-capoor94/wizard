@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ollama
-from pydantic import RootModel
 from sqlmodel import Session
 
 from wizard.config import settings
@@ -196,9 +195,22 @@ class TranscriptReader:
         raise NotImplementedError("OpenCode transcript parser not yet implemented")
 
 
-class _NoteList(RootModel[list[SynthesisNote]]):
-    """Pydantic wrapper so model_json_schema() produces a top-level array schema."""
-    root: list[SynthesisNote]
+# Flat schema for Ollama structured output.  Ollama's grammar engine cannot
+# resolve $ref / $defs, so we inline the SynthesisNote fields directly.
+# task_id and mental_model are omitted from required; Pydantic fills in None.
+_OLLAMA_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "required": ["note_type", "content"],
+        "properties": {
+            "task_id": {"type": "integer"},
+            "note_type": {"type": "string"},
+            "content": {"type": "string"},
+            "mental_model": {"type": "string"},
+        },
+    },
+}
 
 
 class OllamaSynthesiser:
@@ -267,9 +279,10 @@ class OllamaSynthesiser:
                 {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
                 {"role": "user", "content": self._build_prompt(entries)},
             ],
-            format=_NoteList.model_json_schema(),
+            format=_OLLAMA_SCHEMA,
         )
-        return _NoteList.model_validate_json(response.message.content).root
+        raw = response.message.content
+        return [SynthesisNote.model_validate(item) for item in json.loads(raw)]
 
     def _build_prompt(self, entries: list[TranscriptEntry]) -> str:
         lines = ["Session transcript (chronological):\n"]

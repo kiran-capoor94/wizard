@@ -28,10 +28,15 @@ class SecurityService:
 
     def __init__(self, allowlist: list[str] | None = None, enabled: bool = True):
         self._allowlist = allowlist or []
-        self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
+        try:
+            self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
+        except re.error as e:
+            raise ValueError(f"Invalid allowlist regex: {e}") from e
         self._enabled = enabled
 
-    def scrub(self, content: str) -> ScrubResult:
+    def scrub(self, content: str | None) -> ScrubResult:
+        if content is None:
+            return ScrubResult(clean="", original_to_stub={}, was_modified=False)
         if not self._enabled:
             return ScrubResult(clean=content, original_to_stub={}, was_modified=False)
         clean = content

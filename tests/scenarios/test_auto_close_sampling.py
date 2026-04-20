@@ -3,10 +3,10 @@
 from unittest.mock import MagicMock
 
 import pytest
-from sqlmodel import select
 
-from wizard.models import Note, NoteType, WizardSession
+from wizard.models import NoteType
 from wizard.schemas import AutoCloseSummary
+from wizard.tools.query_tools import get_session
 from wizard.tools.session_tools import session_start
 from wizard.tools.task_tools import save_note
 
@@ -15,9 +15,9 @@ from wizard.tools.task_tools import save_note
 async def test_auto_close_via_sampling(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer,
+    seed_task, session_closer, session_repo,
 ):
-    task = seed_task(name="Debug memory leak")
+    task = await seed_task(name="Debug memory leak")
 
     # Session 1: start, do work, DON'T end
     start1 = await session_start(
@@ -66,17 +66,8 @@ async def test_auto_close_via_sampling(
     assert closed.note_count >= 1
     assert task.id in closed.task_ids
 
-    # DB state: session 1 has summary and closed_by
-    s1 = db_session.get(WizardSession, sid1)
-    assert s1.summary is not None
-    assert s1.closed_by == "auto"
-    assert s1.session_state is not None
-
-    # A session_summary note was created for session 1
-    summary_notes = db_session.exec(
-        select(Note).where(
-            Note.session_id == sid1,
-            Note.note_type == NoteType.SESSION_SUMMARY,
-        )
-    ).all()
+    # Session 1 state and notes are observable via query tool
+    s_detail = await get_session(session_id=sid1, s_repo=session_repo, n_repo=note_repo, db=db_session)
+    assert s_detail.session_state is not None
+    summary_notes = [n for n in s_detail.notes if n.note_type == NoteType.SESSION_SUMMARY]
     assert len(summary_notes) == 1

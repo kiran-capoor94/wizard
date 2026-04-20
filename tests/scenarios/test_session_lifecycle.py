@@ -16,7 +16,7 @@ async def test_session_lifecycle(
     seed_task, session_closer,
 ):
     # Pre-seed a task so session_start has something to show
-    task = seed_task(name="Fix auth bug", status="todo")
+    task = await seed_task(name="Fix auth bug", status="todo")
 
     # 1. session_start
     start_resp = await session_start(
@@ -100,7 +100,7 @@ async def test_session_start_writes_wizard_id_to_keyed_dir(
     task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
 ):
     """session_start must write wizard_id to SESSIONS_DIR/<uuid>/wizard_id."""
-    uuid = "test-uuid-abc123"
+    uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
     sessions_dir = tmp_path / "sessions"
     (sessions_dir / uuid).mkdir(parents=True)
     (sessions_dir / uuid / "source").write_text("startup")

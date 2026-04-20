@@ -13,7 +13,7 @@ async def test_duplicate_notes(
     task_repo, note_repo, meeting_repo, task_state_repo, security,
     seed_task, session_closer,
 ):
-    task = seed_task(name="Dupe notes task")
+    task = await seed_task(name="Dupe notes task")
     await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,

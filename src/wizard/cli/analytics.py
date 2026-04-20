@@ -1,7 +1,7 @@
 import datetime
 import logging
 
-from sqlmodel import select
+from sqlmodel import col, select
 
 from wizard.models import Note, NoteType, TaskState, ToolCall, WizardSession
 
@@ -181,18 +181,21 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
     # as the prior-context boundary.
     task_start_session_ids = {tc.session_id for tc in task_starts if tc.session_id}
 
+    if not task_start_session_ids:
+        return 0.0
+
+    # Single query: the earliest note ever in the DB.
+    # If it predates a session's start time, that session had prior context.
+    # This avoids one query per session (N+1).
+    earliest_note_time = db.exec(
+        select(Note.created_at).order_by(col(Note.created_at)).limit(1)
+    ).first()
+
     sessions_with_prior_notes: set[int] = set()
-    for sid in task_start_session_ids:
-        if sid not in session_start_times:
-            continue
-        has_prior = (
-            db.exec(
-                select(Note).where(Note.created_at < session_start_times[sid]).limit(1)
-            ).first()
-            is not None
-        )
-        if has_prior:
-            sessions_with_prior_notes.add(sid)
+    if earliest_note_time is not None:
+        for sid in task_start_session_ids:
+            if sid in session_start_times and earliest_note_time < session_start_times[sid]:
+                sessions_with_prior_notes.add(sid)
 
     return round(len(sessions_with_prior_notes) / len(task_start_session_ids), 2)
 

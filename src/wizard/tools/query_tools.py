@@ -36,7 +36,7 @@ def _decode_cursor(cursor: str) -> int:
         offset = json.loads(base64.b64decode(cursor).decode()).get("offset", 0)
         return int(offset) if offset is not None else 0
     except Exception:
-        return 0
+        raise ToolError("Invalid cursor") from None
 
 
 async def get_tasks(

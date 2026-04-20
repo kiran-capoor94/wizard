@@ -122,6 +122,8 @@ async def save_note(
                         mental_model = sec.scrub(result.data).clean
                 except (NotImplementedError, AttributeError) as e:
                     logger.debug("ctx.elicit unavailable for mental_model: %s", e)
+            if len(content) > 100_000:
+                raise ToolError("Content exceeds 100k character limit")
             clean = sec.scrub(content).clean
             if mental_model is not None:
                 mental_model = sec.scrub(mental_model).clean
