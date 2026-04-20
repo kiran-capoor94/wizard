@@ -317,7 +317,7 @@ class NoteRepository:
         )
         return {row[0]: row[1] for row in db.execute(stmt).all()}
 
-def _build_rolling_summary(notes: list[Note]) -> str | None:
+def build_rolling_summary(notes: list[Note]) -> str | None:
     """Build a rolling summary from mental_models across all task notes.
 
     Produces a chronological digest (newest first) of captured mental models.
@@ -381,7 +381,7 @@ class TaskStateRepository:
             state.last_note_at if state.last_note_at is not None else task.created_at
         )
         state.stale_days = (_dt.datetime.now() - state.last_touched_at).days
-        state.rolling_summary = _build_rolling_summary(notes)
+        state.rolling_summary = build_rolling_summary(notes)
         db.add(state)
         db.flush()
         db.refresh(state)

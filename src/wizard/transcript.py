@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ollama
-from sqlmodel import Session
+from sqlmodel import Session, col, select
 
 from wizard.config import settings
 from wizard.models import Note, NoteType, WizardSession
@@ -16,7 +16,7 @@ from wizard.repositories import (
     NoteRepository,
     TaskRepository,
     TaskStateRepository,
-    _build_rolling_summary,
+    build_rolling_summary,
 )
 from wizard.schemas import SynthesisNote, SynthesisResult
 from wizard.security import SecurityService
@@ -376,16 +376,13 @@ class OllamaSynthesiser:
         Queries notes with both session_id and task_id set. This includes save_note
         calls from the agent and synthesis notes where task matching found a match.
         """
-        from sqlmodel import col as _col
-        from sqlmodel import select as _select
-
         if wizard_session.id is None:
             return []
 
         task_ids: list[int] = list({
             n
             for n in db.execute(
-                _select(Note.task_id)
+                select(Note.task_id)
                 .where(Note.session_id == wizard_session.id)
                 .where(Note.task_id.is_not(None))  # type: ignore[union-attr]
             ).scalars().all()
@@ -398,10 +395,10 @@ class OllamaSynthesiser:
         for task_id in task_ids:
             all_notes = list(
                 db.execute(
-                    _select(Note).where(_col(Note.task_id) == task_id)
+                    select(Note).where(col(Note.task_id) == task_id)
                 ).scalars().all()
             )
-            summary = _build_rolling_summary(all_notes)
+            summary = build_rolling_summary(all_notes)
             if summary is not None:
                 self._task_state_repo.update_rolling_summary(db, task_id, summary)
 

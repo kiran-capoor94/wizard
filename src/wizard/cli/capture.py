@@ -12,7 +12,7 @@ from sqlmodel import select
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
 from wizard.models import WizardSession
-from wizard.repositories import NoteRepository
+from wizard.repositories import NoteRepository, TaskRepository
 from wizard.security import SecurityService
 from wizard.transcript import OllamaSynthesiser, TranscriptReader
 
@@ -112,7 +112,10 @@ def capture(
             allowlist=settings.scrubbing.allowlist, enabled=settings.scrubbing.enabled
         )
         synthesiser = OllamaSynthesiser(
-            reader=TranscriptReader(), note_repo=NoteRepository(), security=security
+            reader=TranscriptReader(),
+            note_repo=NoteRepository(),
+            security=security,
+            t_repo=TaskRepository(),
         )
         total_notes, synthesised_via = 0, "fallback"
         for i, path in enumerate(transcripts):
