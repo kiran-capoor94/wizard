@@ -209,8 +209,6 @@ async def test_session_start_sets_agent_claude_code(
     task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
 ):
     """session_start must set session.agent = 'claude-code' for mid-session synthesis to work."""
-    import contextlib
-
     agent_id = "aaaabbbb-cccc-dddd-eeee-000000000002"
     response = await session_start(
         ctx=fake_ctx,
