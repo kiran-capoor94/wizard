@@ -1,7 +1,7 @@
 """Background mid-session synthesis state."""
 import asyncio
 
-MID_SESSION_TASKS: dict[str, asyncio.Task] = {}
+MID_SESSION_TASKS: dict[str, asyncio.Task[None]] = {}
 
 
 def cancel_mid_session_synthesis(agent_session_id: str) -> None:
