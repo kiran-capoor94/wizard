@@ -5,6 +5,7 @@ from fastmcp import Context
 from sqlmodel import Session, or_, select
 
 from .database import get_session
+from .mid_session import cancel_mid_session_synthesis
 from .models import Note, NoteType, WizardSession
 from .repositories import NoteRepository
 from .schemas import AutoCloseSummary, ClosedSessionSummary, SessionState
@@ -116,6 +117,11 @@ class SessionCloser:
     ) -> ClosedSessionSummary:
         session_id = session.id
         assert session_id is not None
+
+        # Clean up background synthesis tasks if this is an abandoned session
+        if session.agent_session_id:
+            cancel_mid_session_synthesis(session.agent_session_id)
+
         notes = self._get_session_notes(db, session_id)
         task_ids = list({n.task_id for n in notes if n.task_id is not None})
         note_count = len(notes)

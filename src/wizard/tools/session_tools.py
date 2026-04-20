@@ -21,6 +21,7 @@ from ..deps import (
     get_task_state_repo,
 )
 from ..mcp_instance import mcp
+from ..mid_session import MID_SESSION_TASKS, cancel_mid_session_synthesis
 from ..models import (
     Note,
     NoteType,
@@ -50,15 +51,6 @@ from ..toon import encode_task_contexts
 from ..transcript import OllamaSynthesiser, TranscriptReader, find_transcript, read_new_lines
 
 logger = logging.getLogger(__name__)
-
-MID_SESSION_TASKS: dict[str, asyncio.Task] = {}
-
-
-def cancel_mid_session_synthesis(agent_session_id: str) -> None:
-    task = MID_SESSION_TASKS.pop(agent_session_id, None)
-    if task:
-        task.cancel()
-
 
 SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
 
