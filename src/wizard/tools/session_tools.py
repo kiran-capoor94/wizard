@@ -50,7 +50,7 @@ from ..transcript import OllamaSynthesiser, TranscriptReader, find_transcript, r
 
 logger = logging.getLogger(__name__)
 
-_MID_SESSION_TASKS: dict[str, asyncio.Task] = {}
+MID_SESSION_TASKS: dict[str, asyncio.Task] = {}
 
 SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
 
@@ -112,8 +112,9 @@ async def _mid_session_synthesis_loop(
         try:
             with get_session() as db:
                 session = db.get(WizardSession, wizard_session_id)
-                if session is not None:
-                    synthesiser.synthesise_lines(db, session, new_lines)
+                if session is None:
+                    continue
+                synthesiser.synthesise_lines(db, session, new_lines)
             processed += len(new_lines)
         except Exception:
             logger.debug(
@@ -218,7 +219,7 @@ async def session_start(
                 wizard_session_id=response.session_id,
             )
         )
-        _MID_SESSION_TASKS[agent_session_id] = mid_task
+        MID_SESSION_TASKS[agent_session_id] = mid_task
 
     return response
 
@@ -247,7 +248,7 @@ async def session_end(
                 raise ToolError(f"Session {session_id} not found")
 
             agent_id = session.agent_session_id
-            mid_task = _MID_SESSION_TASKS.pop(agent_id, None) if agent_id else None
+            mid_task = MID_SESSION_TASKS.pop(agent_id, None) if agent_id else None
             if mid_task:
                 mid_task.cancel()
 
