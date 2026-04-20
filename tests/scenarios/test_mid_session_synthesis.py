@@ -201,3 +201,34 @@ async def test_auto_close_cancels_mid_session_task(
     assert session1 is not None
     db_session.refresh(session1)
     assert session1.closed_by == "auto"
+
+
+@pytest.mark.asyncio
+async def test_session_start_sets_agent_claude_code(
+    db_session, fake_ctx,
+    task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
+):
+    """session_start must set session.agent = 'claude-code' for mid-session synthesis to work."""
+    import contextlib
+
+    agent_id = "aaaabbbb-cccc-dddd-eeee-000000000002"
+    response = await session_start(
+        ctx=fake_ctx,
+        agent_session_id=agent_id,
+        t_repo=task_repo,
+        n_repo=note_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+    )
+
+    session = db_session.get(WizardSession, response.session_id)
+    assert session is not None
+    assert session.agent == "claude-code"
+
+    # Cleanup the background task
+    task = MID_SESSION_TASKS.pop(agent_id, None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
