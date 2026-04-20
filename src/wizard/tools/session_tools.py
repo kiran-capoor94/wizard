@@ -45,6 +45,7 @@ from ..schemas import (
 from ..security import SecurityService
 from ..services import SessionCloser
 from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_START, load_skill
+from ..toon import encode_task_contexts
 
 logger = logging.getLogger(__name__)
 
@@ -140,15 +141,16 @@ async def session_start(
             logger.warning("refresh_stale_days failed: %s", e)
 
         open_tasks_total = t_repo.count_open_tasks(db)
-        open_tasks = t_repo.get_open_task_contexts(db, limit=20)
+        open_tasks_list = t_repo.get_open_task_contexts(db, limit=20)
+        blocked_list = t_repo.get_blocked_task_contexts(db)
 
         response = SessionStartResponse(
             session_id=session.id,
             continued_from_id=continued_from_id,
             source=source,
-            open_tasks=open_tasks,
+            open_tasks=encode_task_contexts("open_tasks", open_tasks_list),
             open_tasks_total=open_tasks_total,
-            blocked_tasks=t_repo.get_blocked_task_contexts(db),
+            blocked_tasks=encode_task_contexts("blocked_tasks", blocked_list),
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             wizard_context=_build_wizard_context(),
             skill_instructions=load_skill(SKILL_SESSION_START),
@@ -258,15 +260,21 @@ def _deserialise_session_state(
         return None, []
 
 
+_RESUME_NOTES_PER_TASK = 3
+
+
 def _group_prior_notes(
     db: Session, session_id: int, n_repo: NoteRepository, t_repo: TaskRepository
 ) -> list[ResumedTaskNotes]:
-    """Query notes for a session and group by task with latest mental model."""
+    """Query notes for a session, grouped by task with latest mental model.
+
+    Returns at most 3 notes per task (most recent). Full history is available
+    via rewind_task when needed.
+    """
     by_task = n_repo.get_notes_grouped_by_task(db, session_id)
     if not by_task:
         return []
 
-    # Build a TaskContext lookup for all referenced tasks
     task_ids = list(by_task.keys())
     task_contexts = {tc.id: tc for tc in t_repo.get_task_contexts_by_ids(db, task_ids)}
 
@@ -278,10 +286,12 @@ def _group_prior_notes(
                 (n.mental_model for n in reversed(notes) if n.mental_model is not None),
                 None,
             )
+            # Tiered delivery: cap notes per task to avoid bloating resume context
+            capped = notes[-_RESUME_NOTES_PER_TASK:]
             result.append(
                 ResumedTaskNotes(
                     task=tc,
-                    notes=[NoteDetail.from_model(n) for n in notes],
+                    notes=[NoteDetail.from_model(n) for n in capped],
                     latest_mental_model=latest_mm,
                 )
             )
