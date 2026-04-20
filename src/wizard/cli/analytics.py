@@ -135,40 +135,28 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
     if not task_starts:
         return 0.0
 
-    # Find the earliest session_start in the window to use as the prior-context boundary.
-    # Any note before this timestamp came from a previous session.
-    session_starts = db.exec(
-        select(ToolCall).where(
-            ToolCall.tool_name == "session_start",
-            ToolCall.called_at >= start_dt,
-            ToolCall.called_at <= end_dt,
-        )
-    ).all()
-
-    if not session_starts:
+    task_start_session_ids = {tc.session_id for tc in task_starts if tc.session_id}
+    if not task_start_session_ids:
         return 0.0
 
-    # Build earliest session_start time per session (same min logic as query_sessions).
-    session_start_times: dict[int, datetime.datetime] = {}
-    for tc in session_starts:
-        if tc.session_id and (
-            tc.session_id not in session_start_times
-            or tc.called_at < session_start_times[tc.session_id]
-        ):
-            session_start_times[tc.session_id] = tc.called_at
-
-    # For each session that had a task_start call, check whether any note existed
-    # before that session began. ToolCall has no task_id, so we use the session
-    # as the prior-context boundary.
-    task_start_session_ids = {tc.session_id for tc in task_starts if tc.session_id}
+    sessions_map = {
+        s.id: s
+        for s in db.exec(
+            select(WizardSession).where(
+                WizardSession.id.in_(list(task_start_session_ids))
+            )
+        ).all()
+        if s.id is not None
+    }
 
     sessions_with_prior_notes: set[int] = set()
     for sid in task_start_session_ids:
-        if sid not in session_start_times:
+        if sid not in sessions_map:
             continue
+        session_created_at = sessions_map[sid].created_at
         has_prior = (
             db.exec(
-                select(Note).where(Note.created_at < session_start_times[sid]).limit(1)
+                select(Note).where(Note.created_at < session_created_at).limit(1)
             ).first()
             is not None
         )
