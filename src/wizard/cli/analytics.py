@@ -1,7 +1,7 @@
 import datetime
 import logging
 
-from sqlmodel import select
+from sqlmodel import func, select
 
 from wizard.models import Note, NoteType, TaskState, ToolCall, WizardSession
 
@@ -149,19 +149,13 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
         if s.id is not None
     }
 
-    sessions_with_prior_notes: set[int] = set()
-    for sid in task_start_session_ids:
-        if sid not in sessions_map:
-            continue
-        session_created_at = sessions_map[sid].created_at
-        has_prior = (
-            db.exec(
-                select(Note).where(Note.created_at < session_created_at).limit(1)
-            ).first()
-            is not None
-        )
-        if has_prior:
-            sessions_with_prior_notes.add(sid)
+    earliest_note_dt = db.exec(select(func.min(Note.created_at))).one_or_none()
+
+    sessions_with_prior_notes = {
+        sid
+        for sid, session in sessions_map.items()
+        if earliest_note_dt is not None and earliest_note_dt < session.created_at
+    }
 
     return round(len(sessions_with_prior_notes) / len(task_start_session_ids), 2)
 
