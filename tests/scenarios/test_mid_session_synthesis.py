@@ -9,7 +9,7 @@ import pytest
 
 from wizard.models import WizardSession
 from wizard.schemas import SynthesisResult
-from wizard.tools.session_tools import _MID_SESSION_TASKS, session_end, session_start
+from wizard.tools.session_tools import MID_SESSION_TASKS, session_end, session_start
 from wizard.transcript import (
     OllamaSynthesiser,
     TranscriptReader,
@@ -101,12 +101,12 @@ async def test_mid_session_task_registered_when_agent_session_id_provided(
         ts_repo=task_state_repo,
         session_closer=session_closer,
     )
-    task = _MID_SESSION_TASKS.get(agent_id)
+    task = MID_SESSION_TASKS.get(agent_id)
     assert task is not None
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
-    _MID_SESSION_TASKS.pop(agent_id, None)
+    MID_SESSION_TASKS.pop(agent_id, None)
 
 
 @pytest.mark.asyncio
@@ -114,7 +114,7 @@ async def test_mid_session_task_not_registered_without_agent_session_id(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
 ):
-    before = set(_MID_SESSION_TASKS.keys())
+    before = set(MID_SESSION_TASKS.keys())
     await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
@@ -123,7 +123,7 @@ async def test_mid_session_task_not_registered_without_agent_session_id(
         ts_repo=task_state_repo,
         session_closer=session_closer,
     )
-    assert set(_MID_SESSION_TASKS.keys()) == before
+    assert set(MID_SESSION_TASKS.keys()) == before
 
 
 @pytest.mark.asyncio
@@ -141,7 +141,7 @@ async def test_mid_session_task_cancelled_on_session_end(
         ts_repo=task_state_repo,
         session_closer=session_closer,
     )
-    assert agent_id in _MID_SESSION_TASKS
+    assert agent_id in MID_SESSION_TASKS
 
     await session_end(
         ctx=fake_ctx,
@@ -156,4 +156,4 @@ async def test_mid_session_task_cancelled_on_session_end(
         sec=security,
         n_repo=note_repo,
     )
-    assert agent_id not in _MID_SESSION_TASKS
+    assert agent_id not in MID_SESSION_TASKS
