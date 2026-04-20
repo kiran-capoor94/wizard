@@ -92,7 +92,7 @@ def query_notes(db, start: datetime.date, end: datetime.date) -> dict:
         by_type[type_name] = by_type.get(type_name, 0) + 1
         if note.note_type == NoteType.SESSION_SUMMARY:
             session_summaries += 1
-        if note.mental_model:
+        elif note.mental_model:
             mental_models += 1
 
     manual_notes = total - session_summaries
