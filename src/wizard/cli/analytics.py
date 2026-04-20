@@ -18,48 +18,29 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
             ToolCall.called_at <= end_dt,
         )
     ).all()
-
     total_tool_calls = len(calls)
 
-    # Keep earliest session_start and latest session_end per session to ensure
-    # duration is always non-negative and spans the true wall-clock window.
-    starts: dict[int, datetime.datetime] = {}
-    ends: dict[int, datetime.datetime] = {}
-    for c in calls:
-        if c.tool_name == "session_start" and c.session_id:
-            if c.session_id not in starts or c.called_at < starts[c.session_id]:
-                starts[c.session_id] = c.called_at
-        elif c.tool_name == "session_end" and c.session_id and (
-            c.session_id not in ends or c.called_at > ends[c.session_id]
-        ):
-            ends[c.session_id] = c.called_at
-
-    session_count = len(starts)
-
-    # Durations: user-closed sessions use session_end ToolCall timestamp
-    durations = []
-    for sid, start_time in starts.items():
-        if sid in ends:
-            delta = (ends[sid] - start_time).total_seconds() / 60
-            durations.append(delta)
-
-    # Query WizardSession records for the same sessions counted in session_count
-    # so that abandoned_count / session_count is a coherent rate.
-    sessions_by_id = db.exec(
+    sessions = db.exec(
         select(WizardSession).where(
-            WizardSession.id.in_(list(starts.keys()))
+            WizardSession.created_at >= start_dt,
+            WizardSession.created_at <= end_dt,
         )
     ).all()
+    session_count = len(sessions)
 
-    abandoned = [s for s in sessions_by_id if s.closed_by == "auto"]
-    abandoned_count = len(abandoned)
-
-    for s in abandoned:
-        if s.last_active_at is not None and s.id in starts:
-            delta = (s.last_active_at - starts[s.id]).total_seconds() / 60
+    durations = []
+    for s in sessions:
+        if s.closed_by == "user":
+            delta = (s.updated_at - s.created_at).total_seconds() / 60
             durations.append(delta)
+        elif s.closed_by == "auto" and s.last_active_at is not None:
+            delta = (s.last_active_at - s.created_at).total_seconds() / 60
+            durations.append(delta)
+        # open sessions: excluded from average
 
     avg_duration = sum(durations) / len(durations) if durations else 0.0
+    abandoned = [s for s in sessions if s.closed_by == "auto"]
+    abandoned_count = len(abandoned)
 
     return {
         "session_count": session_count,
