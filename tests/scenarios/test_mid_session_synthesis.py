@@ -166,7 +166,7 @@ async def test_auto_close_cancels_mid_session_task(
     task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
 ):
     """Auto-closing an abandoned session must clean up its mid-session task."""
-    agent_id = "aaaabbbb-cccc-dddd-eeee-000000000001"
+    agent_id = "aaaabbbb-cccc-dddd-eeee-ffff00001113"
 
     # Session 1: start with agent_session_id — registers a task in MID_SESSION_TASKS
     start1 = await session_start(
@@ -209,7 +209,7 @@ async def test_session_start_sets_agent_claude_code(
     task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
 ):
     """session_start must set session.agent = 'claude-code' for mid-session synthesis to work."""
-    agent_id = "aaaabbbb-cccc-dddd-eeee-000000000002"
+    agent_id = "aaaabbbb-cccc-dddd-eeee-ffff00001114"
     response = await session_start(
         ctx=fake_ctx,
         agent_session_id=agent_id,
