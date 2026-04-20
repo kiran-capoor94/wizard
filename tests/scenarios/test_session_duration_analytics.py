@@ -84,3 +84,22 @@ def test_abandoned_without_last_active_excluded_from_average(db_session: Session
     result = query_sessions(db_session, start, end)
 
     assert result["avg_duration_minutes"] == 0.0
+
+
+def test_hook_closed_session_included_in_duration(db_session: Session):
+    now = datetime.datetime.now().replace(microsecond=0)
+    start = datetime.date.today() - datetime.timedelta(days=1)
+    end = datetime.date.today() + datetime.timedelta(days=1)
+
+    s = WizardSession(summary="Synthesised", closed_by="hook", created_at=now)
+    db_session.add(s)
+    db_session.flush()
+    db_session.refresh(s)
+    s.updated_at = now + datetime.timedelta(minutes=15)
+    db_session.add(s)
+    db_session.flush()
+
+    result = query_sessions(db_session, start, end)
+
+    assert result["avg_duration_minutes"] == 15.0
+    assert result["abandoned_count"] == 0

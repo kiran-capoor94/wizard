@@ -30,7 +30,7 @@ def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
 
     durations = []
     for s in sessions:
-        if s.closed_by == "user":
+        if s.closed_by in ("user", "hook"):
             delta = (s.updated_at - s.created_at).total_seconds() / 60
             durations.append(delta)
         elif s.closed_by == "auto" and s.last_active_at is not None:
