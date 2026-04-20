@@ -41,6 +41,8 @@ def encode_task_contexts(label: str, tasks: list[TaskContext]) -> str:
     header = f"{label}[{len(tasks)}]{{{','.join(_TASK_FIELDS)}}}:"
     lines = [header]
 
+    buf = io.StringIO()
+    writer = csv.writer(buf)
     for t in tasks:
         preview = (t.last_note_preview or "")[:_PREVIEW_MAX].replace("\n", " ")
         row = [
@@ -57,8 +59,9 @@ def encode_task_contexts(label: str, tasks: list[TaskContext]) -> str:
             preview,
             t.source_url or "",
         ]
-        buf = io.StringIO()
-        csv.writer(buf).writerow(row)
+        buf.seek(0)
+        buf.truncate(0)
+        writer.writerow(row)
         lines.append("  " + buf.getvalue().rstrip("\r\n"))
 
     return "\n".join(lines)
