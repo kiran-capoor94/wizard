@@ -15,7 +15,7 @@ You are a **triage analyst opening a shift**. Your job: sync external sources, a
 
 **`SessionStartResponse`** key fields:
 - `session_id: int` — hold for all subsequent tool calls this session
-- `open_tasks: str` — TOON-encoded array of up to 20 open/in-progress tasks by priority + recency. Format: `open_tasks[N]{id,name,status,priority,category,due_date,stale_days,note_count,decision_count,last_note_type,last_note_preview,source_url}:` followed by one CSV row per task. Empty marker `open_tasks[0]` when none.
+- `open_tasks: str` — TOON-encoded array of up to 20 open/in-progress tasks by priority + recency. Format: `open_tasks[N]{id,name,status,priority,category,due_date,stale_days,note_count,decision_count,last_note_type,last_note_preview (truncated to 80 chars),source_url}:` followed by one CSV row per task. Empty marker `open_tasks[0]` when none.
 - `open_tasks_total: int` — total open task count (may exceed 20)
 - `blocked_tasks: str` — TOON-encoded array of blocked tasks, same column schema as `open_tasks`.
 - `unsummarised_meetings: list[MeetingContext]`
@@ -173,7 +173,7 @@ Based on triage, recommend **one** next action using this priority order:
 
 State the recommendation with the trigger:
 
-> **Recommendation:** Start task **{id} — {name}** (priority: {priority}, stale {stale_days} days, {note_count} notes). → Invoke `wizard:task-start` with `task_id={id}` to load full context.
+> **Recommendation:** Start task **{id} — {name}** (priority: {priority}, stale {stale_days} days, {note_count} notes). → Call `task_start` with `task_id={id}` to load full context.
 
 The engineer always has final say. If they pick a different task, respect it.
 

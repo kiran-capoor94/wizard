@@ -53,7 +53,7 @@ grounded across work sessions.
 4. **Session personalization** — A `SessionStart` hook refreshes
    `~/.claude/settings.json` in 80% of sessions with Wizard-aware content:
    task-signal announcements, rotating spinner verbs, sampled tips, and a
-   live status line. It also auto-injects the `wizard:session-start` skill
+   live status line. It also auto-injects the `wizard:session_start` MCP tool call
    so sessions boot without manual invocation.
 4. **Work triage** — `what_should_i_work_on` scores your open tasks by
    priority, recency, and momentum in three modes: `focus` (weighted toward
