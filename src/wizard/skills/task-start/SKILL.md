@@ -7,7 +7,7 @@ description: Use when the engineer selects a task to work on, says "let's work o
 
 ## Role
 
-You are **resuming or beginning an investigation**. Your job: load all prior context for this task, assess whether you're building on existing work or starting fresh, identify gaps, and brief the engineer before touching any code. You do not re-discover what was already found. You do not skip prior notes.
+You are **resuming or beginning an investigation**. Your job: ground yourself in existing context, assess whether you're building on prior work or starting fresh, identify gaps, and brief the engineer before touching any code. You do not re-discover what was already found.
 
 > **Tool check** — Before any investigation, analysis, or knowledge lookup: consult your Tool Registry. Wizard tools first, then other MCPs. If you no longer have your registry, retrieve `tool_registry` from session state via `resume_session` or rebuild from available tools. Internal knowledge is the last resort.
 
@@ -20,7 +20,10 @@ You are **resuming or beginning an investigation**. Your job: load all prior con
 > - `task: TaskContext` — full task context (id, name, status, priority, category, due_date, stale_days, note_count, decision_count, source_url)
 > - `compounding: bool` — `true` if prior notes exist, `false` if fresh start
 > - `notes_by_type: dict[str, int]` — count per note type, e.g. `{"investigation": 3, "decision": 1}`
-> - `prior_notes: list[NoteDetail]` — all notes, **oldest first**
+> - `rolling_summary: str | None` — synthesised digest of all prior notes built from mental_models, newest first. Present when ≥1 note has a mental_model recorded.
+> - `prior_notes: list[NoteDetail]` — **3 most recent notes**, oldest first. For full history call `rewind_task`.
+> - `total_notes: int` — total note count including notes not returned
+> - `older_notes_available: bool` — `true` if total_notes > 3; use `rewind_task` to see older notes
 > - `latest_mental_model: str | None` — most recent mental model snapshot, or null
 
 > **`NoteDetail`** fields:
@@ -91,39 +94,40 @@ Then:
 
 ### Step 4B — Compounding Session (compounding == true)
 
-Prior work exists. You must absorb it before doing anything else.
+Prior work exists. Ground yourself in it before doing anything else.
 
 **4B.1 — Show note shape:**
 
-> **Prior work:** {note_count} notes — {notes_by_type rendered as e.g. "3 investigations, 1 decision, 1 docs"}
+> **Prior work:** {total_notes} notes — {notes_by_type rendered as e.g. "3 investigations, 1 decision, 1 docs"}
+> {if older_notes_available: "(showing 3 most recent — call rewind_task for full history)"}
 
-**4B.2 — Restore mental model:**
+**4B.2 — Restore mental model from rolling_summary:**
 
-- If `latest_mental_model` is not null:
-  > **Mental model (from {date of note}):**
+- If `rolling_summary` is not null:
+  > **Rolling summary (built from mental models):**
+  > {rolling_summary}
+- Else if `latest_mental_model` is not null:
+  > **Latest mental model:**
   > {latest_mental_model}
-- If null: flag this — "No mental model captured. Consider saving one after this session."
+- If both null: flag this — "No mental models captured. The rolling summary will remain empty until mental_models are recorded on notes."
 
-**4B.3 — Summarise prior notes:**
+**4B.3 — Read the 3 most recent notes:**
 
-Read `prior_notes` from **oldest to newest** (they arrive in this order). For each note, extract:
-- What was done
+Read `prior_notes` from **oldest to newest** (they arrive in this order). Extract:
+- What was done most recently
 - What was found or decided
-- What was ruled out
+- What open questions or next steps were noted
 
-Render a **timeline summary** — not a dump of raw notes. Group by phase of work:
+Render a **brief recap** — not a dump of raw content:
 
-> **Investigation phase** (notes 1-3, {date range}):
-> - Looked at X, found Y
-> - Ruled out Z because {reason}
->
-> **Decision** (note 4, {date}):
-> - Decided to {approach} because {rationale}
+> **Recent activity** ({date range of prior_notes}):
+> - {key finding or decision from most recent notes}
+> - Open: {any unresolved questions from the notes}
 
 **4B.4 — Identify what's already known vs. what's open:**
 
-> **Established:** {list of resolved questions / confirmed facts}
-> **Open:** {list of unresolved questions / next steps from prior notes}
+> **Established:** {from rolling_summary + recent notes — what is resolved}
+> **Open:** {from rolling_summary + recent notes — what remains unresolved}
 
 ### Step 5 — Run Diagnostic
 
@@ -157,7 +161,7 @@ The engineer always has final say.
 
 | Condition | Signal | Recommendation |
 |-----------|--------|----------------|
-| `compounding == true and latest_mental_model == null` | No model captured | Recommend saving a mental model during this session |
+| `compounding == true and rolling_summary == null and latest_mental_model == null` | No model captured | Recommend saving a mental model during this session to enable rolling_summary |
 | `note_count > 3 and decision_count == 0` | Analysis loop | Decide before investigating further |
 | `stale_days >= 5 and compounding == true` | Stale context | Re-validate assumptions, mental model may be outdated |
 | `stale_days >= 7` | Severe context loss | Treat almost as fresh start — re-read everything, verify with code |
@@ -168,10 +172,12 @@ The engineer always has final say.
 
 ## Anti-Patterns
 
-- ⚠️ Do NOT touch code before reading prior notes when `compounding == true`. The prior notes ARE your starting point.
-- ⚠️ Do NOT dump raw note content verbatim — synthesise into a timeline summary.
-- ⚠️ Do NOT re-investigate something already covered in prior notes. If note 2 says "ruled out approach X because Y", do not re-explore X.
-- ⚠️ Do NOT ignore `latest_mental_model` — it is the most recent understanding of the problem. Start from it.
+- ⚠️ Do NOT touch code before reading `rolling_summary` and recent notes when `compounding == true`. These ARE your starting point.
+- ⚠️ Do NOT call `rewind_task` unless `older_notes_available == true` AND you believe the recent notes + rolling_summary are insufficient to proceed. Most sessions will not need it.
+- ⚠️ Do NOT dump raw note content verbatim — synthesise into a brief recap.
+- ⚠️ Do NOT re-investigate something already covered in the rolling_summary. If it says "ruled out approach X because Y", do not re-explore X.
+- ⚠️ Do NOT ignore `rolling_summary` when it is present — it is the distilled understanding built from all prior mental models.
 - ⚠️ Do NOT skip `what_am_i_missing` — it surfaces gaps you won't notice from notes alone.
 - ⚠️ Do NOT begin work without stating the task context header — the engineer needs to confirm you're on the right task.
 - ⚠️ Do NOT invent prior context. If `compounding == false`, say "fresh start" — do not speculate about what might have been done before.
+- ⚠️ Do NOT neglect saving `mental_model` on notes — the rolling_summary is only as good as the mental models recorded. No mental_models = no rolling_summary.
