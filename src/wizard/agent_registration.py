@@ -262,7 +262,7 @@ def register_hook(agent_id: str) -> bool:
     if config_path.exists():
         try:
             data = json.loads(config_path.read_text())
-        except json.JSONDecodeError, ValueError:
+        except (json.JSONDecodeError, ValueError):
             data = {}
     else:
         data = {}
@@ -273,21 +273,28 @@ def register_hook(agent_id: str) -> bool:
     for event, script in _HOOK_SCRIPTS[agent_id].items():
         event_hooks = hooks.setdefault(event, [])
         name = script.name  # e.g. "session-end.sh" or "session-start.sh"
+        expected_cmd = f"WIZARD_AGENT={agent_id} bash {script}"
 
-        already = any(
-            name in h.get("command", "")
+        already_correct = any(
+            h.get("command", "") == expected_cmd
             for entry in event_hooks
             for h in entry.get("hooks", [])
         )
-        if already:
+        if already_correct:
             continue
 
-        event_hooks.append(
+        # Remove stale entry (present but wrong command — e.g. missing WIZARD_AGENT prefix).
+        hooks[event] = [
+            entry
+            for entry in event_hooks
+            if not any(name in h.get("command", "") for h in entry.get("hooks", []))
+        ]
+        hooks[event].append(
             {
                 "hooks": [
                     {
                         "type": "command",
-                        "command": f"bash {script}",
+                        "command": expected_cmd,
                         "timeout": 10,
                     }
                 ],
@@ -314,7 +321,7 @@ def deregister_hook(agent_id: str) -> bool:
 
     try:
         data = json.loads(config_path.read_text())
-    except json.JSONDecodeError, ValueError:
+    except (json.JSONDecodeError, ValueError):
         return False
 
     hooks = data.get(hooks_key, {})
@@ -392,7 +399,7 @@ def uninstall_skills(agent_id: str, source_dir: Path) -> bool:
 
 
 def scan_all_registered() -> list[str]:
-    """Fallback: check all 5 known config paths, return agent IDs where wizard key present."""
+    """Fallback: check all known config paths, return agent IDs where wizard key present."""
     found = []
     for agent_id, cfg in _AGENTS.items():
         if not cfg.config_path.exists():

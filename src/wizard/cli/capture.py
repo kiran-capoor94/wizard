@@ -55,7 +55,25 @@ def _apply_hook_metadata(
 
 
 def _collect_transcripts(session: WizardSession) -> list[Path]:
-    """Return all transcript paths to synthesise for this session."""
+    """Return all transcript paths to synthesise for this session.
+
+    OpenCode stores data in a directory tree keyed by session ID; there is no
+    single transcript file. We synthesise by passing a synthetic path whose
+    stem is the session ID — TranscriptReader._read_opencode uses only path.stem.
+    """
+    if session.agent == "opencode":
+        if not session.agent_session_id:
+            return []
+        return [
+            Path.home()
+            / ".local"
+            / "share"
+            / "opencode"
+            / "storage"
+            / "message"
+            / session.agent_session_id
+            / f"{session.agent_session_id}.json"
+        ]
     if not session.transcript_path:
         return []
     main_path = Path(session.transcript_path)

@@ -13,9 +13,8 @@ INPUT=$(cat)
 AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null || true)
 [ -n "$AGENT_ID" ] && exit 0
 
-# Detect agent from hook input structure
-# Claude Code/Gemini: transcript_path present
-# Copilot: source present
+# Detect transcript path and session ID from hook input.
+# Claude Code/Gemini provide transcript_path; Codex/Copilot provide session_id.
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // .transcript // empty' 2>/dev/null || true)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 
