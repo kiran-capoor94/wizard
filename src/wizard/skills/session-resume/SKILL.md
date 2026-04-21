@@ -50,7 +50,7 @@ You are **picking up a dropped thread**. A prior session exists with state, note
 
 1. **`resume_session` called**
    - ✅ You received a `ResumeSessionResponse` with a new integer `session_id`
-   - 🛑 If ToolError "No sessions with notes found": tell the engineer no prior session exists — use `wizard:session-start` instead.
+   - 🛑 If ToolError "No sessions with notes found": tell the engineer no prior session exists — call `session_start` instead.
    - 🛑 If ToolError "Session {id} not found": the requested session ID is invalid — ask for a different one.
 
 2. **NEW session_id stated**

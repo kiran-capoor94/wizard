@@ -14,12 +14,12 @@ from tests.fakes import (
 from wizard.repositories import (
     MeetingRepository,
     NoteRepository,
+    SessionRepository,
     TaskRepository,
     TaskStateRepository,
 )
 from wizard.security import SecurityService
 from wizard.services import SessionCloser
-from wizard.transcript import CaptureSynthesiser, TranscriptReader
 
 
 @pytest.fixture(scope="session")
@@ -90,12 +90,8 @@ def session_closer(security):
 
 
 @pytest.fixture
-def capture_synthesiser(security, note_repo):
-    return CaptureSynthesiser(
-        reader=TranscriptReader(),
-        note_repo=note_repo,
-        security=security,
-    )
+def session_repo():
+    return SessionRepository()
 
 
 @pytest.fixture

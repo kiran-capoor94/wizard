@@ -1,5 +1,6 @@
 # Wizard
 
+[![Version](https://img.shields.io/badge/version-2.2.0-blue)](https://github.com/kiran-capoor94/wizard)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Built with FastMCP](https://img.shields.io/badge/built%20with-FastMCP-purple)](https://github.com/jlowin/fastmcp)
@@ -16,7 +17,7 @@ quick-wins, and unblock.
 
 ## Quick Start
 
-**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/)
+**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/), a [LiteLLM-compatible](https://docs.litellm.ai/docs/providers) LLM endpoint (e.g. [Ollama](https://ollama.com/), [llama.cpp](https://github.com/ggerganov/llama.cpp), [Unsloth](https://github.com/unslothai/unsloth)) with `gemma4:latest-64k`
 
 ```bash
 git clone https://github.com/kiran-capoor94/wizard.git
@@ -43,11 +44,21 @@ grounded across work sessions.
    per task across sessions. Every time you revisit a task, prior context
    surfaces automatically. The more you use Wizard, the less ramp-up each
    session costs.
-3. **Transcript synthesis** — When a session ends, a `SessionEnd` hook fires
-   and Wizard synthesises the agent's conversation transcript into structured
-   notes (investigation, decision, docs, learnings) via `CaptureSynthesiser`.
-   No manual `save_note` calls required.
-4. **Work triage** — `what_should_i_work_on` scores your open tasks by
+3. **TOON (Token-Oriented Object Notation)** — Wizard delivers large task lists
+   using a custom, compact tabular format that reduces token consumption
+   by ~40% vs JSON. This allows the agent to ingest more context without
+   hitting window limits.
+4. **Transcript synthesis** — Wizard uses any [LiteLLM-compatible](https://docs.litellm.ai/docs/providers)
+   provider (default: `ollama/gemma4:latest-64k`) to synthesise conversation
+   transcripts into structured notes. This happens in the background every 5 minutes
+   during the session, and a final full synthesis is triggered by the `SessionEnd`
+   hook calling `wizard capture --close`.
+5. **Session personalization** — A `SessionStart` hook refreshes
+   `~/.claude/settings.json` in 80% of sessions with Wizard-aware content:
+   task-signal announcements, rotating spinner verbs, sampled tips, and a
+   live status line. It also auto-injects the `wizard:session_start` MCP tool call
+   so sessions boot without manual invocation.
+6. **Work triage** — `what_should_i_work_on` scores your open tasks by
    priority, recency, and momentum in three modes: `focus` (weighted toward
    high-priority active work), `quick-wins` (simplicity-weighted), and
    `unblock` (surfaces stuck tasks). The skill handles the full interaction —
@@ -64,7 +75,7 @@ The MCP server self-describes its tools — this is just for orientation.
 | `session_start`          | Create session, return open/blocked tasks, unsummarised meetings, wizard context |
 | `session_end`            | Persist session summary and state                                              |
 | `resume_session`         | Restore prior session state into a new session                                 |
-| `task_start`             | Get full task context + all prior notes (compounds across sessions)            |
+| `task_start`             | Get tiered task context (rolling_summary + key notes)                          |
 | `create_task`            | Create a new task, optionally linked to a meeting                              |
 | `update_task`            | Update any task field                                                          |
 | `rewind_task`            | Full note timeline for a task, oldest to newest                                |
@@ -121,15 +132,20 @@ graph TD
     C --> F[SessionCloser]
     C --> G[Security / PII Scrubbing]
     C --> H[Repositories]
+    C --> T[TOON Encoder]
     H --> I[(SQLite)]
-    F --> J[CaptureSynthesiser]
-    J --> K[Transcript JSONL]
+    C --> P[Synthesiser]
+    N[SessionEnd hook] --> O[wizard capture --close]
+    O --> P
+    P --> Q[llama_server / Gemma 4]
+    P --> I
     C -.->|optional write-back| L[Knowledge Store\nNotion / Obsidian]
 ```
 
 **MCP Layer** — FastMCP server exposing tools, skills, and resources.
 Tools are the write path, resources are the read path, skills guide agent
-behaviour. A `ToolLoggingMiddleware` logs every tool invocation.
+behaviour. A `ToolLoggingMiddleware` logs every tool invocation into an
+append-only telemetry table.
 
 **Triage** — `what_should_i_work_on` scores open tasks using priority,
 recency, momentum, and simplicity signals with mode-based weight vectors
@@ -137,9 +153,16 @@ recency, momentum, and simplicity signals with mode-based weight vectors
 for the top candidates.
 
 **Session Management** — `SessionCloser` auto-closes abandoned sessions at
-`session_start`. `CaptureSynthesiser` reads the agent's JSONL transcript
-and produces structured notes (investigation / decision / docs / learnings)
-via LLM sampling, with a synthetic fallback if sampling fails.
+`session_start`. Transcript synthesis is handled by `Synthesiser`
+both mid-session (polling every 5 minutes) and inside `wizard capture --close`
+(hook-based final capture). It routes through `LiteLLMAdapter` to any
+LiteLLM-compatible provider (default: `ollama/gemma4:latest-64k`), producing
+notes (investigation / decision / docs / learnings) and writing them directly to
+SQLite.
+
+**TOON (Token-Oriented Object Notation)** — Custom compact tabular format
+used for bulk task delivery in `session_start`, reducing the context window
+footprint by ~40% compared to standard JSON.
 
 **Security** — PII scrubbing on all ingested content before it touches
 disk. Regex-based with an allowlist for org-specific identifiers you want
@@ -172,6 +195,55 @@ After running `wizard setup`, edit `~/.wizard/config.json`:
 ```
 
 That's the minimal config. Wizard works without a knowledge store.
+
+### Transcript Synthesis
+
+Transcript synthesis runs via any llama_server-compatible endpoint (e.g.
+[llama.cpp](https://github.com/ggerganov/llama.cpp), [Unsloth](https://github.com/unslothai/unsloth)).
+Configure in `config.json`:
+
+```json
+"synthesis": {
+  "model": "ollama/gemma4:latest-64k",
+  "base_url": "http://localhost:11434",
+  "api_key": "",
+  "enabled": true
+}
+```
+
+The `model` field uses [LiteLLM model string format](https://docs.litellm.ai/docs/providers):
+`"<provider>/<model>"`. Examples: `"ollama/gemma4:latest-64k"`, `"openai/gpt-4o-mini"`,
+`"openai/local-model"` with `base_url` pointing to a llama.cpp or Unsloth endpoint.
+`api_key` is required for cloud providers (OpenAI, Anthropic, etc.); leave empty for local endpoints.
+
+Set `"enabled": false` to disable synthesis (e.g. on machines without a
+running LLM server). The `wizard capture --close` command will mark the
+session and exit cleanly without synthesising.
+
+### Sentry Monitoring (Optional)
+
+Wizard can send error and performance data to [Sentry](https://sentry.io/) for enhanced observability.
+Configure in `config.json`:
+
+```json
+"sentry": {
+  "dsn": "your-sentry-dsn-here",
+  "enabled": false,
+  "traces_sample_rate": 0.1,
+  "profiles_sample_rate": 0.1
+}
+```
+
+- `dsn`: Your Sentry Data Source Name (found in Project Settings > Client Keys (DSN))
+- `enabled`: Set to `true` to activate Sentry monitoring
+- `traces_sample_rate`: Percentage of transactions to send to Sentry (0.0 to 1.0)
+- `profiles_sample_rate`: Percentage of transactions to profile (0.0 to 1.0)
+
+When enabled, Wizard will:
+- Automatically initialize Sentry on server startup
+- Create spans for all MCP tool executions with session context
+- Capture exceptions with full stack traces and contextual data
+- Respect existing PII scrubbing before sending data to Sentry
 
 ### Knowledge Store (optional)
 
@@ -227,7 +299,7 @@ uv run wizard doctor [--all]                # Health check — config, database,
 uv run wizard analytics [--week]            # Session/task/note usage stats
 uv run wizard update                        # Pull latest, sync deps, migrate DB, re-register agents + hooks
 uv run wizard uninstall [--yes]             # Clean removal of all state, MCP, and hook registration
-uv run wizard capture --close               # (Called by hooks) Mark session for transcript synthesis
+uv run wizard capture --close               # (Called by hooks) Synthesise transcript into notes
 ```
 
 **Supported agents for `--agent`:** `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `all`
@@ -262,7 +334,8 @@ src/wizard/
   resources.py               # 5 MCP read-only resources
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware
-  transcript.py              # TranscriptReader + CaptureSynthesiser (auto-capture)
+  transcript.py              # TranscriptReader (JSONL parser)
+  synthesis.py               # Synthesiser (auto-capture via LiteLLM — any compatible provider)
   models.py                  # SQLModel entities (task, note, meeting, wizardsession, toolcall, task_state)
   schemas.py                 # Pydantic response schemas
   repositories.py            # Query layer
@@ -274,7 +347,8 @@ src/wizard/
   agent_registration.py      # Register MCP + hooks in agent configs
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ on setup)
 hooks/
-  session-end.sh             # Claude Code SessionEnd hook script
+  session-end.sh             # Claude Code SessionEnd hook — transcript synthesis trigger
+  session-start.sh           # Claude Code SessionStart hook — personalization + session boot injection
 ```
 
 ## License

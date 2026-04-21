@@ -2,7 +2,7 @@
 
 import pytest
 
-from wizard.models import NoteType, WizardSession
+from wizard.models import NoteType
 from wizard.tools.session_tools import session_start
 from wizard.tools.task_tools import save_note, task_start
 
@@ -11,19 +11,17 @@ from wizard.tools.task_tools import save_note, task_start
 async def test_abandoned_session(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer,
 ):
-    task = seed_task(name="Debug memory leak")
+    task = await seed_task(name="Debug memory leak")
 
     # Session 1: start, do work, DON'T end
     start_resp = await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     session_1_id = start_resp.session_id
 
@@ -40,24 +38,18 @@ async def test_abandoned_session(
     start_resp2 = await session_start(
         ctx=fresh_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     assert start_resp2.session_id is not None
     assert start_resp2.session_id != session_1_id
 
-    # Session 1 was auto-closed
+    # Session 1 was auto-closed — observable via the response
     assert len(start_resp2.closed_sessions) == 1
     assert start_resp2.closed_sessions[0].session_id == session_1_id
     assert start_resp2.closed_sessions[0].closed_via == "synthetic"
-
-    # Session 1 DB state reflects closure
-    s1 = db_session.get(WizardSession, session_1_id)
-    assert s1.closed_by == "auto"
-    assert s1.summary is not None
+    assert start_resp2.closed_sessions[0].summary is not None
 
     # Notes from session 1 are still there
     ts_resp = await task_start(

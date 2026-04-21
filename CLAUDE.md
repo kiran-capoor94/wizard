@@ -45,7 +45,8 @@ src/wizard/
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
-  transcript.py              # TranscriptReader + CaptureSynthesiser (auto-capture from agent transcripts)
+  transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
+  synthesis.py               # Synthesiser (auto-capture via LiteLLM — any compatible provider)
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, MeetingRepo, etc.)
@@ -57,7 +58,8 @@ src/wizard/
   agent_registration.py      # Write MCP + hook config into agent JSON/TOML files
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
 hooks/                       # Agent hook scripts (installed by wizard setup)
-  session-end.sh             # Claude Code SessionEnd hook — marks session for transcript synthesis
+  session-end.sh             # Claude Code SessionEnd hook — calls `wizard capture --close` to synthesise transcript
+  session-start.sh           # Claude Code SessionStart hook — personalization refresh (80%) + session boot injection
 alembic/                     # DB migration scripts
 tests/                       # pytest suite
 ```
@@ -87,6 +89,12 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
   "scrubbing": {
     "enabled": true,
     "allowlist": []
+  },
+  "synthesis": {
+    "model": "ollama/gemma4:latest-64k",
+    "base_url": "http://localhost:11434",
+    "api_key": "",
+    "enabled": true
   }
 }
 ```
@@ -124,7 +132,6 @@ get_task_repo()            → TaskRepository
 get_meeting_repo()         → MeetingRepository
 get_note_repo()            → NoteRepository
 get_task_state_repo()      → TaskStateRepository
-get_capture_synthesiser()  → CaptureSynthesiser
 ```
 
 Tools and resources declare deps as typed default params:
@@ -177,7 +184,7 @@ global hooks config. Supported agents and their config locations:
 
 | Agent | MCP Config | Hook Config | Hook Event |
 |-------|-----------|-------------|------------|
-| `claude-code` | `~/.claude.json` | `~/.claude/settings.json` | SessionEnd |
+| `claude-code` | `~/.claude.json` | `~/.claude/settings.json` | SessionEnd, SessionStart |
 | `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | _(no hooks)_ | — |
 | `gemini` | `~/.gemini/settings.json` | `~/.gemini/settings.json` | SessionEnd |
 | `opencode` | `~/.config/opencode/opencode.json` | _(TypeScript plugin)_ | — |
@@ -196,6 +203,46 @@ MCP entry point:
 }
 ```
 
+## Session Continuity Tracking
+
+Wizard tracks three distinct session layers and links them explicitly:
+
+| Layer | ID type | Lifetime | Stored in |
+|-------|---------|---------|-----------|
+| Claude Code agent session | UUID string | Single conversation thread | `WizardSession.agent_session_id` |
+| Wizard session | Integer (SQLite PK) | Matches agent session 1:1 | `WizardSession.id` |
+| FastMCP session | Per-connection `ctx.state` | Transport lifetime | Not persisted |
+
+**Session directory (`~/.wizard/sessions/<uuid>/`):**
+
+Each top-level agent session owns an isolated directory. Sub-agents have no directory (they're suppressed entirely).
+
+| File | Written by | Read by | Content |
+|------|-----------|---------|---------|
+| `source` | `session-start.sh` hook at SessionStart | `session_start` tool | `"startup"`, `"compact"`, or `"resume"` |
+| `wizard_id` | `session_start` tool after DB insert | `session-end.sh` hook at SessionEnd | Integer wizard session ID |
+
+The directory is deleted by `session-end.sh` after `wizard capture` completes.
+
+**Sub-agent suppression:**
+
+Both `session-start.sh` and `session-end.sh` exit immediately (`exit 0`) when `agent_id` is present in the hook payload. Top-level sessions never have `agent_id` — this is the suppression signal from Claude Code.
+
+**Continuation detection (`session_start` tool):**
+
+1. The `SessionStart` hook writes `source` (from payload) to `~/.wizard/sessions/<uuid>/source`.
+2. The hook emits `agent_session_id=<uuid> source=<source>` in `additionalContext`.
+3. The agent calls `session_start(agent_session_id=<uuid>)`.
+4. `session_start` reads `source` from the keyed directory.
+5. If `source == "compact"`, the tool queries the DB for the most recent prior session and sets `continued_from_id`.
+
+**Key files:**
+- `hooks/session-start.sh` — sub-agent suppression, keyed dir write, UUID in additionalContext
+- `hooks/session-end.sh` — sub-agent suppression, keyed dir lookup, cleanup
+- `tools/session_tools.py` — `SESSIONS_DIR`, `_find_previous_session_id`, `agent_session_id` param
+- `models.py` — `WizardSession.agent_session_id`, `WizardSession.continued_from_id`
+- `schemas.py` — `SessionStartResponse.source`, `SessionStartResponse.continued_from_id`
+
 ## Auto-Capture (Transcript Synthesis)
 
 Wizard automatically generates structured notes from agent conversation
@@ -206,38 +253,83 @@ accumulate context as you work.
 
 1. A **SessionEnd hook** fires when the agent's session ends (installed by
    `wizard setup`).
-2. The hook calls `wizard capture --close --transcript <path> --agent <id>`,
-   which writes the transcript path to `WizardSession` and sets
-   `closed_by = "hook"`.
-3. At the next `session_start` (or explicit `session_end`),
-   `CaptureSynthesiser` reads the transcript, calls `ctx.sample()` with
-   wizard's opinionated prompt scaffold, and saves structured `Note` objects.
+2. The hook calls `wizard capture --close --transcript <path> --agent <id> --agent-session-id <uuid>`.
+3. `wizard capture` finds the wizard session matching `--session-id` (written
+   by `session_start`) or the most recent unsynthesised session within 24h,
+   sets `transcript_path`, `agent`, and `agent_session_id`, then calls
+   `Synthesiser` which calls a LiteLLM-compatible provider via `LiteLLMAdapter`
+   and saves the resulting notes to SQLite.
+   On success, `WizardSession.is_synthesised` is set to `True`.
 
-**Three-tier fallback** (same pattern as `SessionCloser`):
-- Tier 1: LLM sampling → structured notes (investigation/decision/docs/learnings)
-- Tier 2: Synthetic summary from transcript metadata
-- Tier 3: Minimal fallback
+**Synthesis is fully decoupled from the MCP server.** It runs at hook time,
+before the next session starts. No `ctx.sample()` involved — no round-trip
+cost, no dependency on MCP context availability.
+
+**Fallback:** If the LLM server is unreachable, `wizard capture` exits non-zero.
+The session retains its `transcript_path` (`is_synthesised` stays `False`). Retry
+with `wizard capture --close --session-id <id>` when the server is available.
 
 **Key files:**
-- `transcript.py` — `TranscriptReader` (JSONL parser) + `CaptureSynthesiser`
+- `transcript.py` — `TranscriptReader` (JSONL parser)
+- `synthesis.py` — `Synthesiser` (LLM call + note persistence)
 - `hooks/session-end.sh` — Claude Code hook script
 - `agent_registration.py` — `register_hook()` / `deregister_hook()`
+- `config.py` — `SynthesisSettings` (model, base_url, api_key, enabled)
 
 **Transcript format:** Claude Code writes JSONL with `type` field
 (`user`, `assistant`, `progress`, `file-history-snapshot`, `system`,
 `last-prompt`). The reader skips noise types and normalises
 `tool_use`/`tool_result` blocks into `TranscriptEntry` objects.
 
+**Task matching:** `Synthesiser` always sets `task_id=None` on notes.
+Wizard owns task matching — the LLM is not shown the task list.
+
 **Limitations:**
 - No mid-session intelligence — synthesis runs at session boundaries only
 - Transcript file must exist at synthesis time (not deleted/rotated)
 - Only Claude Code parser is implemented; Codex/Gemini/OpenCode are stubs
+- Requires a running LiteLLM-compatible instance for the configured model string
+
+## Session Personalization
+
+Wizard refreshes Claude Code's appearance and auto-boots the session skill
+on every `SessionStart` event.
+
+**How it works:**
+
+1. A **SessionStart hook** (`hooks/session-start.sh`) fires at the start of
+   every Claude Code session (installed by `wizard setup`).
+2. **80% probability gate** (`$((RANDOM % 10)) -lt 8`): a Python heredoc
+   queries `wizard.db`, selects an announcement based on task signals, picks
+   a spinner verb pack, samples tips, and merges them into
+   `~/.claude/settings.json`. Keys written: `companyAnnouncements`,
+   `spinnerVerbs`, `spinnerTipsOverride`, and `statusLine` (only if absent).
+3. **Always**: outputs `additionalContext` JSON instructing the agent to
+   call the `wizard:session_start` MCP tool — no manual trigger needed.
+
+**Announcement priority** (first match wins):
+- Overdue tasks
+- Analysis loops (`note_count > 3 and decision_count = 0`)
+- Stale tasks (untouched > 14 days)
+- Open task count > 20
+- Generic fallback
+
+**Spinner packs** — three themed sets (Absurdist, Stoic, Dramatic) selected
+randomly each session.
+
+**Failure isolation:** the personalization block runs with `|| true` — a
+SQLite error or missing config file never blocks the session boot injection.
+
+**Key files:**
+- `hooks/session-start.sh` — hook script (bash + python3 heredoc)
+- `agent_registration.py` — `register_hook()` / `deregister_hook()` now
+  iterate `_HOOK_SCRIPTS` to install both SessionEnd and SessionStart
 
 ## MCP Tools — Quick Reference
 
 | Tool | Key inputs | Key outputs |
 |------|-----------|------------|
-| `session_start` | — | session_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context |
+| `session_start` | agent_session_id? | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions |
 | `session_end` | session_id, summary, intent, working_set, state_delta, open_loops, next_actions, closure_status | note_id, session_state_saved |
 | `resume_session` | session_id? | session_id, resumed_from, session_state, working_set_tasks, prior_notes |
 | `task_start` | task_id | task, notes_by_type, prior_notes, latest_mental_model, compounding |

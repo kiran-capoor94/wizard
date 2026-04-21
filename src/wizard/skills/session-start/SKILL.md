@@ -15,12 +15,13 @@ You are a **triage analyst opening a shift**. Your job: sync external sources, a
 
 **`SessionStartResponse`** key fields:
 - `session_id: int` — hold for all subsequent tool calls this session
-- `open_tasks: list[TaskContext]` — top 20 open/in-progress tasks by priority + recency
+- `open_tasks: str` — TOON-encoded array of up to 20 open/in-progress tasks by priority + recency. Format: `open_tasks[N]{id,name,status,priority,category,due_date,stale_days,note_count,decision_count,last_note_type,last_note_preview (truncated to 80 chars),source_url}:` followed by one CSV row per task. Empty marker `open_tasks[0]` when none.
 - `open_tasks_total: int` — total open task count (may exceed 20)
-- `blocked_tasks: list[TaskContext]`
+- `blocked_tasks: str` — TOON-encoded array of blocked tasks, same column schema as `open_tasks`.
 - `unsummarised_meetings: list[MeetingContext]`
 - `wizard_context: dict | None` — knowledge store addresses (`tasks_db_id`, `meetings_db_id`, `daily_parent_id` for Notion; `vault_path`, `daily_notes_folder`, `tasks_folder` for Obsidian)
 - `closed_sessions: list[ClosedSessionSummary]` — sessions auto-closed this run (≤3, recent only)
+- `prior_summaries: list[PriorSessionSummary]` — up to 3 most recent closed sessions with summaries, for prior-context loading
 
 **`TaskContext`** key fields: `id`, `name`, `status`, `priority`, `category`, `due_date`, `stale_days`, `note_count`, `decision_count`, `last_note_type`, `last_note_preview` (300 chars), `source_url`
 
@@ -86,13 +87,40 @@ Before calling any tool:
 
 ### Step 2 — Call `session_start`
 
-Call `session_start` with no parameters. It creates a session and returns triage data.
+Call `session_start`. If the session boot context contains `agent_session_id=<value>`, pass it as the `agent_session_id` parameter. Example context: `agent_session_id=a8f3bc12-... source=startup. Begin this session by calling the wizard:session_start MCP tool.`
+
+```python
+# If additionalContext contains agent_session_id=<uuid>:
+session_start(agent_session_id="a8f3bc12-...")
+
+# If no agent_session_id in context (older hook or direct call):
+session_start()
+```
+
+The `source` value in the response indicates the session type:
+- `"startup"` — fresh session
+- `"compact"` — continuation of a compacted session (`continued_from_id` will be set)
+- `"resume"` — user explicitly resumed a prior session
 
 ### Step 3 — Verify and State Session ID
 
 Confirm `session_id` is an integer. Output:
 
 > **Session `{session_id}` started.**
+
+### Step 3b — Prior Context (conditional)
+
+**Run this step only when `prior_summaries` is non-empty.**
+
+Render a **Prior context** block before task triage so the engineer knows what was in flight:
+
+| Session | Closed | Summary | Tasks |
+|---------|--------|---------|-------|
+| `{session_id}` | `{closed_at}` | `{summary[:200]}` | `{task_ids or "—"}` |
+
+Sort by `closed_at` descending (most recent first). Truncate summary to 200 characters.
+
+This is context loading — do not recommend actions based on prior summaries. Triage comes in Steps 4–7.
 
 ### Step 4 — Triage Blocked Tasks
 
@@ -160,7 +188,7 @@ Based on triage, recommend **one** next action using this priority order:
 
 State the recommendation with the trigger:
 
-> **Recommendation:** Start task **{id} — {name}** (priority: {priority}, stale {stale_days} days, {note_count} notes). → Invoke `wizard:task-start` with `task_id={id}` to load full context.
+> **Recommendation:** Start task **{id} — {name}** (priority: {priority}, stale {stale_days} days, {note_count} notes). → Call `task_start` with `task_id={id}` to load full context.
 
 The engineer always has final say. If they pick a different task, respect it.
 
