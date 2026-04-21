@@ -91,9 +91,9 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
     "allowlist": []
   },
   "synthesis": {
-    "provider": "ollama",
-    "model": "gemma4:latest-64k",
+    "model": "ollama/gemma4:latest-64k",
     "base_url": "http://localhost:11434",
+    "api_key": "",
     "enabled": true
   }
 }

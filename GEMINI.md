@@ -89,7 +89,7 @@ Wizard tracks three layers: Agent session (UUID), Wizard session (Integer PK), a
 
 ### Auto-Capture (Transcript Synthesis)
 - **SessionEnd hook** calls `wizard capture --close`.
-- `Synthesiser` reads agent transcripts (JSONL) and POSTs to a llama_server-compatible endpoint.
+- `Synthesiser` reads agent transcripts (JSONL) and calls any LiteLLM-compatible provider via `LiteLLMAdapter`. Model is configured as a LiteLLM model string (e.g. `"ollama/gemma4:latest-64k"`).
 - Decoupled from MCP server; runs at hook time to avoid round-trip costs.
 
 ### Session Personalization

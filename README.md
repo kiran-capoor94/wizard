@@ -204,12 +204,17 @@ Configure in `config.json`:
 
 ```json
 "synthesis": {
-  "provider": "llama_server",
-  "model": "gemma4:latest-64k",
-  "base_url": "http://localhost:8080",
+  "model": "ollama/gemma4:latest-64k",
+  "base_url": "http://localhost:11434",
+  "api_key": "",
   "enabled": true
 }
 ```
+
+The `model` field uses [LiteLLM model string format](https://docs.litellm.ai/docs/providers):
+`"<provider>/<model>"`. Examples: `"ollama/gemma4:latest-64k"`, `"openai/gpt-4o-mini"`,
+`"openai/local-model"` with `base_url` pointing to a llama.cpp or Unsloth endpoint.
+`api_key` is required for cloud providers (OpenAI, Anthropic, etc.); leave empty for local endpoints.
 
 Set `"enabled": false` to disable synthesis (e.g. on machines without a
 running LLM server). The `wizard capture --close` command will mark the
