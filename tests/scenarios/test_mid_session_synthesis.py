@@ -9,10 +9,13 @@ import pytest
 
 from wizard.mid_session import MID_SESSION_TASKS
 from wizard.models import WizardSession
+from wizard.repositories import NoteRepository
 from wizard.schemas import SynthesisResult
+from wizard.security import SecurityService
+from wizard.synthesis import OllamaSynthesiser
 from wizard.tools.session_tools import session_end, session_start
 from wizard.transcript import (
-    OllamaSynthesiser,
+    TranscriptEntry,
     TranscriptReader,
     find_transcript,
     read_new_lines,
@@ -249,3 +252,68 @@ async def test_session_start_without_agent_session_id_leaves_agent_none(
     session = db_session.get(WizardSession, response.session_id)
     assert session is not None
     assert session.agent is None
+
+
+# ---------------------------------------------------------------------------
+# _filter_for_synthesis behaviour tests
+# ---------------------------------------------------------------------------
+
+def _make_synthesiser() -> OllamaSynthesiser:
+    return OllamaSynthesiser(
+        reader=TranscriptReader(),
+        note_repo=NoteRepository(),
+        security=SecurityService(allowlist=[], enabled=False),
+    )
+
+
+def test_filter_drops_read_tool_result():
+    entries = [
+        TranscriptEntry(role="tool_call", content="{}", tool_name="Read", tool_use_id="tu_1"),
+        TranscriptEntry(role="tool_result", content="file body", tool_use_id="tu_1"),
+    ]
+    result = _make_synthesiser()._filter_for_synthesis(entries)
+    assert len(result) == 1
+    assert result[0].role == "tool_call"
+
+
+def test_filter_keeps_bash_tool_result():
+    entries = [
+        TranscriptEntry(role="tool_call", content="{}", tool_name="Bash", tool_use_id="tu_1"),
+        TranscriptEntry(role="tool_result", content="tests passed", tool_use_id="tu_1"),
+    ]
+    result = _make_synthesiser()._filter_for_synthesis(entries)
+    assert len(result) == 2
+    assert result[1].content == "tests passed"
+
+
+def test_filter_batched_calls_matched_by_id():
+    """Read result is dropped, Bash result kept, even when batched in one turn."""
+    entries = [
+        TranscriptEntry(role="tool_call", content="{}", tool_name="Read", tool_use_id="tu_1"),
+        TranscriptEntry(role="tool_call", content="{}", tool_name="Bash", tool_use_id="tu_2"),
+        TranscriptEntry(role="tool_result", content="file body", tool_use_id="tu_1"),
+        TranscriptEntry(role="tool_result", content="tests passed", tool_use_id="tu_2"),
+    ]
+    result = _make_synthesiser()._filter_for_synthesis(entries)
+    assert sum(1 for e in result if e.role == "tool_call") == 2
+    assert not any(e.role == "tool_result" and e.content == "file body" for e in result)
+    assert any(e.role == "tool_result" and e.content == "tests passed" for e in result)
+
+
+def test_filter_orphaned_result_kept_conservatively():
+    """tool_result with no matching tool_call (no id) is kept — safe default."""
+    entries = [TranscriptEntry(role="tool_result", content="orphaned")]
+    result = _make_synthesiser()._filter_for_synthesis(entries)
+    assert len(result) == 1
+
+
+def test_filter_truncates_per_role():
+    entries = [
+        TranscriptEntry(role="assistant", content="a" * 3000),
+        TranscriptEntry(role="tool_call", content="{}" + "x" * 600, tool_name="Bash"),
+        TranscriptEntry(role="tool_result", content="r" * 500),
+    ]
+    result = _make_synthesiser()._filter_for_synthesis(entries)
+    assert len(result[0].content) == 1000
+    assert len(result[1].content) == 250
+    assert len(result[2].content) == 150

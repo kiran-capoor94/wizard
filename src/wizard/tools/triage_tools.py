@@ -19,15 +19,27 @@ logger = logging.getLogger(__name__)
 _PRIORITY_SCORES = {"high": 1.0, "medium": 0.5, "low": 0.2}
 
 _MODE_WEIGHTS: dict[str, dict[str, float]] = {
-    "focus":      {"priority": 0.50, "recency": 0.30, "momentum": 0.20, "simplicity": 0.00},
-    "quick-wins": {"priority": 0.20, "recency": 0.15, "momentum": 0.15, "simplicity": 0.50},
-    "unblock":    {"priority": 0.40, "recency": 0.40, "momentum": 0.20, "simplicity": 0.00},
+    "focus": {"priority": 0.50, "recency": 0.30, "momentum": 0.20, "simplicity": 0.00},
+    "quick-wins": {
+        "priority": 0.20,
+        "recency": 0.15,
+        "momentum": 0.15,
+        "simplicity": 0.50,
+    },
+    "unblock": {
+        "priority": 0.40,
+        "recency": 0.40,
+        "momentum": 0.20,
+        "simplicity": 0.00,
+    },
 }
 
 _MAX_SAMPLE_COUNT = 4  # sample reasons for top N tasks only
 
 
-def _classify_momentum(task: TaskContext) -> Literal["new", "active", "cooling", "cold"]:
+def _classify_momentum(
+    task: TaskContext,
+) -> Literal["new", "active", "cooling", "cold"]:
     if task.note_count == 0:
         return "new"
     if task.stale_days <= 2:
@@ -69,9 +81,7 @@ def _score_task(
     return round(score, 4)
 
 
-def _dominant_signal(
-    task: TaskContext, mode: str, time_budget: str | None
-) -> str:
+def _dominant_signal(task: TaskContext, mode: str, time_budget: str | None) -> str:
     weights = _MODE_WEIGHTS.get(mode, _MODE_WEIGHTS["focus"])
     priority_score = _PRIORITY_SCORES.get(task.priority.value, 0.2)
     recency_score = 1.0 / (1.0 + task.stale_days)
@@ -114,8 +124,8 @@ async def _sample_reason(
         "Ground the reason in the note context if available. Be specific, not generic."
     )
     try:
-        result = await ctx.sample(messages=[{"role": "user", "content": prompt}], max_tokens=60)
-        return result.content.strip()
+        result = await ctx.sample(prompt, max_tokens=60)
+        return result.result.strip()
     except Exception:
         logger.warning("Reason sampling failed for task %d, using fallback", task.id)
         return _fallback_reason(task, dominant)
@@ -177,16 +187,18 @@ async def what_should_i_work_on(
     recs: list[TaskRecommendation] = []
     for task in shortlist:
         reason = await _sample_reason(ctx, task, mode, time_budget)
-        recs.append(TaskRecommendation(
-            task_id=task.id,
-            name=task.name,
-            priority=task.priority.value,
-            status=task.status.value,
-            score=_score_task(task, mode=mode, time_budget=time_budget),
-            reason=reason,
-            momentum=_classify_momentum(task),
-            last_note_preview=task.last_note_preview,
-        ))
+        recs.append(
+            TaskRecommendation(
+                task_id=task.id,
+                name=task.name,
+                priority=task.priority.value,
+                status=task.status.value,
+                score=_score_task(task, mode=mode, time_budget=time_budget),
+                reason=reason,
+                momentum=_classify_momentum(task),
+                last_note_preview=task.last_note_preview,
+            )
+        )
 
     skill_content = load_skill(SKILL_TRIAGE)
     if skill_content:

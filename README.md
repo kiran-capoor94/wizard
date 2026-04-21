@@ -1,5 +1,6 @@
 # Wizard
 
+[![Version](https://img.shields.io/badge/version-2.2.0-blue)](https://github.com/kiran-capoor94/wizard)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Built with FastMCP](https://img.shields.io/badge/built%20with-FastMCP-purple)](https://github.com/jlowin/fastmcp)
@@ -43,19 +44,21 @@ grounded across work sessions.
    per task across sessions. Every time you revisit a task, prior context
    surfaces automatically. The more you use Wizard, the less ramp-up each
    session costs.
-3. **Transcript synthesis** — When a session ends, a `SessionEnd` hook fires
-   and calls `wizard capture --close`, which reads the conversation transcript
-   and synthesises it into structured notes (investigation, decision, docs,
-   learnings) via a local [Ollama](https://ollama.com/) instance (default model:
-   `gemma4:latest-64k`). No manual `save_note` calls required. Synthesis runs
-   at hook time — fully decoupled from the MCP server, no round-trip cost to
-   the next session.
-4. **Session personalization** — A `SessionStart` hook refreshes
+3. **TOON (Token-Oriented Object Notation)** — Wizard delivers large task lists
+   using a custom, compact tabular format that reduces token consumption
+   by ~40% vs JSON. This allows the agent to ingest more context without
+   hitting window limits.
+4. **Transcript synthesis** — Wizard uses a local [Ollama](https://ollama.com/)
+   instance (default: `gemma4:latest-64k`) to synthesise conversation transcripts
+   into structured notes. This happens in the background every 5 minutes during
+   the session, and a final full synthesis is triggered by the `SessionEnd`
+   hook calling `wizard capture --close`.
+5. **Session personalization** — A `SessionStart` hook refreshes
    `~/.claude/settings.json` in 80% of sessions with Wizard-aware content:
    task-signal announcements, rotating spinner verbs, sampled tips, and a
    live status line. It also auto-injects the `wizard:session_start` MCP tool call
    so sessions boot without manual invocation.
-4. **Work triage** — `what_should_i_work_on` scores your open tasks by
+6. **Work triage** — `what_should_i_work_on` scores your open tasks by
    priority, recency, and momentum in three modes: `focus` (weighted toward
    high-priority active work), `quick-wins` (simplicity-weighted), and
    `unblock` (surfaces stuck tasks). The skill handles the full interaction —
@@ -72,7 +75,7 @@ The MCP server self-describes its tools — this is just for orientation.
 | `session_start`          | Create session, return open/blocked tasks, unsummarised meetings, wizard context |
 | `session_end`            | Persist session summary and state                                              |
 | `resume_session`         | Restore prior session state into a new session                                 |
-| `task_start`             | Get full task context + all prior notes (compounds across sessions)            |
+| `task_start`             | Get tiered task context (rolling_summary + key notes)                          |
 | `create_task`            | Create a new task, optionally linked to a meeting                              |
 | `update_task`            | Update any task field                                                          |
 | `rewind_task`            | Full note timeline for a task, oldest to newest                                |
@@ -129,9 +132,11 @@ graph TD
     C --> F[SessionCloser]
     C --> G[Security / PII Scrubbing]
     C --> H[Repositories]
+    C --> T[TOON Encoder]
     H --> I[(SQLite)]
+    C --> P[OllamaSynthesiser]
     N[SessionEnd hook] --> O[wizard capture --close]
-    O --> P[OllamaSynthesiser]
+    O --> P
     P --> Q[Ollama / Gemma 4]
     P --> I
     C -.->|optional write-back| L[Knowledge Store\nNotion / Obsidian]
@@ -139,7 +144,8 @@ graph TD
 
 **MCP Layer** — FastMCP server exposing tools, skills, and resources.
 Tools are the write path, resources are the read path, skills guide agent
-behaviour. A `ToolLoggingMiddleware` logs every tool invocation.
+behaviour. A `ToolLoggingMiddleware` logs every tool invocation into an
+append-only telemetry table.
 
 **Triage** — `what_should_i_work_on` scores open tasks using priority,
 recency, momentum, and simplicity signals with mode-based weight vectors
@@ -148,11 +154,15 @@ for the top candidates.
 
 **Session Management** — `SessionCloser` auto-closes abandoned sessions at
 `session_start`. Transcript synthesis is handled by `OllamaSynthesiser`
-inside `wizard capture --close`, which runs at hook time after each session
-ends. It calls a local Ollama instance (default: `gemma4:latest-64k`) with
-structured output, producing notes (investigation / decision / docs /
-learnings) and writing them directly to SQLite. Synthesis is fully decoupled
-from the MCP server — the next session pays no synthesis cost.
+both mid-session (polling every 5 minutes) and inside `wizard capture --close`
+(hook-based final capture). It calls a local Ollama instance (default:
+`gemma4:latest-64k`) with structured output, producing notes
+(investigation / decision / docs / learnings) and writing them directly to
+SQLite.
+
+**TOON (Token-Oriented Object Notation)** — Custom compact tabular format
+used for bulk task delivery in `session_start`, reducing the context window
+footprint by ~40% compared to standard JSON.
 
 **Security** — PII scrubbing on all ingested content before it touches
 disk. Regex-based with an allowlist for org-specific identifiers you want

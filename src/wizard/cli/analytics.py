@@ -1,7 +1,7 @@
 import datetime
 import logging
 
-from sqlmodel import func, select
+from sqlmodel import col, func, select
 
 from wizard.models import Note, NoteType, TaskState, ToolCall, WizardSession
 
@@ -143,7 +143,7 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
         s.id: s
         for s in db.exec(
             select(WizardSession).where(
-                WizardSession.id.in_(list(task_start_session_ids))
+                col(WizardSession.id).in_(list(task_start_session_ids))
             )
         ).all()
         if s.id is not None

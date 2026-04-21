@@ -8,7 +8,8 @@ from sqlmodel import select
 
 from wizard.models import Note, WizardSession
 from wizard.schemas import SynthesisNote
-from wizard.transcript import OllamaSynthesiser, TranscriptEntry, TranscriptReader
+from wizard.synthesis import OllamaSynthesiser
+from wizard.transcript import TranscriptEntry, TranscriptReader
 
 
 @pytest.mark.asyncio
@@ -55,7 +56,7 @@ async def test_synthesise_path_assigns_task_id_to_matching_note(
         SynthesisNote(task_id=task.id, note_type="investigation", content="Fixed auth bug")
     ]
     with patch.object(synthesiser._reader, "read", return_value=fake_entries), \
-         patch.object(synthesiser, "_call_ollama", return_value=fake_notes):
+         patch.object(synthesiser, "_call_llm_server", return_value=fake_notes):
         result = synthesiser.synthesise_path(db_session, wizard_session, Path("dummy.jsonl"))
 
     assert result.notes_created == 1
@@ -90,7 +91,7 @@ async def test_synthesise_path_rejects_hallucinated_task_id(
         SynthesisNote(task_id=9999, note_type="investigation", content="Work done")
     ]
     with patch.object(synthesiser._reader, "read", return_value=fake_entries), \
-         patch.object(synthesiser, "_call_ollama", return_value=fake_notes):
+         patch.object(synthesiser, "_call_llm_server", return_value=fake_notes):
         synthesiser.synthesise_path(db_session, wizard_session, Path("dummy.jsonl"))
 
     notes = list(

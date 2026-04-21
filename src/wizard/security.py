@@ -48,7 +48,7 @@ class SecurityService:
         clean = self._scrub_phones(clean, original_to_stub, counters, regions=[None])
 
         # 2. Fixed-format patterns (NHS_ID, NI_NUMBER, EMAIL, etc.)
-        for _name, pattern, prefix in self.PATTERNS:
+        for _, pattern, prefix in self.PATTERNS:
 
             def replace(m: re.Match, _prefix: str = prefix) -> str:
                 matched = m.group(0)

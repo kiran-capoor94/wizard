@@ -77,8 +77,6 @@ def _check_config_file() -> tuple[bool, str]:
     return False, f"Config file not found: {config_path}"
 
 
-
-
 def _check_allowlist_file() -> tuple[bool, str]:
     allowlist = Path.home() / ".wizard" / "allowlist.txt"
     if allowlist.exists():
@@ -108,12 +106,20 @@ def _check_migration_current() -> tuple[bool, str]:
 
 
 def _check_skills_installed() -> tuple[bool, str]:
-    skills_dir = Path.home() / ".wizard" / "skills"
-    if skills_dir.exists() and any(skills_dir.iterdir()):
-        return True, f"Skills directory present: {skills_dir}"
+    registered = agent_registration.read_registered_agents()
+    if not registered:
+        registered = agent_registration.scan_all_registered()
+    for aid in registered:
+        skills_dir = agent_registration._AGENT_SKILLS_DIRS.get(aid)
+        if skills_dir and skills_dir.exists() and any(skills_dir.iterdir()):
+            return True, f"Skills installed for {aid}: {skills_dir}"
+    # Fallback: wizard internal cache
+    wizard_skills = Path.home() / ".wizard" / "skills"
+    if wizard_skills.exists() and any(wizard_skills.iterdir()):
+        return True, f"Skills directory present: {wizard_skills}"
     return (
         False,
-        f"Skills not installed at {skills_dir} — run 'wizard setup --agent claude-code'",
+        "Skills not installed — run 'wizard setup --agent <agent>'",
     )
 
 
@@ -134,7 +140,6 @@ def run_checks(stop_on_failure: bool = True) -> list[tuple[str, bool, str]]:
         ("DB file exists", _check_db_file),
         ("Config file", _check_config_file),
         ("DB tables", _check_db_tables),
-        ("Allowlist file", _check_allowlist_file),
         ("Agent registered", _check_agent_registrations),
         ("Migration current", _check_migration_current),
         ("Skills installed", _check_skills_installed),

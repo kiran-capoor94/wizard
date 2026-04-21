@@ -6,26 +6,10 @@ from fastmcp.exceptions import ToolError
 from sqlmodel import col, select
 
 from ..database import get_session
-from ..deps import (
-    get_meeting_repo,
-    get_note_repo,
-    get_security,
-    get_task_repo,
-)
+from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo
 from ..mcp_instance import mcp
-from ..models import (
-    Meeting,
-    MeetingCategory,
-    MeetingTasks,
-    Note,
-    NoteType,
-    TaskStatus,
-)
-from ..repositories import (
-    MeetingRepository,
-    NoteRepository,
-    TaskRepository,
-)
+from ..models import Meeting, MeetingCategory, MeetingTasks, Note, NoteType, TaskStatus
+from ..repositories import MeetingRepository, NoteRepository, TaskRepository
 from ..schemas import (
     GetMeetingResponse,
     IngestMeetingResponse,
@@ -53,13 +37,16 @@ async def get_meeting(
         with get_session() as db:
             meeting = m_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
-                raise ToolError("Internal error: meeting was not assigned an id after flush")
+                raise ToolError(
+                    "Internal error: meeting was not assigned an id after flush"
+                )
 
             open_task_ids = [
                 t.id
                 for t in meeting.tasks
                 if t.id is not None
-                and t.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
+                and t.status
+                in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
             ]
             linked_tasks = t_repo.get_task_contexts_by_ids(db, open_task_ids)
 
@@ -94,7 +81,9 @@ async def save_meeting_summary(
             session_id: int | None = await ctx.get_state("current_session_id")
             meeting = m_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
-                raise ToolError("Internal error: meeting was not assigned an id after flush")
+                raise ToolError(
+                    "Internal error: meeting was not assigned an id after flush"
+                )
 
             clean_summary = sec.scrub(summary).clean
             meeting.summary = clean_summary
@@ -108,7 +97,9 @@ async def save_meeting_summary(
             )
             saved = n_repo.save(db, note)
             if saved.id is None:
-                raise ToolError("Internal error: note was not assigned an id after flush")
+                raise ToolError(
+                    "Internal error: note was not assigned an id after flush"
+                )
 
             if task_ids:
                 existing_links = {
@@ -176,7 +167,9 @@ async def ingest_meeting(
         db.flush()
         db.refresh(meeting)
         if meeting.id is None:
-            raise ToolError("Internal error: meeting was not assigned an id after flush")
+            raise ToolError(
+                "Internal error: meeting was not assigned an id after flush"
+            )
 
         return IngestMeetingResponse(
             meeting_id=meeting.id,

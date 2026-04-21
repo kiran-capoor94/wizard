@@ -8,7 +8,7 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from pydantic import ValidationError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from ..config import settings
 from ..database import get_session
@@ -22,11 +22,7 @@ from ..deps import (
 )
 from ..mcp_instance import mcp
 from ..mid_session import MID_SESSION_TASKS, cancel_mid_session_synthesis
-from ..models import (
-    Note,
-    NoteType,
-    WizardSession,
-)
+from ..models import Note, NoteType, WizardSession
 from ..repositories import (
     MeetingRepository,
     NoteRepository,
@@ -46,9 +42,15 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..services import SessionCloser
-from ..skills import SKILL_SESSION_END, SKILL_SESSION_RESUME, SKILL_SESSION_START, load_skill
+from ..skills import (
+    SKILL_SESSION_END,
+    SKILL_SESSION_RESUME,
+    SKILL_SESSION_START,
+    load_skill,
+)
+from ..synthesis import OllamaSynthesiser
 from ..toon import encode_task_contexts
-from ..transcript import OllamaSynthesiser, TranscriptReader, find_transcript, read_new_lines
+from ..transcript import TranscriptReader, find_transcript, read_new_lines
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,7 @@ async def _mid_session_synthesis_loop(
         if not new_lines:
             continue
         try:
+
             def _run_synthesis(lines: list[str]) -> int:
                 with get_session() as db:
                     session = db.get(WizardSession, wizard_session_id)
@@ -127,7 +130,9 @@ async def _mid_session_synthesis_loop(
             )
 
 
-def _build_prior_summaries(db: Session, current_session_id: int) -> list[PriorSessionSummary]:
+def _build_prior_summaries(
+    db: Session, current_session_id: int
+) -> list[PriorSessionSummary]:
     """Return the 3 most recent closed sessions with summaries for prior-context surfacing."""
     prior_sessions = db.exec(
         select(WizardSession)
@@ -135,7 +140,7 @@ def _build_prior_summaries(db: Session, current_session_id: int) -> list[PriorSe
             WizardSession.summary != None,  # noqa: E711
             WizardSession.id != current_session_id,
         )
-        .order_by(WizardSession.created_at.desc())
+        .order_by(col(WizardSession.created_at).desc())
         .limit(3)
     ).all()
 
@@ -150,23 +155,25 @@ def _build_prior_summaries(db: Session, current_session_id: int) -> list[PriorSe
                 task_ids = state_obj.working_set
             except (ValueError, ValidationError) as e:
                 logger.warning("prior_summaries: bad session_state sid=%s: %s", s.id, e)
-        result.append(PriorSessionSummary(
-            session_id=s.id,
-            summary=s.summary,
-            closed_at=s.updated_at,
-            task_ids=task_ids,
-        ))
+        result.append(
+            PriorSessionSummary(
+                session_id=s.id,
+                summary=s.summary,
+                closed_at=s.updated_at,
+                task_ids=task_ids,
+            )
+        )
     return result
 
 
 def _find_previous_session_id() -> int | None:
     """Return the most recently created WizardSession id, or None if none exists."""
     with get_session() as db:
-        result = db.execute(
+        result = db.exec(
             select(WizardSession.id)
-            .order_by(WizardSession.created_at.desc(), WizardSession.id.desc())
+            .order_by(col(WizardSession.created_at).desc(), col(WizardSession.id).desc())
             .limit(1)
-        ).scalar()
+        ).first()
         return result
 
 
@@ -210,7 +217,9 @@ async def session_start(
         db.flush()
         db.refresh(session)
         if session.id is None:
-            raise ToolError("Internal error: session was not assigned an id after flush")
+            raise ToolError(
+                "Internal error: session was not assigned an id after flush"
+            )
 
         await ctx.set_state("current_session_id", session.id)
 
@@ -222,7 +231,9 @@ async def session_start(
 
         await ctx.info(f"Session {session.id} started.")
 
-        closed_sessions = await session_closer.close_recent_abandoned(db, ctx, session.id)
+        closed_sessions = await session_closer.close_recent_abandoned(
+            db, ctx, session.id
+        )
 
         try:
             ts_repo.refresh_stale_days(db)
@@ -314,7 +325,9 @@ async def session_end(
             db.flush()
             db.refresh(session)
             if session.id is None:
-                raise ToolError("Internal error: session was not assigned an id after flush")
+                raise ToolError(
+                    "Internal error: session was not assigned an id after flush"
+                )
 
             note = Note(
                 note_type=NoteType.SESSION_SUMMARY,
@@ -323,7 +336,9 @@ async def session_end(
             )
             saved = n_repo.save(db, note)
             if saved.id is None:
-                raise ToolError("Internal error: note was not assigned an id after flush")
+                raise ToolError(
+                    "Internal error: note was not assigned an id after flush"
+                )
 
             await ctx.delete_state("current_session_id")
             await ctx.info(
@@ -432,7 +447,9 @@ async def resume_session(
                 raise ToolError("No sessions with notes found")
 
         if prior.id is None:
-            raise ToolError("Internal error: session was not assigned an id after flush")
+            raise ToolError(
+                "Internal error: session was not assigned an id after flush"
+            )
 
         # Resumed sessions explicitly continue from the source session.
         new_session = WizardSession(
@@ -441,6 +458,10 @@ async def resume_session(
         db.add(new_session)
         db.flush()
         db.refresh(new_session)
+        if new_session.id is None:
+            raise ToolError(
+                "Internal error: session was not assigned an id after flush"
+            )
         await ctx.set_state("current_session_id", new_session.id)
 
         # Write wizard integer ID to the agent-session keyed directory (mirrors session_start).
