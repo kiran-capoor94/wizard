@@ -19,7 +19,6 @@ async def test_resume_session(
     start_resp = await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -71,7 +70,6 @@ async def test_resume_session_caps_prior_notes_per_task(
     start_resp = await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,

@@ -183,7 +183,7 @@ async def test_rewind_task_returns_full_history(
             t_state_repo=task_state_repo,
         )
 
-    rewind_resp = await rewind_task(ctx=fake_ctx, task_id=task.id, n_repo=note_repo)
+    rewind_resp = await rewind_task(task_id=task.id, n_repo=note_repo)
     ts_resp = await task_start(ctx=fake_ctx, task_id=task.id, t_repo=task_repo, n_repo=note_repo)
 
     assert rewind_resp.summary.total_notes == 7

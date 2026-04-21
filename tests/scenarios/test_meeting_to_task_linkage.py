@@ -17,7 +17,6 @@ async def test_meeting_to_task_linkage(
     await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -33,7 +32,7 @@ async def test_meeting_to_task_linkage(
 
     # Create task linked to meeting
     create_resp = await create_task(
-        ctx=fake_ctx, name="Fix auth flow",
+        name="Fix auth flow",
         priority=TaskPriority.HIGH,
         category=TaskCategory.BUG,
         meeting_id=meeting_id,
@@ -50,7 +49,7 @@ async def test_meeting_to_task_linkage(
 
     # Mark task done -- should no longer appear in open_tasks
     await update_task(
-        ctx=fake_ctx, task_id=task_id, status=TaskStatus.DONE,
+        task_id=task_id, status=TaskStatus.DONE,
         t_repo=task_repo, sec=security,
         t_state_repo=task_state_repo,
     )

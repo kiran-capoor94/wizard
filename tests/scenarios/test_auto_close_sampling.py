@@ -23,7 +23,6 @@ async def test_auto_close_via_sampling(
     start1 = await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -51,7 +50,6 @@ async def test_auto_close_via_sampling(
     start2 = await session_start(
         ctx=fresh_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,

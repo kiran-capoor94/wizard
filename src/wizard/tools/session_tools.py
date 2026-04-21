@@ -181,7 +181,6 @@ async def session_start(
     ctx: Context,
     agent_session_id: str | None = None,
     t_repo: TaskRepository = Depends(get_task_repo),
-    n_repo: NoteRepository = Depends(get_note_repo),
     m_repo: MeetingRepository = Depends(get_meeting_repo),
     ts_repo: TaskStateRepository = Depends(get_task_state_repo),
     session_closer: SessionCloser = Depends(get_session_closer),

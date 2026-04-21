@@ -9,7 +9,7 @@ from wizard.tools.task_tools import create_task
 
 
 @pytest.fixture
-def seed_task(fake_ctx, task_repo, security, task_state_repo):
+def seed_task(task_repo, security, task_state_repo):
     """Factory fixture: creates a task via the create_task tool."""
 
     async def _create(
@@ -21,7 +21,6 @@ def seed_task(fake_ctx, task_repo, security, task_state_repo):
         source_url: str | None = None,
     ) -> SimpleNamespace:
         resp = await create_task(
-            ctx=fake_ctx,
             name=name,
             priority=priority,
             category=category,

@@ -14,7 +14,6 @@ async def test_session_end_twice(
     start_resp = await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,

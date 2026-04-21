@@ -201,7 +201,6 @@ async def save_note(
 
 
 async def update_task(
-    ctx: Context,
     task_id: int,
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
@@ -260,7 +259,6 @@ async def update_task(
 
 
 async def create_task(
-    ctx: Context,
     name: str,
     priority: TaskPriority = TaskPriority.MEDIUM,
     category: TaskCategory = TaskCategory.ISSUE,
@@ -333,7 +331,6 @@ async def create_task(
 
 
 async def rewind_task(
-    ctx: Context,
     task_id: int,
     n_repo: NoteRepository = Depends(get_note_repo),
 ) -> RewindResponse:
@@ -382,7 +379,6 @@ async def rewind_task(
 
 
 async def what_am_i_missing(
-    ctx: Context,
     task_id: int,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),

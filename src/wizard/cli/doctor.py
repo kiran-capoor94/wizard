@@ -140,6 +140,7 @@ def run_checks(stop_on_failure: bool = True) -> list[tuple[str, bool, str]]:
         ("DB file exists", _check_db_file),
         ("Config file", _check_config_file),
         ("DB tables", _check_db_tables),
+        ("Allowlist file", _check_allowlist_file),
         ("Agent registered", _check_agent_registrations),
         ("Migration current", _check_migration_current),
         ("Skills installed", _check_skills_installed),
