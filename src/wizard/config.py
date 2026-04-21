@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     model_config = {"extra": "ignore"}
 
     name: str = "wizard"
-    version: str = "2.2.0"
+    version: str = "2.2.1"
     db: str = str(Path.home() / ".wizard" / "wizard.db")
     scrubbing: ScrubbingSettings = Field(default_factory=ScrubbingSettings)
     knowledge_store: KnowledgeStoreSettings = Field(
