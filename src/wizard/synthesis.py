@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import tempfile
 from pathlib import Path
+from typing import Protocol
 
-import httpx
+import litellm
 from sqlmodel import Session, col, select
 
 from wizard.config import settings
@@ -67,6 +69,63 @@ _TRUNCATE: dict[str, int] = {
 }
 
 
+class SynthesisAdapter(Protocol):
+    """Protocol for LLM backends used by Synthesiser."""
+
+    @property
+    def model_id(self) -> str: ...
+
+    def complete(
+        self,
+        messages: list[dict],
+        schema: dict,
+    ) -> list[SynthesisNote]: ...
+
+
+class LiteLLMAdapter:
+    """LiteLLM-backed SynthesisAdapter. Supports any litellm-compatible provider."""
+
+    def __init__(
+        self,
+        model: str,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        self._model = model
+        self._base_url = base_url or None
+        self._api_key = api_key or None
+
+    @property
+    def model_id(self) -> str:
+        return self._model
+
+    def complete(self, messages: list[dict], schema: dict) -> list[SynthesisNote]:
+        kwargs: dict = {"model": self._model, "messages": messages}
+        if self._base_url:
+            kwargs["base_url"] = self._base_url
+        if self._api_key:
+            kwargs["api_key"] = self._api_key
+        try:
+            response = litellm.completion(
+                **kwargs,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "notes", "schema": schema},
+                },
+            )
+            raw = response.choices[0].message.content
+        except Exception:
+            response = litellm.completion(**kwargs)
+            raw = response.choices[0].message.content
+        raw = self._extract_json(raw or "")
+        return [SynthesisNote.model_validate(n) for n in json.loads(raw)]
+
+    @staticmethod
+    def _extract_json(text: str) -> str:
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        return match.group(1).strip() if match else text.strip()
+
+
 class Synthesiser:
     """Synthesise agent transcripts into structured Note objects."""
 
@@ -77,12 +136,18 @@ class Synthesiser:
         security: SecurityService,
         task_state_repo: TaskStateRepository | None = None,
         t_repo: TaskRepository | None = None,
+        adapter: SynthesisAdapter | None = None,
     ):
         self._reader = reader
         self._note_repo = note_repo
         self._security = security
         self._task_state_repo = task_state_repo or TaskStateRepository()
         self._t_repo = t_repo or TaskRepository()
+        self._adapter = adapter or LiteLLMAdapter(
+            model=settings.synthesis.model,
+            base_url=settings.synthesis.base_url or None,
+            api_key=settings.synthesis.api_key or None,
+        )
 
     def synthesise_path(
         self,
@@ -114,8 +179,12 @@ class Synthesiser:
         open_tasks = self._t_repo.get_open_tasks_compact(db)
         valid_task_ids = {tid for tid, _ in open_tasks}
         task_table = "\n".join(f"{tid}\t{name}" for tid, name in open_tasks)
+        messages = [
+            {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
+            {"role": "user", "content": self._build_prompt(entries, task_table)},
+        ]
         try:
-            notes_data = self._call_llm_server(entries, task_table)
+            notes_data = self._adapter.complete(messages, _SYNTHESIS_SCHEMA)
         except Exception as e:
             logger.warning("Synthesiser: LLM call failed: %s", e)
             return SynthesisResult(
@@ -134,7 +203,7 @@ class Synthesiser:
         return SynthesisResult(
             notes_created=saved,
             task_ids_touched=task_ids_touched,
-            synthesised_via="llama_server",
+            synthesised_via=self._adapter.model_id,
         )
 
     def synthesise(self, db: Session, wizard_session: WizardSession) -> SynthesisResult:
@@ -169,33 +238,6 @@ class Synthesiser:
             return self.synthesise_path(db, wizard_session, tmp_path, terminal=False)
         finally:
             tmp_path.unlink(missing_ok=True)
-
-    def _call_llm_server(
-        self, entries: list[TranscriptEntry], task_table: str = ""
-    ) -> list[SynthesisNote]:
-        resp = httpx.post(
-            f"{settings.synthesis.base_url}/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.synthesis.api_key}"},
-            json={
-                "model": settings.synthesis.model,
-                "messages": [
-                    {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": self._build_prompt(entries, task_table),
-                    },
-                ],
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {"name": "notes", "schema": _SYNTHESIS_SCHEMA},
-                },
-                "stream": False,
-            },
-            timeout=300.0,
-        )
-        resp.raise_for_status()
-        raw = resp.json()["choices"][0]["message"]["content"]
-        return [SynthesisNote.model_validate(n) for n in json.loads(raw)]
 
     def _filter_for_synthesis(
         self, entries: list[TranscriptEntry]
