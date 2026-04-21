@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 logger = logging.getLogger(__name__)
@@ -55,11 +55,21 @@ class KnowledgeStoreSettings(BaseModel):
 
 
 class SynthesisSettings(BaseModel):
-    provider: str = "ollama"
-    model: str = "gemma4:latest-64k"
+    provider: str = ""  # deprecated; kept so existing configs don't error on load
+    model: str = "ollama/gemma4:latest-64k"
     base_url: str = "http://localhost:11434"
     api_key: str = ""
     enabled: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_provider(cls, data: object) -> object:
+        if isinstance(data, dict):
+            provider = data.get("provider", "")
+            model = data.get("model", "")
+            if provider and model and "/" not in str(model):
+                data["model"] = f"{provider}/{model}"
+        return data
 
 
 class Settings(BaseSettings):
