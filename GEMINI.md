@@ -8,7 +8,7 @@ Wizard is a local memory layer for AI agents, providing persistent context acros
 - **Database:** SQLite with [SQLModel](https://sqlmodel.tiangolo.com/) (SQLAlchemy + Pydantic)
 - **Migrations:** [Alembic](https://alembic.sqlalchemy.org/)
 - **CLI:** [Typer](https://typer.tiangolo.com/)
-- **Synthesis:** [Ollama](https://ollama.com/) (default model: `gemma4:latest-64k`)
+- **Synthesis:** [LiteLLM](https://docs.litellm.ai/) (default model: `ollama/gemma4:latest-64k`)
 - **Package Manager:** [uv](https://docs.astral.sh/uv/)
 
 ## Building and Running
@@ -16,7 +16,7 @@ Wizard is a local memory layer for AI agents, providing persistent context acros
 ### Prerequisites
 - Python 3.14+
 - `uv` installed
-- `Ollama` with `gemma4:latest-64k` (optional but recommended for synthesis)
+- A [LiteLLM-compatible](https://docs.litellm.ai/docs/providers) endpoint with `gemma4:latest-64k` (optional but recommended for synthesis)
 
 ### Core Commands
 ```bash
@@ -44,7 +44,7 @@ src/wizard/
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
   transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
-  synthesis.py               # Synthesiser (auto-capture via llama_server-compatible endpoint)
+  synthesis.py               # Synthesiser (auto-capture via LiteLLM — any compatible provider)
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, etc.)

@@ -45,7 +45,8 @@ src/wizard/
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
-  transcript.py              # TranscriptReader + OllamaSynthesiser (auto-capture via local Ollama)
+  transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
+  synthesis.py               # Synthesiser (auto-capture via LiteLLM — any compatible provider)
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, MeetingRepo, etc.)
@@ -57,8 +58,8 @@ src/wizard/
   agent_registration.py      # Write MCP + hook config into agent JSON/TOML files
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
 hooks/                       # Agent hook scripts (installed by wizard setup)
-  session-end.sh             # Codex SessionEnd hook — calls `wizard capture --close` to synthesise transcript
-  session-start.sh           # Codex SessionStart hook — personalization refresh (80%) + session boot injection
+  session-end.sh             # Claude Code SessionEnd hook — calls `wizard capture --close` to synthesise transcript
+  session-start.sh           # Claude Code SessionStart hook — personalization refresh (80%) + session boot injection
 alembic/                     # DB migration scripts
 tests/                       # pytest suite
 ```
@@ -90,9 +91,9 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
     "allowlist": []
   },
   "synthesis": {
-    "provider": "ollama",
-    "model": "gemma4:latest-64k",
+    "model": "ollama/gemma4:latest-64k",
     "base_url": "http://localhost:11434",
+    "api_key": "",
     "enabled": true
   }
 }
@@ -183,8 +184,8 @@ global hooks config. Supported agents and their config locations:
 
 | Agent | MCP Config | Hook Config | Hook Event |
 |-------|-----------|-------------|------------|
-| `Codex` | `~/.Codex.json` | `~/.Codex/settings.json` | SessionEnd, SessionStart |
-| `Codex-desktop` | `~/Library/Application Support/Codex/claude_desktop_config.json` | _(no hooks)_ | — |
+| `claude-code` | `~/.claude.json` | `~/.claude/settings.json` | SessionEnd, SessionStart |
+| `claude-desktop` | `~/Library/Application Support/Claude/claude_desktop_config.json` | _(no hooks)_ | — |
 | `gemini` | `~/.gemini/settings.json` | `~/.gemini/settings.json` | SessionEnd |
 | `opencode` | `~/.config/opencode/opencode.json` | _(TypeScript plugin)_ | — |
 | `codex` | `~/.codex/config.toml` | `~/.codex/hooks.json` | Stop |
@@ -208,29 +209,37 @@ Wizard tracks three distinct session layers and links them explicitly:
 
 | Layer | ID type | Lifetime | Stored in |
 |-------|---------|---------|-----------|
-| Codex agent session | UUID string | Single conversation thread | `WizardSession.agent_session_id` |
+| Claude Code agent session | UUID string | Single conversation thread | `WizardSession.agent_session_id` |
 | Wizard session | Integer (SQLite PK) | Matches agent session 1:1 | `WizardSession.id` |
 | FastMCP session | Per-connection `ctx.state` | Transport lifetime | Not persisted |
 
+**Session directory (`~/.wizard/sessions/<uuid>/`):**
+
+Each top-level agent session owns an isolated directory. Sub-agents have no directory (they're suppressed entirely).
+
+| File | Written by | Read by | Content |
+|------|-----------|---------|---------|
+| `source` | `session-start.sh` hook at SessionStart | `session_start` tool | `"startup"`, `"compact"`, or `"resume"` |
+| `wizard_id` | `session_start` tool after DB insert | `session-end.sh` hook at SessionEnd | Integer wizard session ID |
+
+The directory is deleted by `session-end.sh` after `wizard capture` completes.
+
+**Sub-agent suppression:** Both `session-start.sh` and `session-end.sh` exit immediately (`exit 0`) when `agent_id` is present in the hook payload. Top-level sessions never have `agent_id` — this is the suppression signal from Claude Code.
+
 **Continuation detection** (`session_start` tool):
 
-1. If `~/.wizard/current_session_id` exists when `session_start` runs, the
-   previous wizard session was not cleanly ended (compaction, crash, or
-   abandon). The old integer ID is read and stored as `continued_from_id` on
-   the new session, forming an explicit chain.
-2. The `SessionStart` hook writes the agent's UUID to
-   `~/.wizard/pending_agent_session_id`. `session_start` reads and clears this
-   file, storing it as `agent_session_id` on the new wizard session.
-3. The `SessionEnd` hook passes `--agent-session-id <uuid>` to
-   `wizard capture`, which stores it on the session as a fallback if
-   `session_start` never ran (e.g. hook-only capture).
+1. The `SessionStart` hook writes `source` (from payload) to `~/.wizard/sessions/<uuid>/source`.
+2. The hook emits `agent_session_id=<uuid> source=<source>` in `additionalContext`.
+3. The agent calls `session_start(agent_session_id=<uuid>)`.
+4. `session_start` reads `source` from the keyed directory.
+5. If `source == "compact"`, the tool queries the DB for the most recent prior session and sets `continued_from_id`.
 
 **Key files:**
-- `hooks/session-start.sh` — extracts `session_id` UUID from stdin JSON, writes to `pending_agent_session_id`
-- `hooks/session-end.sh` — passes `--agent-session-id` to `wizard capture`
-- `tools/session_tools.py` — `_SESSION_ID_FILE`, `_AGENT_SESSION_ID_FILE`, continuation detection in `session_start`
+- `hooks/session-start.sh` — sub-agent suppression, keyed dir write, UUID in additionalContext
+- `hooks/session-end.sh` — sub-agent suppression, keyed dir lookup, cleanup
+- `tools/session_tools.py` — `SESSIONS_DIR`, `_find_previous_session_id`, `agent_session_id` param
 - `models.py` — `WizardSession.agent_session_id`, `WizardSession.continued_from_id`
-- `schemas.py` — `SessionStartResponse.continued_from_id`
+- `schemas.py` — `SessionStartResponse.source`, `SessionStartResponse.continued_from_id`
 
 ## Auto-Capture (Transcript Synthesis)
 
@@ -246,7 +255,7 @@ accumulate context as you work.
 3. `wizard capture` finds the wizard session matching `--session-id` (written
    by `session_start`) or the most recent unsynthesised session within 24h,
    sets `transcript_path`, `agent`, and `agent_session_id`, then calls
-   `OllamaSynthesiser` which POSTs the transcript to a local Ollama instance
+   `Synthesiser` which calls a LiteLLM-compatible provider via `LiteLLMAdapter`
    and saves the resulting notes to SQLite. On success,
    `WizardSession.is_synthesised` is set to `True`.
 
@@ -254,46 +263,47 @@ accumulate context as you work.
 before the next session starts. No `ctx.sample()` involved — no round-trip
 cost, no dependency on MCP context availability.
 
-**Fallback:** If Ollama is unreachable, `wizard capture` exits non-zero. The
-session retains its `transcript_path` (`is_synthesised` stays `False`). Retry
-with `wizard capture --close --session-id <id>` after Ollama is available.
+**Fallback:** If the LLM server is unreachable, `wizard capture` exits non-zero.
+The session retains its `transcript_path` (`is_synthesised` stays `False`). Retry
+with `wizard capture --close --session-id <id>` when the server is available.
 
 **Key files:**
-- `transcript.py` — `TranscriptReader` (JSONL parser) + `OllamaSynthesiser`
-- `hooks/session-end.sh` — Codex hook script
+- `transcript.py` — `TranscriptReader` (JSONL parser)
+- `synthesis.py` — `Synthesiser` (LLM call + note persistence)
+- `hooks/session-end.sh` — Claude Code hook script
 - `agent_registration.py` — `register_hook()` / `deregister_hook()`
-- `config.py` — `SynthesisSettings` (provider, model, base_url, enabled)
+- `config.py` — `SynthesisSettings` (model, base_url, api_key, enabled)
 
-**Transcript format:** Codex writes JSONL with `type` field
+**Transcript format:** Claude Code writes JSONL with `type` field
 (`user`, `assistant`, `progress`, `file-history-snapshot`, `system`,
 `last-prompt`). The reader skips noise types and normalises
 `tool_use`/`tool_result` blocks into `TranscriptEntry` objects.
 
-**Task matching:** `OllamaSynthesiser` always sets `task_id=None` on notes.
-Wizard owns task matching — the Ollama model is not shown the task list.
+**Task matching:** `Synthesiser` always sets `task_id=None` on notes.
+Wizard owns task matching — the LLM is not shown the task list.
 
 **Limitations:**
 - No mid-session intelligence — synthesis runs at session boundaries only
 - Transcript file must exist at synthesis time (not deleted/rotated)
-- Only Codex parser is implemented; Codex/Gemini/OpenCode are stubs
-- Requires a running local Ollama instance with `gemma4:latest-64k` pulled
+- Only Claude Code parser is implemented; Gemini/OpenCode/Codex are stubs
+- Requires a running LiteLLM-compatible instance for the configured model string
 
 ## Session Personalization
 
-Wizard refreshes Codex's appearance and auto-boots the session skill
+Wizard refreshes Claude Code's appearance and auto-boots the session skill
 on every `SessionStart` event.
 
 **How it works:**
 
 1. A **SessionStart hook** (`hooks/session-start.sh`) fires at the start of
-   every Codex session (installed by `wizard setup`).
+   every Claude Code session (installed by `wizard setup`).
 2. **80% probability gate** (`$((RANDOM % 10)) -lt 8`): a Python heredoc
    queries `wizard.db`, selects an announcement based on task signals, picks
    a spinner verb pack, samples tips, and merges them into
-   `~/.Codex/settings.json`. Keys written: `companyAnnouncements`,
+   `~/.claude/settings.json`. Keys written: `companyAnnouncements`,
    `spinnerVerbs`, `spinnerTipsOverride`, and `statusLine` (only if absent).
 3. **Always**: outputs `additionalContext` JSON instructing the agent to
-   invoke the `wizard:session-start` skill — no manual trigger needed.
+   call the `wizard:session_start` MCP tool — no manual trigger needed.
 
 **Announcement priority** (first match wins):
 - Overdue tasks
@@ -317,7 +327,7 @@ SQLite error or missing config file never blocks the session boot injection.
 
 | Tool | Key inputs | Key outputs |
 |------|-----------|------------|
-| `session_start` | — | session_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context |
+| `session_start` | agent_session_id? | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions |
 | `session_end` | session_id, summary, intent, working_set, state_delta, open_loops, next_actions, closure_status | note_id, session_state_saved |
 | `resume_session` | session_id? | session_id, resumed_from, session_state, working_set_tasks, prior_notes |
 | `task_start` | task_id | task, notes_by_type, prior_notes, latest_mental_model, compounding |

@@ -17,7 +17,7 @@ quick-wins, and unblock.
 
 ## Quick Start
 
-**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/), a llama_server-compatible LLM endpoint (e.g. [llama.cpp](https://github.com/ggerganov/llama.cpp) or [Unsloth](https://github.com/unslothai/unsloth)) with `gemma4:latest-64k`
+**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/), a [LiteLLM-compatible](https://docs.litellm.ai/docs/providers) LLM endpoint (e.g. [Ollama](https://ollama.com/), [llama.cpp](https://github.com/ggerganov/llama.cpp), [Unsloth](https://github.com/unslothai/unsloth)) with `gemma4:latest-64k`
 
 ```bash
 git clone https://github.com/kiran-capoor94/wizard.git
@@ -48,10 +48,10 @@ grounded across work sessions.
    using a custom, compact tabular format that reduces token consumption
    by ~40% vs JSON. This allows the agent to ingest more context without
    hitting window limits.
-4. **Transcript synthesis** — Wizard uses a local llama_server-compatible
-   endpoint (default: `gemma4:latest-64k`) to synthesise conversation transcripts
-   into structured notes. This happens in the background every 5 minutes during
-   the session, and a final full synthesis is triggered by the `SessionEnd`
+4. **Transcript synthesis** — Wizard uses any [LiteLLM-compatible](https://docs.litellm.ai/docs/providers)
+   provider (default: `ollama/gemma4:latest-64k`) to synthesise conversation
+   transcripts into structured notes. This happens in the background every 5 minutes
+   during the session, and a final full synthesis is triggered by the `SessionEnd`
    hook calling `wizard capture --close`.
 5. **Session personalization** — A `SessionStart` hook refreshes
    `~/.claude/settings.json` in 80% of sessions with Wizard-aware content:
@@ -155,9 +155,9 @@ for the top candidates.
 **Session Management** — `SessionCloser` auto-closes abandoned sessions at
 `session_start`. Transcript synthesis is handled by `Synthesiser`
 both mid-session (polling every 5 minutes) and inside `wizard capture --close`
-(hook-based final capture). It POSTs to a llama_server-compatible endpoint
-(default: `gemma4:latest-64k`) with structured output, producing notes
-(investigation / decision / docs / learnings) and writing them directly to
+(hook-based final capture). It routes through `LiteLLMAdapter` to any
+LiteLLM-compatible provider (default: `ollama/gemma4:latest-64k`), producing
+notes (investigation / decision / docs / learnings) and writing them directly to
 SQLite.
 
 **TOON (Token-Oriented Object Notation)** — Custom compact tabular format
@@ -310,7 +310,7 @@ src/wizard/
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware
   transcript.py              # TranscriptReader (JSONL parser)
-  synthesis.py               # Synthesiser (auto-capture via llama_server endpoint)
+  synthesis.py               # Synthesiser (auto-capture via LiteLLM — any compatible provider)
   models.py                  # SQLModel entities (task, note, meeting, wizardsession, toolcall, task_state)
   schemas.py                 # Pydantic response schemas
   repositories.py            # Query layer
