@@ -79,6 +79,13 @@ class SynthesisSettings(BaseModel):
         return data
 
 
+class SentrySettings(BaseModel):
+    dsn: str = ""
+    enabled: bool = False
+    traces_sample_rate: float = 0.1
+    profiles_sample_rate: float = 0.1
+
+
 class Settings(BaseSettings):
     model_config = {"extra": "ignore"}
 
@@ -90,6 +97,7 @@ class Settings(BaseSettings):
         default_factory=KnowledgeStoreSettings
     )
     synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
+    sentry: SentrySettings = Field(default_factory=SentrySettings)
 
     @classmethod
     def settings_customise_sources(

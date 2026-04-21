@@ -1,5 +1,6 @@
 import logging
 
+import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
@@ -63,6 +64,10 @@ async def get_meeting(
     except ValueError as e:
         logger.warning("get_meeting failed: %s", e)
         raise ToolError(str(e)) from e
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 async def save_meeting_summary(
@@ -125,6 +130,10 @@ async def save_meeting_summary(
     except ValueError as e:
         logger.warning("save_meeting_summary failed: %s", e)
         raise ToolError(str(e)) from e
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 async def ingest_meeting(

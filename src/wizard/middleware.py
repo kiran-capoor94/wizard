@@ -1,6 +1,7 @@
 import datetime
 import logging
 
+import sentry_sdk
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools.base import ToolResult
 from sqlmodel import select as sa_select
@@ -20,14 +21,38 @@ class ToolLoggingMiddleware(Middleware):
         logger.info("%s ...", tool_name)
 
         session_id = None
+        agent_session_id = None
         if context.fastmcp_context is not None:
             session_id = await context.fastmcp_context.get_state("current_session_id")
+            agent_session_id = await context.fastmcp_context.get_state("agent_session_id")
 
-        with get_session() as db:
-            db.add(ToolCall(tool_name=tool_name, session_id=session_id))
-            db.flush()
+        # Create Sentry span for tool execution
+        with sentry_sdk.start_span(
+            op="mcp.tool",
+            name=tool_name,
+            description=f"MCP tool execution: {tool_name}",
+        ) as span:
+            span.set_tag("tool.name", tool_name)
+            if session_id:
+                span.set_tag("wizard.session_id", session_id)
+            if agent_session_id:
+                span.set_tag("wizard.agent_session_id", agent_session_id)
 
-        return await call_next(context)
+            with get_session() as db:
+                db.add(ToolCall(tool_name=tool_name, session_id=session_id))
+                db.flush()
+
+            try:
+                result = await call_next(context)
+                span.set_status("ok")
+                return result
+            except Exception as e:
+                # Capture exception in Sentry with context
+                sentry_sdk.capture_exception(e)
+                span.set_status("internal_error")
+                span.set_data("exception", str(e))
+                span.set_data("exception_type", type(e).__name__)
+                raise
 
 
 class SessionStateMiddleware(Middleware):
