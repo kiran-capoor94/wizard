@@ -70,25 +70,25 @@ Wizard exposes 17 tools via the
 [Model Context Protocol](https://modelcontextprotocol.io/).
 The MCP server self-describes its tools — this is just for orientation.
 
-| Tool                     | Description                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------ |
-| `session_start`          | Create session, return open/blocked tasks, unsummarised meetings, wizard context |
-| `session_end`            | Persist session summary and state                                              |
-| `resume_session`         | Restore prior session state into a new session                                 |
-| `task_start`             | Get tiered task context (rolling_summary + key notes)                          |
-| `create_task`            | Create a new task, optionally linked to a meeting                              |
-| `update_task`            | Update any task field                                                          |
-| `rewind_task`            | Full note timeline for a task, oldest to newest                                |
-| `save_note`              | Scrub PII and persist investigation/decision/learning notes                    |
-| `what_am_i_missing`      | 7-point diagnostic — surfaces stale context, missing decisions, etc.           |
-| `what_should_i_work_on`  | Scored recommendation with mode (focus / quick-wins / unblock) and time budget |
-| `get_meeting`            | Retrieve transcript and linked open tasks                                      |
-| `save_meeting_summary`   | Store meeting summary and create linked note                                   |
-| `ingest_meeting`         | Accept raw meeting data (e.g. from Krisp), scrub and store                     |
-| `get_tasks`              | Paginated task list with optional status and source filters                    |
-| `get_task`               | Full task detail with note timeline and task state                             |
-| `get_sessions`           | Paginated session history                                                      |
-| `get_session`            | Single session detail with state and prior notes                               |
+| Tool                    | Description                                                                      |
+| ----------------------- | -------------------------------------------------------------------------------- |
+| `session_start`         | Create session, return open/blocked tasks, unsummarised meetings, wizard context |
+| `session_end`           | Persist session summary and state                                                |
+| `resume_session`        | Restore prior session state into a new session                                   |
+| `task_start`            | Get tiered task context (rolling_summary + key notes)                            |
+| `create_task`           | Create a new task, optionally linked to a meeting                                |
+| `update_task`           | Update any task field                                                            |
+| `rewind_task`           | Full note timeline for a task, oldest to newest                                  |
+| `save_note`             | Scrub PII and persist investigation/decision/learning notes                      |
+| `what_am_i_missing`     | 7-point diagnostic — surfaces stale context, missing decisions, etc.             |
+| `what_should_i_work_on` | Scored recommendation with mode (focus / quick-wins / unblock) and time budget   |
+| `get_meeting`           | Retrieve transcript and linked open tasks                                        |
+| `save_meeting_summary`  | Store meeting summary and create linked note                                     |
+| `ingest_meeting`        | Accept raw meeting data (e.g. from Krisp), scrub and store                       |
+| `get_tasks`             | Paginated task list with optional status and source filters                      |
+| `get_task`              | Full task detail with note timeline and task state                               |
+| `get_sessions`          | Paginated session history                                                        |
+| `get_session`           | Single session detail with state and prior notes                                 |
 
 ## MCP Resources
 
@@ -108,18 +108,18 @@ Wizard ships 10 FastMCP skills, installed to `~/.wizard/skills/` during
 `wizard setup`. Skills guide agent behaviour for common workflows — when
 a trigger phrase is detected, the agent loads and follows the skill.
 
-| Skill                   | When it fires                                                  |
-| ----------------------- | -------------------------------------------------------------- |
-| `session-start`         | Beginning a coding session                                     |
-| `session-end`           | "Let's wrap up", "I'm done for today"                          |
-| `session-resume`        | "Continue where I left off", "pick up from yesterday"          |
-| `task-start`            | "Let's work on task X", picking a task from triage             |
-| `what-should-i-work-on` | "What should I work on?", "I have 30 minutes", "quick win"     |
-| `note`                  | After investigations, decisions, or non-obvious discoveries    |
-| `meeting`               | Summarising a meeting flagged by session_start                 |
-| `meeting-to-tasks`      | Turning meeting action items into tracked tasks                |
-| `code-review`           | Reviewing code changes with prior wizard context               |
-| `architecture-debate`   | Choosing between design approaches before implementing         |
+| Skill                   | When it fires                                               |
+| ----------------------- | ----------------------------------------------------------- |
+| `session-start`         | Beginning a coding session                                  |
+| `session-end`           | "Let's wrap up", "I'm done for today"                       |
+| `session-resume`        | "Continue where I left off", "pick up from yesterday"       |
+| `task-start`            | "Let's work on task X", picking a task from triage          |
+| `what-should-i-work-on` | "What should I work on?", "I have 30 minutes", "quick win"  |
+| `note`                  | After investigations, decisions, or non-obvious discoveries |
+| `meeting`               | Summarising a meeting flagged by session_start              |
+| `meeting-to-tasks`      | Turning meeting action items into tracked tasks             |
+| `code-review`           | Reviewing code changes with prior wizard context            |
+| `architecture-debate`   | Choosing between design approaches before implementing      |
 
 ## Architecture
 
@@ -240,6 +240,7 @@ Configure in `config.json`:
 - `profiles_sample_rate`: Percentage of transactions to profile (0.0 to 1.0)
 
 When enabled, Wizard will:
+
 - Automatically initialize Sentry on server startup
 - Create spans for all MCP tool executions with session context
 - Capture exceptions with full stack traces and contextual data
