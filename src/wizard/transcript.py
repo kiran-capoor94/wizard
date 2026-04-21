@@ -20,14 +20,28 @@ _CLAUDE_CODE_SKIP_TYPES = frozenset(
 )
 
 
-def find_transcript(agent_session_id: str) -> Path | None:
-    """Locate the Claude Code transcript JSONL file for an agent session UUID.
+def find_transcript(agent_session_id: str, agent: str = "claude-code") -> Path | None:
+    """Locate the transcript JSONL file for an agent session.
 
-    Globs ~/.claude/projects/*/<uuid>.jsonl — the path Claude Code uses for
-    per-project transcripts. Returns the first match, or None if not found.
+    Agent-specific discovery:
+    - claude-code: ~/.claude/projects/*/<uuid>.jsonl
+    - codex: ~/.codex/threads/thread_<id>.jsonl
+    - copilot: ~/.copilot/session-state/<id>/events.jsonl
+    - gemini: (requires transcript_path from hook)
+    - opencode: (requires session ID to assemble from storage)
     """
-    matches = list(Path.home().glob(f".claude/projects/*/{agent_session_id}.jsonl"))
-    return matches[0] if matches else None
+    if agent == "claude-code":
+        matches = list(Path.home().glob(f".claude/projects/*/{agent_session_id}.jsonl"))
+        return matches[0] if matches else None
+    elif agent == "codex":
+        thread_file = Path.home() / ".codex" / "threads" / f"thread_{agent_session_id}.jsonl"
+        return thread_file if thread_file.exists() else None
+    elif agent == "copilot":
+        session_file = (
+            Path.home() / ".copilot" / "session-state" / agent_session_id / "events.jsonl"
+        )
+        return session_file if session_file.exists() else None
+    return None
 
 
 def read_new_lines(path: Path, skip: int) -> list[str]:
@@ -64,6 +78,7 @@ class TranscriptReader:
         "codex": "_read_codex",
         "gemini": "_read_gemini",
         "opencode": "_read_opencode",
+        "copilot": "_read_copilot",
     }
 
     def read(self, path: str, agent: str) -> list[TranscriptEntry]:
@@ -227,10 +242,92 @@ class TranscriptReader:
                 )
         return entries
 
-    def _read_gemini(self, _path: Path) -> list[TranscriptEntry]:
-        raise NotImplementedError("Gemini transcript parser not yet implemented")
+    def _read_gemini(self, path: Path) -> list[TranscriptEntry]:
+        entries: list[TranscriptEntry] = []
+        with path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                entry_type = raw.get("type", "")
+                if entry_type in {"progress", "system", "notification"}:
+                    continue
+                role = raw.get("role", "assistant")
+                content = raw.get("content", "") or raw.get("text", "")
+                entries.append(
+                    TranscriptEntry(
+                        role=role,
+                        content=content,
+                        timestamp=raw.get("timestamp"),
+                    )
+                )
+        return entries
 
-    def _read_opencode(self, _path: Path) -> list[TranscriptEntry]:
-        raise NotImplementedError("OpenCode transcript parser not yet implemented")
+    def _read_opencode(self, path: Path) -> list[TranscriptEntry]:
+        base = Path.home() / ".local" / "share" / "opencode" / "storage"
+        session_id = path.stem
+        entries: list[TranscriptEntry] = []
+        msg_dir = base / "message" / session_id
+        if not msg_dir.exists():
+            return entries
+        for msg_file in sorted(msg_dir.glob("msg_*.json")):
+            try:
+                msg = json.loads(msg_file.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            role = msg.get("role", "assistant")
+            content = msg.get("content", "")
+            entries.append(
+                TranscriptEntry(
+                    role=role,
+                    content=content,
+                    timestamp=msg.get("timestamp"),
+                )
+            )
+        return entries
+
+    def _read_copilot(self, path: Path) -> list[TranscriptEntry]:
+        entries: list[TranscriptEntry] = []
+        with path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                tool_name = raw.get("toolName")
+                if tool_name:
+                    entries.append(
+                        TranscriptEntry(
+                            role="tool_call",
+                            content=raw.get("toolArgs", "{}"),
+                            tool_name=tool_name,
+                            timestamp=raw.get("timestamp"),
+                        )
+                    )
+                    tool_result = raw.get("toolResult", {})
+                    if tool_result:
+                        entries.append(
+                            TranscriptEntry(
+                                role="tool_result",
+                                content=str(tool_result.get("textResultForLlm", "")),
+                                timestamp=raw.get("timestamp"),
+                            )
+                        )
+                elif raw.get("prompt"):
+                    entries.append(
+                        TranscriptEntry(
+                            role="user",
+                            content=raw.get("prompt", ""),
+                            timestamp=raw.get("timestamp"),
+                        )
+                    )
+        return entries
 
 

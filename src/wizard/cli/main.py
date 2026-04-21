@@ -38,7 +38,7 @@ _DEFAULT_CONFIG = {
     "scrubbing": {"enabled": True, "allowlist": []},
 }
 
-_AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "all"]
+_AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "copilot", "all"]
 
 
 def _ensure_editable_pth() -> None:

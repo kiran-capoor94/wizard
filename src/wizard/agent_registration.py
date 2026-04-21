@@ -78,6 +78,12 @@ _AGENTS: dict[str, AgentConfig] = {
         format="toml",
         mcp_key="mcp_servers",
     ),
+    "copilot": AgentConfig(
+        agent_id="copilot",
+        config_path=Path.home() / ".copilot" / "mcp-config.json",
+        format="json",
+        mcp_key="mcpServers",
+    ),
 }
 
 
@@ -226,6 +232,10 @@ _HOOK_CONFIGS: dict[str, tuple[Path, str]] = {
         Path.home() / ".gemini" / "settings.json",
         "hooks",
     ),
+    "copilot": (
+        Path.home() / ".copilot" / "config.json",
+        "hooks",
+    ),
 }
 
 _HOOK_SCRIPTS: dict[str, dict[str, Path]] = {
@@ -235,6 +245,7 @@ _HOOK_SCRIPTS: dict[str, dict[str, Path]] = {
     },
     "codex": {"Stop": _HOOK_SCRIPT_SESSION_END},
     "gemini": {"SessionEnd": _HOOK_SCRIPT_SESSION_END},
+    "copilot": {"sessionEnd": _HOOK_SCRIPT_SESSION_END},
 }
 
 
@@ -333,6 +344,7 @@ _AGENT_SKILLS_DIRS: dict[str, Path] = {
     "gemini": Path.home() / ".gemini" / "skills",
     "codex": Path.home() / ".agents" / "skills",
     "opencode": Path.home() / ".config" / "opencode" / "skills",
+    "copilot": Path.home() / ".copilot" / "skills",
 }
 
 

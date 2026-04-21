@@ -189,8 +189,9 @@ global hooks config. Supported agents and their config locations:
 | `gemini` | `~/.gemini/settings.json` | `~/.gemini/settings.json` | SessionEnd |
 | `opencode` | `~/.config/opencode/opencode.json` | _(TypeScript plugin)_ | — |
 | `codex` | `~/.codex/config.toml` | `~/.codex/hooks.json` | Stop |
+| `copilot` | `~/.copilot/mcp-config.json` | `~/.copilot/config.json` | sessionEnd |
 
-`wizard setup --agent all` registers all five (MCP) and installs hooks
+`wizard setup --agent all` registers all six (MCP) and installs hooks
 where supported. `wizard update` re-registers both. `wizard uninstall`
 removes both.
 
@@ -287,7 +288,7 @@ Wizard owns task matching — the LLM is not shown the task list.
 **Limitations:**
 - No mid-session intelligence — synthesis runs at session boundaries only
 - Transcript file must exist at synthesis time (not deleted/rotated)
-- Only Claude Code parser is implemented; Codex/Gemini/OpenCode are stubs
+- Parsers: Claude Code (full), Codex, Gemini, OpenCode, Copilot CLI
 - Requires a running LiteLLM-compatible instance for the configured model string
 
 ## Session Personalization
