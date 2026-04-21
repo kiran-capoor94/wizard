@@ -277,6 +277,13 @@ with `wizard capture --close --session-id <id>` when the server is available.
 - `agent_registration.py` — `register_hook()` / `deregister_hook()`
 - `config.py` — `SynthesisSettings` (model, base_url, api_key, enabled)
 
+**`WIZARD_AGENT` environment variable:** `session-end.sh` uses this to
+identify the agent type when building the `wizard capture` command. It is
+set in the hook command registered by `register_hook()` at setup time
+(e.g. `WIZARD_AGENT=gemini bash /path/to/session-end.sh`). Valid values
+match `TranscriptReader._PARSERS`: `claude-code`, `codex`, `gemini`,
+`opencode`, `copilot`. Defaults to `claude-code` if unset.
+
 **Transcript format:** Claude Code writes JSONL with `type` field
 (`user`, `assistant`, `progress`, `file-history-snapshot`, `system`,
 `last-prompt`). The reader skips noise types and normalises

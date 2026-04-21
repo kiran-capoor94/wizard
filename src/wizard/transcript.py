@@ -25,7 +25,7 @@ def find_transcript(agent_session_id: str, agent: str = "claude-code") -> Path |
 
     Agent-specific discovery:
     - claude-code: ~/.claude/projects/*/<uuid>.jsonl
-    - codex: ~/.codex/threads/thread_<id>.jsonl
+    - codex: (date-sharded; hook provides path via --transcript)
     - copilot: ~/.copilot/session-state/<id>/events.jsonl
     - gemini: (requires transcript_path from hook)
     - opencode: (requires session ID to assemble from storage)
@@ -34,8 +34,10 @@ def find_transcript(agent_session_id: str, agent: str = "claude-code") -> Path |
         matches = list(Path.home().glob(f".claude/projects/*/{agent_session_id}.jsonl"))
         return matches[0] if matches else None
     elif agent == "codex":
-        thread_file = Path.home() / ".codex" / "threads" / f"thread_{agent_session_id}.jsonl"
-        return thread_file if thread_file.exists() else None
+        # Codex transcripts are date-sharded: ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl
+        # Discovery by session UUID requires scanning date dirs.
+        # Hook provides path via --transcript.
+        return None
     elif agent == "copilot":
         session_file = (
             Path.home() / ".copilot" / "session-state" / agent_session_id / "events.jsonl"
@@ -86,7 +88,9 @@ class TranscriptReader:
         if parser_name is None:
             raise ValueError(f"Unsupported agent: {agent}")
         p = Path(path)
-        if not p.exists():
+        # OpenCode stores data in a directory keyed by session ID, not a single file.
+        # The path.stem is the session ID; existence is checked inside _read_opencode.
+        if agent != "opencode" and not p.exists():
             raise FileNotFoundError(f"Transcript not found: {path}")
         parser = getattr(self, parser_name)
         return parser(p)
@@ -254,40 +258,121 @@ class TranscriptReader:
                 except json.JSONDecodeError:
                     continue
                 entry_type = raw.get("type", "")
-                if entry_type in {"progress", "system", "notification"}:
+                if entry_type in {"info", "error", "warning"}:
                     continue
-                role = raw.get("role", "assistant")
-                content = raw.get("content", "") or raw.get("text", "")
-                entries.append(
-                    TranscriptEntry(
-                        role=role,
-                        content=content,
-                        timestamp=raw.get("timestamp"),
+                timestamp = raw.get("timestamp")
+                role = "user" if entry_type == "user" else "assistant"
+                content_raw = raw.get("content") or raw.get("text") or ""
+                content = self._normalise_gemini_content(content_raw)
+                if content:
+                    entries.append(
+                        TranscriptEntry(
+                            role=role,
+                            content=content,
+                            timestamp=timestamp,
+                        )
                     )
-                )
+                for tc in raw.get("toolCalls", []):
+                    if not isinstance(tc, dict):
+                        continue
+                    entries.append(
+                        TranscriptEntry(
+                            role="tool_call",
+                            content=json.dumps(tc.get("args", {})),
+                            tool_name=tc.get("name"),
+                            timestamp=timestamp,
+                            tool_use_id=tc.get("id"),
+                        )
+                    )
         return entries
+
+    def _normalise_gemini_content(self, content_raw: object) -> str:
+        """Coerce Gemini content (string, parts list, or other) to a plain string."""
+        if isinstance(content_raw, str):
+            return content_raw
+        if isinstance(content_raw, list):
+            # Gemini parts list: [{"text": "..."}, ...]
+            return " ".join(
+                p.get("text", "") for p in content_raw if isinstance(p, dict)
+            )
+        if content_raw is None:
+            return ""
+        return str(content_raw)
+
+    def _parse_opencode_part(
+        self, part: dict, role: str, timestamp: str | None
+    ) -> list[TranscriptEntry]:
+        part_type = part.get("type", "")
+        if part_type == "text":
+            return [TranscriptEntry(role=role, content=part.get("text", ""), timestamp=timestamp)]
+        if part_type == "tool-invocation":
+            ti = part.get("toolInvocation", {})
+            if ti.get("state") == "result":
+                result = ti.get("result", "")
+                return [TranscriptEntry(
+                    role="tool_result",
+                    content=json.dumps(result) if isinstance(result, (dict, list)) else str(result),
+                    tool_name=ti.get("toolName"),
+                    timestamp=timestamp,
+                    tool_use_id=ti.get("toolCallId"),
+                )]
+            return [TranscriptEntry(
+                role="tool_call",
+                content=json.dumps(ti.get("args", {})),
+                tool_name=ti.get("toolName"),
+                timestamp=timestamp,
+                tool_use_id=ti.get("toolCallId"),
+            )]
+        return []
 
     def _read_opencode(self, path: Path) -> list[TranscriptEntry]:
         base = Path.home() / ".local" / "share" / "opencode" / "storage"
         session_id = path.stem
-        entries: list[TranscriptEntry] = []
         msg_dir = base / "message" / session_id
         if not msg_dir.exists():
-            return entries
-        for msg_file in sorted(msg_dir.glob("msg_*.json")):
+            return []
+
+        messages: list[tuple[float, dict]] = []
+        for msg_file in msg_dir.glob("*.json"):
             try:
                 msg = json.loads(msg_file.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
+            try:
+                created = float(msg.get("metadata", {}).get("time", {}).get("created", 0))
+            except (TypeError, ValueError):
+                created = 0.0
+            messages.append((created, msg))
+
+        entries: list[TranscriptEntry] = []
+        for _, msg in sorted(messages, key=lambda x: x[0]):
             role = msg.get("role", "assistant")
-            content = msg.get("content", "")
+            ts = msg.get("metadata", {}).get("time", {}).get("created")
+            timestamp = str(ts) if ts is not None else None
+            for part in msg.get("parts", []):
+                if isinstance(part, dict):
+                    entries.extend(self._parse_opencode_part(part, role, timestamp))
+        return entries
+
+    def _parse_copilot_assistant_message(
+        self, data: dict, timestamp: str | None
+    ) -> list[TranscriptEntry]:
+        entries: list[TranscriptEntry] = []
+        content = data.get("content", "")
+        if content:
             entries.append(
-                TranscriptEntry(
-                    role=role,
-                    content=content,
-                    timestamp=msg.get("timestamp"),
-                )
+                TranscriptEntry(role="assistant", content=str(content), timestamp=timestamp)
             )
+        for tr in data.get("toolRequests", []):
+            if not isinstance(tr, dict):
+                continue
+            entries.append(TranscriptEntry(
+                role="tool_call",
+                content=json.dumps(tr.get("arguments", {})),
+                tool_name=tr.get("name"),
+                timestamp=timestamp,
+                tool_use_id=tr.get("toolCallId"),
+            ))
         return entries
 
     def _read_copilot(self, path: Path) -> list[TranscriptEntry]:
@@ -301,33 +386,29 @@ class TranscriptReader:
                     raw = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                tool_name = raw.get("toolName")
-                if tool_name:
-                    entries.append(
-                        TranscriptEntry(
-                            role="tool_call",
-                            content=raw.get("toolArgs", "{}"),
-                            tool_name=tool_name,
-                            timestamp=raw.get("timestamp"),
-                        )
-                    )
-                    tool_result = raw.get("toolResult", {})
-                    if tool_result:
+                timestamp = raw.get("timestamp")
+                event_type = raw.get("type", "")
+                data = raw.get("data") or {}
+                if event_type == "user.message":
+                    content = data.get("content", "")
+                    if content:
                         entries.append(
-                            TranscriptEntry(
-                                role="tool_result",
-                                content=str(tool_result.get("textResultForLlm", "")),
-                                timestamp=raw.get("timestamp"),
-                            )
+                            TranscriptEntry(role="user", content=str(content), timestamp=timestamp)
                         )
-                elif raw.get("prompt"):
-                    entries.append(
-                        TranscriptEntry(
-                            role="user",
-                            content=raw.get("prompt", ""),
-                            timestamp=raw.get("timestamp"),
-                        )
-                    )
+                elif event_type == "assistant.message":
+                    entries.extend(self._parse_copilot_assistant_message(data, timestamp))
+                elif event_type == "tool.execution_complete":
+                    result = data.get("result", {})
+                    if isinstance(result, dict):
+                        result_text = result.get("content", json.dumps(result))
+                    else:
+                        result_text = str(result)
+                    entries.append(TranscriptEntry(
+                        role="tool_result",
+                        content=result_text,
+                        timestamp=timestamp,
+                        tool_use_id=data.get("toolCallId"),
+                    ))
         return entries
 
 

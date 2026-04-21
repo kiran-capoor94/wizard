@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 import litellm
+from pydantic import ValidationError
 from sqlmodel import Session, col, select
 
 from wizard.config import settings
@@ -174,7 +175,7 @@ class Synthesiser:
             )
         try:
             entries = self._reader.read(str(transcript_path), wizard_session.agent)
-        except (FileNotFoundError, NotImplementedError, ValueError) as e:
+        except (FileNotFoundError, NotImplementedError, ValueError, ValidationError) as e:
             logger.warning("Synthesiser: cannot read transcript: %s", e)
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback"
