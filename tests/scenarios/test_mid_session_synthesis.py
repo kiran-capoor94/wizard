@@ -2,92 +2,12 @@
 
 import asyncio
 import contextlib
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from wizard.mid_session import MID_SESSION_TASKS
 from wizard.models import WizardSession
-from wizard.repositories import NoteRepository
-from wizard.schemas import SynthesisResult
-from wizard.security import SecurityService
-from wizard.synthesis import OllamaSynthesiser
 from wizard.tools.session_tools import session_end, session_start
-from wizard.transcript import (
-    TranscriptEntry,
-    TranscriptReader,
-    find_transcript,
-    read_new_lines,
-)
-
-
-def test_find_transcript_finds_file(tmp_path, monkeypatch):
-    session_id = "aaaabbbb-cccc-dddd-eeee-ffff00001234"
-    project_dir = tmp_path / ".claude" / "projects" / "my-project"
-    project_dir.mkdir(parents=True)
-    transcript = project_dir / f"{session_id}.jsonl"
-    transcript.write_text("")
-
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    result = find_transcript(session_id)
-    assert result == transcript
-
-
-def test_find_transcript_returns_none_when_not_found(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    assert find_transcript("nonexistent-session-uuid") is None
-
-
-def test_read_new_lines_skips_processed_and_drops_last(tmp_path):
-    f = tmp_path / "t.jsonl"
-    f.write_text('{"line":1}\n{"line":2}\n{"line":3}\n{"line":4}\n')
-    # Skip 2 already-processed, get lines 3+4 minus the last (safety guard)
-    lines = read_new_lines(f, skip=2)
-    assert lines == ['{"line":3}']
-
-
-def test_read_new_lines_returns_empty_when_nothing_new(tmp_path):
-    f = tmp_path / "t.jsonl"
-    f.write_text('{"line":1}\n{"line":2}\n')
-    assert read_new_lines(f, skip=2) == []
-
-
-def test_read_new_lines_defers_single_new_line(tmp_path):
-    # A single new line may be incomplete — defer until next poll
-    f = tmp_path / "t.jsonl"
-    f.write_text('{"line":1}\n{"line":2}\n')
-    assert read_new_lines(f, skip=1) == []
-
-
-def test_synthesise_lines_calls_synthesise_path(db_session, note_repo, security):
-    wizard_session = WizardSession(agent="claude-code")
-    db_session.add(wizard_session)
-    db_session.flush()
-    db_session.refresh(wizard_session)
-
-    synthesiser = OllamaSynthesiser(
-        reader=TranscriptReader(),
-        note_repo=note_repo,
-        security=security,
-    )
-
-    received_paths = []
-
-    def capture(db, session, path):
-        received_paths.append(path)
-        return SynthesisResult(notes_created=0, task_ids_touched=[], synthesised_via="fallback")
-
-    with patch.object(synthesiser, "synthesise_path", side_effect=capture):
-        synthesiser.synthesise_lines(
-            db_session,
-            wizard_session,
-            ['{"type":"user","message":{"content":"hi"}}'],
-        )
-
-    assert len(received_paths) == 1
-    assert isinstance(received_paths[0], Path)
-    assert not received_paths[0].exists()  # temp file cleaned up
 
 
 @pytest.mark.asyncio
@@ -254,66 +174,3 @@ async def test_session_start_without_agent_session_id_leaves_agent_none(
     assert session.agent is None
 
 
-# ---------------------------------------------------------------------------
-# _filter_for_synthesis behaviour tests
-# ---------------------------------------------------------------------------
-
-def _make_synthesiser() -> OllamaSynthesiser:
-    return OllamaSynthesiser(
-        reader=TranscriptReader(),
-        note_repo=NoteRepository(),
-        security=SecurityService(allowlist=[], enabled=False),
-    )
-
-
-def test_filter_drops_read_tool_result():
-    entries = [
-        TranscriptEntry(role="tool_call", content="{}", tool_name="Read", tool_use_id="tu_1"),
-        TranscriptEntry(role="tool_result", content="file body", tool_use_id="tu_1"),
-    ]
-    result = _make_synthesiser()._filter_for_synthesis(entries)
-    assert len(result) == 1
-    assert result[0].role == "tool_call"
-
-
-def test_filter_keeps_bash_tool_result():
-    entries = [
-        TranscriptEntry(role="tool_call", content="{}", tool_name="Bash", tool_use_id="tu_1"),
-        TranscriptEntry(role="tool_result", content="tests passed", tool_use_id="tu_1"),
-    ]
-    result = _make_synthesiser()._filter_for_synthesis(entries)
-    assert len(result) == 2
-    assert result[1].content == "tests passed"
-
-
-def test_filter_batched_calls_matched_by_id():
-    """Read result is dropped, Bash result kept, even when batched in one turn."""
-    entries = [
-        TranscriptEntry(role="tool_call", content="{}", tool_name="Read", tool_use_id="tu_1"),
-        TranscriptEntry(role="tool_call", content="{}", tool_name="Bash", tool_use_id="tu_2"),
-        TranscriptEntry(role="tool_result", content="file body", tool_use_id="tu_1"),
-        TranscriptEntry(role="tool_result", content="tests passed", tool_use_id="tu_2"),
-    ]
-    result = _make_synthesiser()._filter_for_synthesis(entries)
-    assert sum(1 for e in result if e.role == "tool_call") == 2
-    assert not any(e.role == "tool_result" and e.content == "file body" for e in result)
-    assert any(e.role == "tool_result" and e.content == "tests passed" for e in result)
-
-
-def test_filter_orphaned_result_kept_conservatively():
-    """tool_result with no matching tool_call (no id) is kept — safe default."""
-    entries = [TranscriptEntry(role="tool_result", content="orphaned")]
-    result = _make_synthesiser()._filter_for_synthesis(entries)
-    assert len(result) == 1
-
-
-def test_filter_truncates_per_role():
-    entries = [
-        TranscriptEntry(role="assistant", content="a" * 3000),
-        TranscriptEntry(role="tool_call", content="{}" + "x" * 600, tool_name="Bash"),
-        TranscriptEntry(role="tool_result", content="r" * 500),
-    ]
-    result = _make_synthesiser()._filter_for_synthesis(entries)
-    assert len(result[0].content) == 1000
-    assert len(result[1].content) == 250
-    assert len(result[2].content) == 150

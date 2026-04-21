@@ -43,7 +43,8 @@ src/wizard/
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
-  transcript.py              # TranscriptReader + OllamaSynthesiser (auto-capture via local Ollama)
+  transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
+  synthesis.py               # Synthesiser (auto-capture via llama_server-compatible endpoint)
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, etc.)
@@ -88,7 +89,7 @@ Wizard tracks three layers: Agent session (UUID), Wizard session (Integer PK), a
 
 ### Auto-Capture (Transcript Synthesis)
 - **SessionEnd hook** calls `wizard capture --close`.
-- `OllamaSynthesiser` reads agent transcripts (JSONL) and POSTs to local Ollama.
+- `Synthesiser` reads agent transcripts (JSONL) and POSTs to a llama_server-compatible endpoint.
 - Decoupled from MCP server; runs at hook time to avoid round-trip costs.
 
 ### Session Personalization

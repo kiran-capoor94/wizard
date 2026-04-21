@@ -40,7 +40,7 @@ def backfill(dry_run: bool = False) -> None:
     conn = sqlite3.connect(db_path)
     rows = conn.execute(
         """
-        SELECT id, transcript_path, agent_session_id
+        SELECT id, transcript_path, agent_session_id, agent
         FROM wizardsession
         WHERE is_synthesised = 0
           AND (transcript_path IS NOT NULL OR agent_session_id IS NOT NULL)
@@ -57,7 +57,7 @@ def backfill(dry_run: bool = False) -> None:
 
     ok = skipped = failed = 0
 
-    for session_id, transcript_path, agent_session_id in rows:
+    for session_id, transcript_path, agent_session_id, agent in rows:
         path: Path | None = None
         if transcript_path and Path(transcript_path).exists():
             path = Path(transcript_path)
@@ -72,7 +72,7 @@ def backfill(dry_run: bool = False) -> None:
         cmd = [
             "uv", "run", "wizard", "capture", "--close",
             "--session-id", str(session_id),
-            "--agent", "claude-code",
+            "--agent", agent or "claude-code",
             "--transcript", str(path),
         ]
         print(f"  [{session_id}] {path.name}", end=" ... ", flush=True)

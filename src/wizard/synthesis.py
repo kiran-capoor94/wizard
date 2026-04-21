@@ -1,4 +1,4 @@
-"""OllamaSynthesiser — synthesise agent transcripts into structured Note objects."""
+"""Synthesiser — synthesise agent transcripts into structured Note objects."""
 
 from __future__ import annotations
 
@@ -67,8 +67,8 @@ _TRUNCATE: dict[str, int] = {
 }
 
 
-class OllamaSynthesiser:
-    """Synthesise agent transcripts into structured Note objects via local Ollama."""
+class Synthesiser:
+    """Synthesise agent transcripts into structured Note objects."""
 
     def __init__(
         self,
@@ -89,6 +89,7 @@ class OllamaSynthesiser:
         db: Session,
         wizard_session: WizardSession,
         transcript_path: Path,
+        terminal: bool = True,
     ) -> SynthesisResult:
         """Synthesise a specific transcript file into notes. Core implementation."""
         if not wizard_session.agent:
@@ -100,7 +101,7 @@ class OllamaSynthesiser:
         try:
             entries = self._reader.read(str(transcript_path), wizard_session.agent)
         except (FileNotFoundError, NotImplementedError, ValueError) as e:
-            logger.warning("OllamaSynthesiser: cannot read transcript: %s", e)
+            logger.warning("Synthesiser: cannot read transcript: %s", e)
             return SynthesisResult(
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback"
             )
@@ -116,14 +117,15 @@ class OllamaSynthesiser:
         try:
             notes_data = self._call_llm_server(entries, task_table)
         except Exception as e:
-            logger.warning("OllamaSynthesiser: LLM call failed: %s", e)
+            logger.warning("Synthesiser: LLM call failed: %s", e)
             return SynthesisResult(
                 notes_created=0,
                 task_ids_touched=[],
                 synthesised_via="fallback",
             )
         saved = self._save_notes(db, notes_data, wizard_session, valid_task_ids)
-        wizard_session.is_synthesised = True
+        if terminal:
+            wizard_session.is_synthesised = True
         if wizard_session.summary is None:
             wizard_session.summary = f"Synthesised {saved} note(s) from transcript."
         db.add(wizard_session)
@@ -164,7 +166,7 @@ class OllamaSynthesiser:
             tmp.write("\n".join(lines) + "\n")
             tmp_path = Path(tmp.name)
         try:
-            return self.synthesise_path(db, wizard_session, tmp_path)
+            return self.synthesise_path(db, wizard_session, tmp_path, terminal=False)
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -205,8 +207,6 @@ class OllamaSynthesiser:
         and is kept. tool_use_id from the Claude API links each result to its
         call; orphaned results (no matching id) are kept conservatively.
         """
-        from dataclasses import replace
-
         kept: list[TranscriptEntry] = []
         call_by_id: dict[str, str | None] = {}
         for entry in entries:
@@ -214,7 +214,7 @@ class OllamaSynthesiser:
                 if entry.tool_use_id:
                     call_by_id[entry.tool_use_id] = entry.tool_name
                 kept.append(
-                    replace(entry, content=entry.content[: _TRUNCATE["tool_call"]])
+                    entry.model_copy(update={"content": entry.content[: _TRUNCATE["tool_call"]]})
                 )
             elif entry.role == "tool_result":
                 call_name = (
@@ -225,12 +225,12 @@ class OllamaSynthesiser:
                 if call_name in _SKIP_RESULT_TOOLS:
                     continue
                 kept.append(
-                    replace(entry, content=entry.content[: _TRUNCATE["tool_result"]])
+                    entry.model_copy(update={"content": entry.content[: _TRUNCATE["tool_result"]]})
                 )
             else:
                 kept.append(
-                    replace(
-                        entry, content=entry.content[: _TRUNCATE.get(entry.role, 2000)]
+                    entry.model_copy(
+                        update={"content": entry.content[: _TRUNCATE.get(entry.role, 2000)]}
                     )
                 )
         return kept
@@ -239,11 +239,14 @@ class OllamaSynthesiser:
         self, entries: list[TranscriptEntry], task_table: str = ""
     ) -> str:
         filtered = self._filter_for_synthesis(entries)
-        if (total_chars := sum(len(e.content) for e in filtered)) > 200_000:
+        total_chars = sum(len(e.content) for e in filtered)
+        if total_chars > 200_000:
             logger.warning(
-                "_build_prompt: %d chars after filtering; context overflow risk",
+                "_build_prompt: %d chars after filtering; trimming oldest entries",
                 total_chars,
             )
+            while filtered and total_chars > 200_000:
+                total_chars -= len(filtered.pop(0).content)
         lines = ["Session transcript (chronological):\n"]
         for e in filtered:
             prefix = e.role.upper()

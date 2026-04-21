@@ -14,7 +14,7 @@ from wizard.database import get_session as get_db_session
 from wizard.models import WizardSession
 from wizard.repositories import NoteRepository, TaskRepository
 from wizard.security import SecurityService
-from wizard.synthesis import OllamaSynthesiser
+from wizard.synthesis import Synthesiser
 from wizard.transcript import TranscriptReader
 
 
@@ -86,7 +86,7 @@ def capture(
         None, "--agent-session-id", help="Agent-assigned session UUID"
     ),
 ) -> None:
-    """Capture agent session data and synthesise transcript into notes via Ollama."""
+    """Capture agent session data and synthesise transcript into notes."""
     if not close:
         typer.echo("Only --close mode is supported.")
         raise typer.Exit(0)
@@ -112,22 +112,21 @@ def capture(
         security = SecurityService(
             allowlist=settings.scrubbing.allowlist, enabled=settings.scrubbing.enabled
         )
-        synthesiser = OllamaSynthesiser(
+        synthesiser = Synthesiser(
             reader=TranscriptReader(),
             note_repo=NoteRepository(),
             security=security,
             t_repo=TaskRepository(),
         )
         total_notes, synthesised_via = 0, "fallback"
-        for i, path in enumerate(transcripts):
+        for path in transcripts:
             try:
                 result = synthesiser.synthesise_path(db, session, path)
                 total_notes += result.notes_created
                 synthesised_via = result.synthesised_via
             except Exception as e:
                 typer.echo(f"Synthesis failed for {path}: {e}", err=True)
-                if i == 0:
-                    raise typer.Exit(1) from None
+                raise typer.Exit(1) from None
         typer.echo(
             f"Session {session.id}: {total_notes} note(s) via {synthesised_via}."
         )

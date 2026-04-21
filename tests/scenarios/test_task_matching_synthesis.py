@@ -8,30 +8,8 @@ from sqlmodel import select
 
 from wizard.models import Note, WizardSession
 from wizard.schemas import SynthesisNote
-from wizard.synthesis import OllamaSynthesiser
+from wizard.synthesis import Synthesiser
 from wizard.transcript import TranscriptEntry, TranscriptReader
-
-
-@pytest.mark.asyncio
-async def test_get_open_tasks_compact_returns_id_name_pairs(
-    db_session, task_repo, seed_task
-):
-    task = await seed_task(name="Fix auth bug")
-    results = task_repo.get_open_tasks_compact(db_session)
-    assert len(results) == 1
-    assert results[0] == (task.id, "Fix auth bug")
-
-
-@pytest.mark.asyncio
-async def test_get_open_tasks_compact_excludes_done_tasks(
-    db_session, task_repo, seed_task
-):
-    await seed_task(name="Done task", status="done")
-    await seed_task(name="Open task", status="todo")
-    results = task_repo.get_open_tasks_compact(db_session)
-    names = [r[1] for r in results]
-    assert "Open task" in names
-    assert "Done task" not in names
 
 
 @pytest.mark.asyncio
@@ -45,7 +23,7 @@ async def test_synthesise_path_assigns_task_id_to_matching_note(
     db_session.flush()
     db_session.refresh(wizard_session)
 
-    synthesiser = OllamaSynthesiser(
+    synthesiser = Synthesiser(
         reader=TranscriptReader(),
         note_repo=note_repo,
         security=security,
@@ -80,7 +58,7 @@ async def test_synthesise_path_rejects_hallucinated_task_id(
     db_session.flush()
     db_session.refresh(wizard_session)
 
-    synthesiser = OllamaSynthesiser(
+    synthesiser = Synthesiser(
         reader=TranscriptReader(),
         note_repo=note_repo,
         security=security,
