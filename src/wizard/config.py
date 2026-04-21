@@ -4,14 +4,16 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 logger = logging.getLogger(__name__)
 
 
 class JsonConfigSettingsSource(PydanticBaseSettingsSource):
-    def get_field_value(self, field, field_name) -> tuple[Any, str, bool]:  # noqa: ARG002
+    def get_field_value(
+        self, field, field_name
+    ) -> tuple[Any, str, bool]:  # noqa: ARG002
         return None, field_name, False
 
     def __call__(self) -> dict[str, Any]:
@@ -46,21 +48,56 @@ class ObsidianKSSettings(BaseModel):
     tasks_folder: str = "Tasks"
 
 
-
 class KnowledgeStoreSettings(BaseModel):
     type: str = ""  # "notion" | "obsidian" | ""
     notion: NotionKSSettings = Field(default_factory=NotionKSSettings)
     obsidian: ObsidianKSSettings = Field(default_factory=ObsidianKSSettings)
 
 
+class SynthesisSettings(BaseModel):
+    provider: str = ""  # deprecated; kept so existing configs don't error on load
+    model: str = "ollama/gemma4:latest-64k"
+    base_url: str = "http://localhost:11434"
+    api_key: str = ""
+    enabled: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_provider(cls, data: object) -> object:
+        if isinstance(data, dict):
+            provider = data.get("provider", "")
+            model = data.get("model", "")
+            if provider and model and "/" not in str(model):
+                data["model"] = f"{provider}/{model}"
+            elif model and "/" not in str(model):
+                logger.warning(
+                    "SynthesisSettings: model %r has no provider prefix "
+                    "(expected '<provider>/<model>', e.g. 'ollama/gemma4:latest-64k'). "
+                    "LiteLLM may route incorrectly.",
+                    model,
+                )
+        return data
+
+
+class SentrySettings(BaseModel):
+    dsn: str = ""
+    enabled: bool = False
+    traces_sample_rate: float = 0.1
+    profiles_sample_rate: float = 0.1
+
+
 class Settings(BaseSettings):
     model_config = {"extra": "ignore"}
 
     name: str = "wizard"
-    version: str = "2.1.2"
+    version: str = "2.2.0"
     db: str = str(Path.home() / ".wizard" / "wizard.db")
     scrubbing: ScrubbingSettings = Field(default_factory=ScrubbingSettings)
-    knowledge_store: KnowledgeStoreSettings = Field(default_factory=KnowledgeStoreSettings)
+    knowledge_store: KnowledgeStoreSettings = Field(
+        default_factory=KnowledgeStoreSettings
+    )
+    synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
+    sentry: SentrySettings = Field(default_factory=SentrySettings)
 
     @classmethod
     def settings_customise_sources(

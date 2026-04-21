@@ -147,6 +147,20 @@ class WizardSession(TimestampMixin, table=True):
             "Agent that produced this session: 'claude-code', 'codex', 'gemini', 'opencode'."
         ),
     )
+    agent_session_id: str | None = Field(
+        default=None,
+        index=True,
+        description="UUID assigned by the agent runtime (e.g. Claude Code session_id).",
+    )
+    continued_from_id: int | None = Field(
+        default=None,
+        index=True,
+        description="Wizard session ID this session continues from (unclean prior close).",
+    )
+    is_synthesised: bool = Field(
+        default=False,
+        description="True once Synthesiser has processed transcript_path into notes.",
+    )
     notes: list["Note"] = Relationship(back_populates="session")
 
 
@@ -206,3 +220,10 @@ class TaskState(TimestampMixin, table=True):
     last_status_change_at: datetime.datetime | None = Field(default=None)
     last_touched_at: datetime.datetime = Field(nullable=False)
     stale_days: int = Field(default=0, nullable=False)
+    rolling_summary: str | None = Field(
+        default=None,
+        description=(
+            "Synthesised overview of all prior notes, built from mental_models. "
+            "Updated on every note save. Used by task_start for tiered context delivery."
+        ),
+    )

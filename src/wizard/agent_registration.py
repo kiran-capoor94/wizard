@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -208,7 +209,8 @@ def write_registered_agents(agents: list[str]) -> None:
     _REGISTERED_AGENTS_PATH.write_text(json.dumps(agents, indent=2))
 
 
-_HOOK_SCRIPT = _PROJECT_DIR / "hooks" / "session-end.sh"
+_HOOK_SCRIPT_SESSION_END = _PROJECT_DIR / "hooks" / "session-end.sh"
+_HOOK_SCRIPT_SESSION_START = _PROJECT_DIR / "hooks" / "session-start.sh"
 
 _HOOK_CONFIGS: dict[str, tuple[Path, str]] = {
     # agent_id -> (config_path, hooks_key_path)
@@ -226,96 +228,155 @@ _HOOK_CONFIGS: dict[str, tuple[Path, str]] = {
     ),
 }
 
-_HOOK_EVENT: dict[str, str] = {
-    "claude-code": "SessionEnd",
-    "codex": "Stop",
-    "gemini": "SessionEnd",
+_HOOK_SCRIPTS: dict[str, dict[str, Path]] = {
+    "claude-code": {
+        "SessionEnd": _HOOK_SCRIPT_SESSION_END,
+        "SessionStart": _HOOK_SCRIPT_SESSION_START,
+    },
+    "codex": {"Stop": _HOOK_SCRIPT_SESSION_END},
+    "gemini": {"SessionEnd": _HOOK_SCRIPT_SESSION_END},
 }
 
 
 def register_hook(agent_id: str) -> bool:
-    """Install wizard SessionEnd hook into agent's hooks config. Idempotent.
+    """Install wizard hook(s) into agent's hooks config. Idempotent.
 
-    Returns True if hook was installed, False if agent not supported.
+    Returns True if agent is supported, False otherwise.
     """
-    if agent_id not in _HOOK_CONFIGS:
+    if agent_id not in _HOOK_CONFIGS or agent_id not in _HOOK_SCRIPTS:
         return False
     config_path, hooks_key = _HOOK_CONFIGS[agent_id]
-    event = _HOOK_EVENT[agent_id]
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     if config_path.exists():
         try:
             data = json.loads(config_path.read_text())
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             data = {}
     else:
         data = {}
 
     hooks = data.setdefault(hooks_key, {})
-    event_hooks = hooks.setdefault(event, [])
+    changed = False
 
-    # Check if wizard hook already registered
-    for entry in event_hooks:
-        for h in entry.get("hooks", []):
-            if "wizard" in h.get("command", "") and "session-end" in h.get(
-                "command", ""
-            ):
-                return True  # already installed
+    for event, script in _HOOK_SCRIPTS[agent_id].items():
+        event_hooks = hooks.setdefault(event, [])
+        name = script.name  # e.g. "session-end.sh" or "session-start.sh"
 
-    hook_command = f"bash {_HOOK_SCRIPT}"
-    event_hooks.append(
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": hook_command,
-                    "timeout": 10,
-                }
-            ],
-        }
-    )
-    config_path.write_text(json.dumps(data, indent=2))
+        already = any(
+            name in h.get("command", "")
+            for entry in event_hooks
+            for h in entry.get("hooks", [])
+        )
+        if already:
+            continue
+
+        event_hooks.append(
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f"bash {script}",
+                        "timeout": 10,
+                    }
+                ],
+            }
+        )
+        changed = True
+
+    if changed:
+        config_path.write_text(json.dumps(data, indent=2))
     return True
 
 
 def deregister_hook(agent_id: str) -> bool:
-    """Remove wizard SessionEnd hook from agent's hooks config.
+    """Remove wizard hook(s) from agent's hooks config.
 
-    Returns True if hook was removed, False if agent not supported or not found.
+    Returns True if any hook was removed, False if agent not supported or nothing removed.
     """
-    if agent_id not in _HOOK_CONFIGS:
+    if agent_id not in _HOOK_CONFIGS or agent_id not in _HOOK_SCRIPTS:
         return False
     config_path, hooks_key = _HOOK_CONFIGS[agent_id]
-    event = _HOOK_EVENT[agent_id]
 
     if not config_path.exists():
         return False
 
     try:
         data = json.loads(config_path.read_text())
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         return False
 
     hooks = data.get(hooks_key, {})
-    event_hooks = hooks.get(event, [])
+    removed_any = False
 
-    filtered = [
-        entry
-        for entry in event_hooks
-        if not any(
-            "wizard" in h.get("command", "") and "session-end" in h.get("command", "")
-            for h in entry.get("hooks", [])
-        )
-    ]
+    for event, script in _HOOK_SCRIPTS[agent_id].items():
+        name = script.name  # e.g. "session-end.sh" or "session-start.sh"
+        event_hooks = hooks.get(event, [])
+        filtered = [
+            entry
+            for entry in event_hooks
+            if not any(name in h.get("command", "") for h in entry.get("hooks", []))
+        ]
+        if len(filtered) < len(event_hooks):
+            hooks[event] = filtered
+            removed_any = True
 
-    if len(filtered) == len(event_hooks):
-        return False  # nothing removed
+    if removed_any:
+        data[hooks_key] = hooks
+        config_path.write_text(json.dumps(data, indent=2))
+    return removed_any
 
-    hooks[event] = filtered
-    data[hooks_key] = hooks
-    config_path.write_text(json.dumps(data, indent=2))
+
+_AGENT_SKILLS_DIRS: dict[str, Path] = {
+    "claude-code": Path.home() / ".claude" / "skills",
+    "claude-desktop": Path.home() / ".claude" / "skills",
+    "gemini": Path.home() / ".gemini" / "skills",
+    "codex": Path.home() / ".agents" / "skills",
+    "opencode": Path.home() / ".config" / "opencode" / "skills",
+}
+
+
+def install_skills(agent_id: str, source_dir: Path) -> bool:
+    """Copy skills from source_dir into the agent's native skills directory.
+
+    Merges — existing skills not in source_dir are left untouched.
+    Returns True if agent has a known skills dir, False otherwise.
+    """
+    if agent_id not in _AGENT_SKILLS_DIRS or not source_dir.exists():
+        return False
+    dest = _AGENT_SKILLS_DIRS[agent_id]
+    dest.mkdir(parents=True, exist_ok=True)
+    for skill_dir in source_dir.iterdir():
+        if not skill_dir.is_dir():
+            continue
+        skill_dest = dest / skill_dir.name
+        if skill_dest.exists():
+            shutil.rmtree(skill_dest)
+        shutil.copytree(skill_dir, skill_dest)
     return True
+
+
+def uninstall_skills(agent_id: str, source_dir: Path) -> bool:
+    """Remove wizard-managed skills from the agent's native skills directory.
+
+    Only removes skill subdirectories that exist in source_dir — never touches
+    skills the user added manually.
+    Returns True if any skills were removed.
+    """
+    if agent_id not in _AGENT_SKILLS_DIRS or not source_dir.exists():
+        return False
+    dest = _AGENT_SKILLS_DIRS[agent_id]
+    if not dest.exists():
+        return False
+    removed = False
+    for skill_dir in source_dir.iterdir():
+        if not skill_dir.is_dir():
+            continue
+        skill_dest = dest / skill_dir.name
+        if skill_dest.exists():
+            shutil.rmtree(skill_dest)
+            removed = True
+    return removed
 
 
 def scan_all_registered() -> list[str]:

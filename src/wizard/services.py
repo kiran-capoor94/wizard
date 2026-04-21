@@ -5,6 +5,7 @@ from fastmcp import Context
 from sqlmodel import Session, or_, select
 
 from .database import get_session
+from .mid_session import cancel_mid_session_synthesis
 from .models import Note, NoteType, WizardSession
 from .repositories import NoteRepository
 from .schemas import AutoCloseSummary, ClosedSessionSummary, SessionState
@@ -39,7 +40,11 @@ class SessionCloser:
         return [await self._close_one(db, s, ctx) for s in recent]
 
     async def close_abandoned_background(self, current_session_id: int) -> None:
-        """Close sessions older than 2h using synthetic closure. Opens its own DB session."""
+        """Synthetically close sessions older than 24h with no summary. Opens its own DB session.
+
+        Hook-marked sessions (with transcripts) are handled inline in session_start so that
+        ctx.sample() is available. This task only handles sessions with closed_by=None.
+        """
         try:
             with get_session() as db:
                 old = self._find_old_abandoned(db, current_session_id)
@@ -51,7 +56,8 @@ class SessionCloser:
                     except Exception as e:
                         logger.warning(
                             "close_abandoned_background: failed for session %d: %s",
-                            session.id, e,
+                            session.id,
+                            e,
                         )
                 logger.info("close_abandoned_background: closed %d session(s)", count)
         except Exception as e:
@@ -65,7 +71,7 @@ class SessionCloser:
         limit: int = 3,
     ) -> list[WizardSession]:
         """Sessions with no summary abandoned within the last max_age_hours."""
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=max_age_hours)
+        cutoff = datetime.datetime.now() - datetime.timedelta(hours=max_age_hours)
         stmt = (
             select(WizardSession)
             .where(
@@ -80,7 +86,7 @@ class SessionCloser:
             .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
             .limit(limit)
         )
-        return list(db.execute(stmt).scalars().all())
+        return list(db.exec(stmt).all())
 
     def _find_old_abandoned(
         self,
@@ -89,7 +95,7 @@ class SessionCloser:
         min_age_hours: int = 2,
     ) -> list[WizardSession]:
         """Sessions with no summary older than min_age_hours."""
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=min_age_hours)
+        cutoff = datetime.datetime.now() - datetime.timedelta(hours=min_age_hours)
         stmt = (
             select(WizardSession)
             .where(
@@ -103,7 +109,7 @@ class SessionCloser:
             )
             .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
         )
-        return list(db.execute(stmt).scalars().all())
+        return list(db.exec(stmt).all())
 
     async def _close_one(
         self,
@@ -113,12 +119,21 @@ class SessionCloser:
     ) -> ClosedSessionSummary:
         session_id = session.id
         assert session_id is not None
+
+        # Clean up background synthesis tasks if this is an abandoned session
+        if session.agent_session_id:
+            cancel_mid_session_synthesis(session.agent_session_id)
+
         notes = self._get_session_notes(db, session_id)
         task_ids = list({n.task_id for n in notes if n.task_id is not None})
         note_count = len(notes)
         state = SessionState(
-            intent="", working_set=task_ids, state_delta="",
-            open_loops=[], next_actions=[], closure_status="interrupted",
+            intent="",
+            working_set=task_ids,
+            state_delta="",
+            open_loops=[],
+            next_actions=[],
+            closure_status="interrupted",
         )
         summary_text: str | None = None
         closed_via = ""
@@ -134,13 +149,17 @@ class SessionCloser:
         db.add(session)
         db.flush()
         note = Note(
-            note_type=NoteType.SESSION_SUMMARY, content=clean_summary,
+            note_type=NoteType.SESSION_SUMMARY,
+            content=clean_summary,
             session_id=session_id,
         )
         self._note_repo.save(db, note)
         return ClosedSessionSummary(
-            session_id=session_id, summary=clean_summary,
-            closed_via=closed_via, task_ids=task_ids, note_count=note_count,
+            session_id=session_id,
+            summary=clean_summary,
+            closed_via=closed_via,
+            task_ids=task_ids,
+            note_count=note_count,
         )
 
     def _get_session_notes(self, db: Session, session_id: int) -> list[Note]:

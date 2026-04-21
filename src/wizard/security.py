@@ -28,10 +28,15 @@ class SecurityService:
 
     def __init__(self, allowlist: list[str] | None = None, enabled: bool = True):
         self._allowlist = allowlist or []
-        self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
+        try:
+            self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
+        except re.error as e:
+            raise ValueError(f"Invalid allowlist regex: {e}") from e
         self._enabled = enabled
 
-    def scrub(self, content: str) -> ScrubResult:
+    def scrub(self, content: str | None) -> ScrubResult:
+        if content is None:
+            return ScrubResult(clean="", original_to_stub={}, was_modified=False)
         if not self._enabled:
             return ScrubResult(clean=content, original_to_stub={}, was_modified=False)
         clean = content
@@ -43,7 +48,7 @@ class SecurityService:
         clean = self._scrub_phones(clean, original_to_stub, counters, regions=[None])
 
         # 2. Fixed-format patterns (NHS_ID, NI_NUMBER, EMAIL, etc.)
-        for _name, pattern, prefix in self.PATTERNS:
+        for _, pattern, prefix in self.PATTERNS:
 
             def replace(m: re.Match, _prefix: str = prefix) -> str:
                 matched = m.group(0)

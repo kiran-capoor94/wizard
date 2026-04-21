@@ -106,7 +106,9 @@ class TaskContext(BaseModel):
         latest_note: Note | None = None,
     ) -> "TaskContext":
         if task.id is None:
-            raise ValueError("Cannot build TaskContext from an unpersisted Task (id is None)")
+            raise ValueError(
+                "Cannot build TaskContext from an unpersisted Task (id is None)"
+            )
         return cls(
             id=task.id,
             name=task.name,
@@ -165,7 +167,9 @@ class NoteDetail(BaseModel):
     @classmethod
     def from_model(cls, note) -> "NoteDetail":
         if note.id is None:
-            raise ValueError("Cannot build NoteDetail from an unpersisted Note (id is None)")
+            raise ValueError(
+                "Cannot build NoteDetail from an unpersisted Note (id is None)"
+            )
         return cls(
             id=note.id,
             note_type=note.note_type,
@@ -193,22 +197,39 @@ class ClosedSessionSummary(BaseModel):
     note_count: int
 
 
+class PriorSessionSummary(BaseModel):
+    """A recently-closed session surfaced as prior context in session_start."""
+
+    session_id: int
+    summary: str
+    closed_at: UTCDateTime
+    task_ids: list[int] = Field(default_factory=list)
+
+
 class SessionStartResponse(BaseModel):
     session_id: int
-    open_tasks: list[TaskContext]
-    blocked_tasks: list[TaskContext]
+    continued_from_id: int | None = None
+    open_tasks: str = ""  # TOON-encoded; see encode_task_contexts
+    blocked_tasks: str = ""  # TOON-encoded; see encode_task_contexts
     unsummarised_meetings: list[MeetingContext]
     wizard_context: dict | None = None
     skill_instructions: str | None = None
     closed_sessions: list[ClosedSessionSummary] = Field(default_factory=list)
     open_tasks_total: int = 0
+    source: str = "startup"
+    prior_summaries: list[PriorSessionSummary] = Field(default_factory=list)
 
 
 class TaskStartResponse(BaseModel):
     task: TaskContext
     compounding: bool  # True if prior notes exist for this task
     notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
-    prior_notes: list[NoteDetail]  # all notes, oldest first
+    prior_notes: list[NoteDetail]  # 3 most recent notes, oldest first
+    total_notes: int = 0  # total note count including older notes not returned
+    older_notes_available: bool = (
+        False  # True if note_count > 3; use rewind_task for full history
+    )
+    rolling_summary: str | None = None  # synthesised from mental_models of all notes
     latest_mental_model: str | None = None
     skill_instructions: str | None = None
 
@@ -279,6 +300,7 @@ class ResumedTaskNotes(BaseModel):
 class ResumeSessionResponse(BaseModel):
     session_id: int
     resumed_from_session_id: int
+    continued_from_id: int | None = None
     session_state: SessionState | None
     working_set_tasks: list[TaskContext]
     prior_notes: list[ResumedTaskNotes]

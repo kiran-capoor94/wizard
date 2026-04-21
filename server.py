@@ -3,9 +3,13 @@ import stat
 import sys
 from pathlib import Path
 
+import sentry_sdk
+from sentry_sdk.integrations.logging import LoggingIntegration
+
 import wizard.prompts  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.prompt decorators
 import wizard.resources  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.resource decorators
 import wizard.tools  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers MCP tools via submodule imports
+from wizard.config import settings
 from wizard.mcp_instance import mcp
 
 # uv sets UF_HIDDEN on .pth files it creates inside .venv; Python 3.14+
@@ -28,4 +32,20 @@ if hasattr(os, "chflags"):
 
 
 if __name__ == "__main__":
+    # Initialize Sentry if DSN is provided
+    if settings.sentry.dsn and settings.sentry.enabled:
+        sentry_sdk.init(
+            dsn=settings.sentry.dsn,
+            traces_sample_rate=settings.sentry.traces_sample_rate,
+            profiles_sample_rate=settings.sentry.profiles_sample_rate,
+            # Add wizard-specific context
+            release=f"wizard@{settings.version}",
+            integrations=[
+                LoggingIntegration(
+                    level=None,  # Capture all logs as breadcrumbs
+                    event_level=None,  # Don't send logs as events
+                ),
+            ],
+        )
+    
     mcp.run()

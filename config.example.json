@@ -1,6 +1,6 @@
 {
   "name": "wizard",
-  "version": "1.1.0",
+  "version": "2.2.0",
   "db": "~/.wizard/wizard.db",
   "jira": {
     "base_url": "https://yourorg.atlassian.net",
@@ -16,5 +16,17 @@
   "scrubbing": {
     "enabled": true,
     "allowlist": ["SISU", "AUTH-\\d+", "ENG-\\d+"]
+  },
+  "synthesis": {
+    "model": "ollama/gemma4:latest-64k",
+    "base_url": "http://localhost:11434",
+    "api_key": "",
+    "enabled": true
+  },
+  "sentry": {
+    "dsn": "your-sentry-dsn-here",
+    "enabled": false,
+    "traces_sample_rate": 0.1,
+    "profiles_sample_rate": 0.1
   }
 }

@@ -39,7 +39,7 @@ async def test_update_task_nonexistent(
 ):
     with pytest.raises(ToolError):
         await update_task(
-            ctx=fake_ctx, task_id=9999, status=TaskStatus.DONE,
+            task_id=9999, status=TaskStatus.DONE,
             t_repo=task_repo, sec=security,
             t_state_repo=task_state_repo,
         )
@@ -48,17 +48,17 @@ async def test_update_task_nonexistent(
 @pytest.mark.asyncio
 async def test_rewind_task_nonexistent(db_session, fake_ctx, note_repo):
     with pytest.raises(ToolError):
-        await rewind_task(ctx=fake_ctx, task_id=9999, n_repo=note_repo)
+        await rewind_task(task_id=9999, n_repo=note_repo)
 
 
 @pytest.mark.asyncio
 async def test_what_am_i_missing_nonexistent(db_session, fake_ctx, task_repo, note_repo):
     with pytest.raises(ToolError):
-        await what_am_i_missing(ctx=fake_ctx, task_id=9999, t_repo=task_repo, n_repo=note_repo)
+        await what_am_i_missing(task_id=9999, t_repo=task_repo, n_repo=note_repo)
 
 
 @pytest.mark.asyncio
-async def test_session_end_nonexistent(db_session, fake_ctx, note_repo, security, capture_synthesiser):
+async def test_session_end_nonexistent(db_session, fake_ctx, note_repo, security):
     with pytest.raises(ToolError):
         await session_end(
             ctx=fake_ctx, session_id=9999,
@@ -66,7 +66,6 @@ async def test_session_end_nonexistent(db_session, fake_ctx, note_repo, security
             state_delta="test", open_loops=[], next_actions=[],
             closure_status="clean",
             sec=security, n_repo=note_repo,
-            synthesiser=capture_synthesiser,
         )
 
 

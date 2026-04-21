@@ -3,6 +3,7 @@
 import logging
 from typing import Literal
 
+import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from sqlmodel import Session
@@ -19,15 +20,27 @@ logger = logging.getLogger(__name__)
 _PRIORITY_SCORES = {"high": 1.0, "medium": 0.5, "low": 0.2}
 
 _MODE_WEIGHTS: dict[str, dict[str, float]] = {
-    "focus":      {"priority": 0.50, "recency": 0.30, "momentum": 0.20, "simplicity": 0.00},
-    "quick-wins": {"priority": 0.20, "recency": 0.15, "momentum": 0.15, "simplicity": 0.50},
-    "unblock":    {"priority": 0.40, "recency": 0.40, "momentum": 0.20, "simplicity": 0.00},
+    "focus": {"priority": 0.50, "recency": 0.30, "momentum": 0.20, "simplicity": 0.00},
+    "quick-wins": {
+        "priority": 0.20,
+        "recency": 0.15,
+        "momentum": 0.15,
+        "simplicity": 0.50,
+    },
+    "unblock": {
+        "priority": 0.40,
+        "recency": 0.40,
+        "momentum": 0.20,
+        "simplicity": 0.00,
+    },
 }
 
 _MAX_SAMPLE_COUNT = 4  # sample reasons for top N tasks only
 
 
-def _classify_momentum(task: TaskContext) -> Literal["new", "active", "cooling", "cold"]:
+def _classify_momentum(
+    task: TaskContext,
+) -> Literal["new", "active", "cooling", "cold"]:
     if task.note_count == 0:
         return "new"
     if task.stale_days <= 2:
@@ -44,8 +57,7 @@ def _score_task(
 ) -> float:
     weights = _MODE_WEIGHTS.get(mode, _MODE_WEIGHTS["focus"])
 
-    priority_val = task.priority.value if hasattr(task.priority, "value") else task.priority
-    priority_score = _PRIORITY_SCORES.get(priority_val, 0.2)
+    priority_score = _PRIORITY_SCORES.get(task.priority.value, 0.2)
     recency_score = 1.0 / (1.0 + task.stale_days)
     momentum_score = min(task.note_count / 10.0, 1.0)  # saturates at 10 notes
 
@@ -61,9 +73,8 @@ def _score_task(
     )
 
     # time_budget adjustments
-    status_val = task.status.value if hasattr(task.status, "value") else task.status
     if time_budget == "30m":
-        if status_val == "in_progress":
+        if task.status.value == "in_progress":
             score += 0.1
         if task.note_count == 0:
             score -= 0.1
@@ -71,12 +82,9 @@ def _score_task(
     return round(score, 4)
 
 
-def _dominant_signal(
-    task: TaskContext, mode: str, time_budget: str | None
-) -> str:
+def _dominant_signal(task: TaskContext, mode: str) -> str:
     weights = _MODE_WEIGHTS.get(mode, _MODE_WEIGHTS["focus"])
-    priority_val = task.priority.value if hasattr(task.priority, "value") else task.priority
-    priority_score = _PRIORITY_SCORES.get(priority_val, 0.2)
+    priority_score = _PRIORITY_SCORES.get(task.priority.value, 0.2)
     recency_score = 1.0 / (1.0 + task.stale_days)
     momentum_score = min(task.note_count / 10.0, 1.0)
 
@@ -101,16 +109,13 @@ async def _sample_reason(
     ctx: Context,
     task: TaskContext,
     mode: str,
-    time_budget: str | None,
 ) -> str:
-    dominant = _dominant_signal(task, mode, time_budget)
+    dominant = _dominant_signal(task, mode)
     momentum = _classify_momentum(task)
-    priority_val = task.priority.value if hasattr(task.priority, "value") else task.priority
-    status_val = task.status.value if hasattr(task.status, "value") else task.status
     prompt = (
         f"Task: {task.name!r}\n"
-        f"Priority: {priority_val}\n"
-        f"Status: {status_val}\n"
+        f"Priority: {task.priority.value}\n"
+        f"Status: {task.status.value}\n"
         f"Momentum: {momentum} ({task.stale_days}d since last note,"
         f" {task.note_count} notes total)\n"
         f"Dominant scoring signal: {dominant}\n"
@@ -119,9 +124,11 @@ async def _sample_reason(
         "Ground the reason in the note context if available. Be specific, not generic."
     )
     try:
-        result = await ctx.sample(messages=[{"role": "user", "content": prompt}], max_tokens=60)
-        return result.content.strip()
-    except Exception:
+        result = await ctx.sample(prompt, max_tokens=60)
+        return result.result.strip()
+    except Exception as e:
+        # Capture exception in Sentry
+        sentry_sdk.capture_exception(e)
         logger.warning("Reason sampling failed for task %d, using fallback", task.id)
         return _fallback_reason(task, dominant)
 
@@ -142,20 +149,16 @@ async def what_should_i_work_on(
         mode: Scoring mode — 'focus' (default), 'quick-wins', or 'unblock'.
         time_budget: Available time — '30m', '2h', 'half-day', 'full-day'.
     """
-    include_blocked = mode == "unblock"
+    # session_id is a schema contract — callers must have an active session.
+    _ = session_id
+    # Always fetch all workable tasks including blocked so we can count skipped ones
+    # without a second query. Filter post-fetch based on mode.
     all_workable = t_repo.get_workable_task_contexts(db, include_blocked=True)
 
-    # In unblock mode, only surface blocked tasks; otherwise exclude them
     if mode == "unblock":
-        tasks = [
-            t for t in all_workable
-            if (t.status.value if hasattr(t.status, "value") else t.status) == "blocked"
-        ]
+        tasks = [t for t in all_workable if t.status.value == "blocked"]
     else:
-        tasks = [
-            t for t in all_workable
-            if (t.status.value if hasattr(t.status, "value") else t.status) != "blocked"
-        ]
+        tasks = [t for t in all_workable if t.status.value != "blocked"]
 
     if not tasks:
         return WorkRecommendationResponse(
@@ -168,22 +171,16 @@ async def what_should_i_work_on(
             ),
         )
 
-    # Count blocked tasks skipped in non-unblock mode
     skipped_blocked = 0
-    if not include_blocked:
-        skipped_blocked = sum(
-            1 for t in all_workable
-            if (t.status.value if hasattr(t.status, "value") else t.status) == "blocked"
-        )
+    if mode != "unblock":
+        skipped_blocked = sum(1 for t in all_workable if t.status.value == "blocked")
 
     # Score and rank
     scored = sorted(
         tasks,
         key=lambda t: (
             -_score_task(t, mode=mode, time_budget=time_budget),
-            {"high": 0, "medium": 1, "low": 2}.get(
-                t.priority.value if hasattr(t.priority, "value") else t.priority, 2
-            ),
+            {"high": 0, "medium": 1, "low": 2}.get(t.priority.value, 2),
             t.stale_days,
         ),
     )
@@ -193,17 +190,19 @@ async def what_should_i_work_on(
     # Build recommendations with LLM-sampled reasons
     recs: list[TaskRecommendation] = []
     for task in shortlist:
-        reason = await _sample_reason(ctx, task, mode, time_budget)
-        recs.append(TaskRecommendation(
-            task_id=task.id,
-            name=task.name,
-            priority=task.priority.value if hasattr(task.priority, "value") else task.priority,
-            status=task.status.value if hasattr(task.status, "value") else task.status,
-            score=_score_task(task, mode=mode, time_budget=time_budget),
-            reason=reason,
-            momentum=_classify_momentum(task),
-            last_note_preview=task.last_note_preview,
-        ))
+        reason = await _sample_reason(ctx, task, mode)
+        recs.append(
+            TaskRecommendation(
+                task_id=task.id,
+                name=task.name,
+                priority=task.priority.value,
+                status=task.status.value,
+                score=_score_task(task, mode=mode, time_budget=time_budget),
+                reason=reason,
+                momentum=_classify_momentum(task),
+                last_note_preview=task.last_note_preview,
+            )
+        )
 
     skill_content = load_skill(SKILL_TRIAGE)
     if skill_content:

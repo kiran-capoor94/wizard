@@ -1,9 +1,9 @@
-"""Scenario: run multiple sessions, verify DB state across them."""
+"""Scenario: run multiple sessions, verify state across them via query tools."""
 
 import pytest
-from sqlmodel import select
 
-from wizard.models import Note, NoteType, WizardSession
+from wizard.models import NoteType
+from wizard.tools.query_tools import get_session, get_sessions
 from wizard.tools.session_tools import session_end, session_start
 from wizard.tools.task_tools import save_note
 
@@ -12,10 +12,10 @@ from wizard.tools.task_tools import save_note
 async def test_multi_session_analytics(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer, session_repo,
 ):
-    task1 = seed_task(name="Task A")
-    task2 = seed_task(name="Task B", source_id="unique-b")
+    task1 = await seed_task(name="Task A")
+    task2 = await seed_task(name="Task B", source_id="unique-b")
 
     session_ids = []
     note_counts = [3, 2, 1]  # notes per session
@@ -25,11 +25,9 @@ async def test_multi_session_analytics(
         start = await session_start(
             ctx=ctx,
             t_repo=task_repo,
-            n_repo=note_repo,
             m_repo=meeting_repo,
             ts_repo=task_state_repo,
             session_closer=session_closer,
-            capture_synthesiser=capture_synthesiser,
         )
         session_ids.append(start.session_id)
 
@@ -50,20 +48,16 @@ async def test_multi_session_analytics(
             open_loops=[], next_actions=[],
             closure_status="clean",
             sec=security, n_repo=note_repo,
-            synthesiser=capture_synthesiser,
         )
 
-    # Verify: 3 sessions
-    sessions = db_session.exec(select(WizardSession)).all()
-    assert len(sessions) == 3
+    # Verify: 3 sessions visible via query tool
+    sessions_resp = await get_sessions(s_repo=session_repo, n_repo=note_repo, db=db_session)
+    assert sessions_resp.total_returned == 3
 
     # Verify: notes per session (task notes + session_summary note from session_end)
     for sid, expected_task_notes in zip(session_ids, note_counts, strict=True):
-        notes = db_session.exec(
-            select(Note).where(Note.session_id == sid)
-        ).all()
-        # Each session has task notes + 1 session_summary from session_end
-        task_notes = [n for n in notes if n.note_type != NoteType.SESSION_SUMMARY]
-        summary_notes = [n for n in notes if n.note_type == NoteType.SESSION_SUMMARY]
+        s_detail = await get_session(session_id=sid, s_repo=session_repo, n_repo=note_repo, db=db_session)
+        task_notes = [n for n in s_detail.notes if n.note_type != NoteType.SESSION_SUMMARY]
+        summary_notes = [n for n in s_detail.notes if n.note_type == NoteType.SESSION_SUMMARY]
         assert len(task_notes) == expected_task_notes
         assert len(summary_notes) == 1

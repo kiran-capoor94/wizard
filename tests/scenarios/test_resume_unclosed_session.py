@@ -11,19 +11,17 @@ from wizard.tools.task_tools import save_note
 async def test_resume_unclosed_session(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer,
 ):
-    task = seed_task(name="Unclosed session task")
+    task = await seed_task(name="Unclosed session task")
 
     # Start session, do work, DON'T end
     start_resp = await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
     session_id = start_resp.session_id
 
@@ -44,5 +42,6 @@ async def test_resume_unclosed_session(
     # session_state is None because session_end was never called
     assert resume_resp.session_state is None
     assert resume_resp.resumed_from_session_id == session_id
+    assert resume_resp.continued_from_id == session_id
     # But prior notes are still returned
     assert len(resume_resp.prior_notes) > 0

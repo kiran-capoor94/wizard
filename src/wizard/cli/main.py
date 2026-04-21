@@ -10,14 +10,13 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from sqlmodel import select
 
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
+from wizard.cli.capture import capture
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
-from wizard.models import WizardSession
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +27,7 @@ app = typer.Typer(
 )
 
 app.command()(doctor)
+app.command()(capture)
 
 configure_app = typer.Typer(help="Configure wizard settings.")
 app.add_typer(configure_app, name="configure")
@@ -75,7 +75,8 @@ def _package_skills_dir() -> Path:
 
 
 def _refresh_skills(dest: Path) -> None:
-    """Copy skills from the package into dest, replacing any existing copy."""
+    """Copy skills from the package into dest (wizard internal cache),
+    replacing any existing copy."""
     source = _package_skills_dir()
     if source.exists():
         if dest.exists():
@@ -86,6 +87,27 @@ def _refresh_skills(dest: Path) -> None:
         typer.echo("No skills found in package — skipping skill install")
 
 
+def _install_skills_for_agents(agent_ids: list[str]) -> None:
+    """Copy wizard skills into each agent's native skills directory."""
+    source = _package_skills_dir()
+    if not source.exists():
+        return
+    for aid in agent_ids:
+        if agent_registration.install_skills(aid, source):
+            dest = agent_registration._AGENT_SKILLS_DIRS[aid]
+            typer.echo(f"  Installed skills for {aid} → {dest}")
+
+
+def _uninstall_skills_for_agents(agent_ids: list[str]) -> None:
+    """Remove wizard-managed skills from each agent's native skills directory."""
+    source = _package_skills_dir()
+    if not source.exists():
+        return
+    for aid in agent_ids:
+        if agent_registration.uninstall_skills(aid, source):
+            typer.echo(f"  Removed skills for {aid}")
+
+
 def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
     """Run a subprocess step, printing label and ok/FAILED. Returns (success, output)."""
     typer.echo(f"  {label}...", nl=False)
@@ -93,6 +115,18 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
     ok = result.returncode == 0
     typer.echo(" ok" if ok else " FAILED")
     return ok, (result.stdout + result.stderr).strip()
+
+
+def _register_agents(agent_ids: list[str], verb: str = "Registered") -> None:
+    """Register MCP, install hooks, and install skills for each agent ID."""
+    for aid in agent_ids:
+        try:
+            agent_registration.register(aid)
+            hook_ok = agent_registration.register_hook(aid)
+            typer.echo(f"  {verb} {aid}" + (" + hook" if hook_ok else ""))
+        except Exception as exc:
+            typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
+    _install_skills_for_agents(agent_ids)
 
 
 def _prompt_and_register_agents(agent: str | None) -> list[str]:
@@ -108,7 +142,7 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
         try:
             idx = int(selection) - 1
             agent = _AGENT_CHOICES[idx]
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             typer.echo("Invalid selection.", err=True)
             raise typer.Exit(1) from None
 
@@ -120,14 +154,7 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
     else:
         agents_to_register = [agent]
 
-    for aid in agents_to_register:
-        try:
-            agent_registration.register(aid)
-            hook_ok = agent_registration.register_hook(aid)
-            typer.echo(f"  Registered {aid}" + (" + hook" if hook_ok else ""))
-        except Exception as exc:
-            typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
-
+    _register_agents(agents_to_register, verb="Registered")
     agent_registration.write_registered_agents(agents_to_register)
     return agents_to_register
 
@@ -173,7 +200,9 @@ def setup(
     typer.echo("\n" + "─" * 45)
     typer.echo("Setup complete.")
     typer.echo(f"  Agent  {', '.join(agents_to_register)}")
-    typer.echo("\nTo configure a knowledge store, run: wizard configure knowledge-store")
+    typer.echo(
+        "\nTo configure a knowledge store, run: wizard configure knowledge-store"
+    )
 
 
 @configure_app.command("knowledge-store")
@@ -182,16 +211,22 @@ def configure_knowledge_store() -> None:
     config_file = Path.home() / ".wizard" / "config.json"
     existing = json.loads(config_file.read_text()) if config_file.exists() else {}
 
-    ks_type = typer.prompt(
-        "Knowledge store type",
-        default="",
-        prompt_suffix=" [notion/obsidian/none]: ",
-    ).strip().lower()
+    ks_type = (
+        typer.prompt(
+            "Knowledge store type",
+            default="",
+            prompt_suffix=" [notion/obsidian/none]: ",
+        )
+        .strip()
+        .lower()
+    )
     if ks_type == "none":
         ks_type = ""
 
     if ks_type not in ("notion", "obsidian", ""):
-        typer.echo(f"Unknown type: {ks_type}. Valid: notion, obsidian, or leave blank for none.")
+        typer.echo(
+            f"Unknown type: {ks_type}. Valid: notion, obsidian, or leave blank for none."
+        )
         raise typer.Exit(1)
 
     ks_config: dict = {"type": ks_type, "notion": {}, "obsidian": {}}
@@ -239,7 +274,7 @@ def _confirm_uninstall(
 
 
 def _deregister_agents(registered: list[str]) -> None:
-    """Deregister all agents, printing status for each."""
+    """Deregister MCP, remove hooks, and remove skills for all agents."""
     for aid in registered:
         try:
             agent_registration.deregister(aid)
@@ -247,6 +282,7 @@ def _deregister_agents(registered: list[str]) -> None:
             typer.echo(f"  Removed wizard from {aid}")
         except Exception as exc:
             typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
+    _uninstall_skills_for_agents(registered)
 
 
 @app.command()
@@ -385,49 +421,6 @@ def update() -> None:
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
-    for aid in registered:
-        try:
-            agent_registration.register(aid)
-            hook_ok = agent_registration.register_hook(aid)
-            typer.echo(f"  Re-registered {aid}" + (" + hook" if hook_ok else ""))
-        except Exception as exc:
-            typer.echo(f"  Warning: could not re-register {aid}: {exc}", err=True)
+    _register_agents(registered, verb="Re-registered")
 
     typer.echo("Wizard updated.")
-
-
-@app.command()
-def capture(
-    close: bool = typer.Option(False, "--close", help="Mark session as closed by hook"),
-    transcript: str = typer.Option("", "--transcript", help="Path to transcript file"),
-    agent: str = typer.Option("", "--agent", help="Agent name"),
-    session_id: int | None = typer.Option(None, "--session-id", help="Wizard session ID"),
-) -> None:
-    """Capture agent session data for later synthesis."""
-    if not close:
-        typer.echo("Only --close mode is supported.")
-        raise typer.Exit(0)
-
-    with get_db_session() as db:
-        if session_id is not None:
-            session = db.get(WizardSession, session_id)
-        else:
-            session = db.exec(
-                select(WizardSession)
-                .where(WizardSession.closed_by == None)  # noqa: E711
-                .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
-                .limit(1)
-            ).first()
-
-        if session is None:
-            typer.echo("No open session found.")
-            raise typer.Exit(0)
-
-        if transcript:
-            session.transcript_path = transcript
-        if agent:
-            session.agent = agent
-        session.closed_by = "hook"
-        db.add(session)
-        db.flush()
-        typer.echo(f"Session {session.id} marked for synthesis.")

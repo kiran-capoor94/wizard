@@ -4,29 +4,56 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 
-from wizard.models import Note, NoteType
-from wizard.repositories import NoteRepository
-from wizard.schemas import SynthesisNote, SynthesisResult
-from wizard.security import SecurityService
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-_CLAUDE_CODE_SKIP_TYPES = frozenset({
-    "progress", "file-history-snapshot", "system", "last-prompt",
-})
+_CLAUDE_CODE_SKIP_TYPES = frozenset(
+    {
+        "progress",
+        "file-history-snapshot",
+        "system",
+        "last-prompt",
+    }
+)
 
 
-@dataclass
-class TranscriptEntry:
+def find_transcript(agent_session_id: str) -> Path | None:
+    """Locate the Claude Code transcript JSONL file for an agent session UUID.
+
+    Globs ~/.claude/projects/*/<uuid>.jsonl — the path Claude Code uses for
+    per-project transcripts. Returns the first match, or None if not found.
+    """
+    matches = list(Path.home().glob(f".claude/projects/*/{agent_session_id}.jsonl"))
+    return matches[0] if matches else None
+
+
+def read_new_lines(path: Path, skip: int) -> list[str]:
+    """Read lines from a JSONL file, skipping the first `skip` lines.
+
+    Drops the last line of new content to guard against partial JSON objects
+    while the transcript is actively being written. The dropped line is picked
+    up on the next poll once the following line has been written.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as e:
+        logger.debug("read_new_lines: failed to read %s: %s", path, e)
+        return []
+    new = lines[skip:]
+    return new[:-1] if len(new) > 1 else []
+
+
+class TranscriptEntry(BaseModel):
     """One normalised entry from an agent transcript."""
 
     role: str  # "user" | "assistant" | "tool_call" | "tool_result"
     content: str
     tool_name: str | None = None
     timestamp: str | None = None
+    tool_use_id: str | None = None  # links tool_use block to its tool_result block
 
 
 class TranscriptReader:
@@ -77,7 +104,10 @@ class TranscriptReader:
         return entries
 
     def _parse_claude_message(
-        self, content: str | list, role: str, timestamp: str | None,
+        self,
+        content: str | list,
+        role: str,
+        timestamp: str | None,
     ) -> list[TranscriptEntry]:
         if isinstance(content, str):
             return [TranscriptEntry(role=role, content=content, timestamp=timestamp)]
@@ -93,194 +123,114 @@ class TranscriptReader:
             if block_type == "text":
                 if has_tool_use:
                     continue
-                entries.append(TranscriptEntry(
-                    role=role,
-                    content=block.get("text", ""),
-                    timestamp=timestamp,
-                ))
+                entries.append(
+                    TranscriptEntry(
+                        role=role,
+                        content=block.get("text", ""),
+                        timestamp=timestamp,
+                    )
+                )
             elif block_type == "tool_use":
-                entries.append(TranscriptEntry(
-                    role="tool_call",
-                    content=json.dumps(block.get("input", {})),
-                    tool_name=block.get("name"),
-                    timestamp=timestamp,
-                ))
+                entries.append(
+                    TranscriptEntry(
+                        role="tool_call",
+                        content=json.dumps(block.get("input", {})),
+                        tool_name=block.get("name"),
+                        timestamp=timestamp,
+                        tool_use_id=block.get("id"),
+                    )
+                )
             elif block_type == "tool_result":
                 tool_content = block.get("content", "")
                 if isinstance(tool_content, list):
                     tool_content = json.dumps(tool_content)
-                entries.append(TranscriptEntry(
-                    role="tool_result",
-                    content=str(tool_content),
-                    tool_name=None,
-                    timestamp=timestamp,
-                ))
+                entries.append(
+                    TranscriptEntry(
+                        role="tool_result",
+                        content=str(tool_content),
+                        tool_name=None,
+                        timestamp=timestamp,
+                        tool_use_id=block.get("tool_use_id"),
+                    )
+                )
         return entries
 
     def _read_codex(self, path: Path) -> list[TranscriptEntry]:
-        raise NotImplementedError("Codex transcript parser not yet implemented")
+        entries: list[TranscriptEntry] = []
+        with path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-    def _read_gemini(self, path: Path) -> list[TranscriptEntry]:
+                timestamp = raw.get("timestamp")
+                if raw.get("type") != "response_item":
+                    continue
+
+                payload = raw.get("payload", {})
+                payload_type = payload.get("type")
+                if payload_type == "message":
+                    role = payload.get("role")
+                    if role not in {"user", "assistant"}:
+                        continue
+                    entries.extend(
+                        self._parse_codex_message(
+                            payload.get("content", []),
+                            role,
+                            timestamp,
+                        )
+                    )
+                elif payload_type == "function_call":
+                    entries.append(
+                        TranscriptEntry(
+                            role="tool_call",
+                            content=payload.get("arguments", ""),
+                            tool_name=payload.get("name"),
+                            timestamp=timestamp,
+                        )
+                    )
+                elif payload_type == "function_call_output":
+                    entries.append(
+                        TranscriptEntry(
+                            role="tool_result",
+                            content=str(payload.get("output", "")),
+                            timestamp=timestamp,
+                        )
+                    )
+        return entries
+
+    def _parse_codex_message(
+        self,
+        content: list,
+        role: str,
+        timestamp: str | None,
+    ) -> list[TranscriptEntry]:
+        entries: list[TranscriptEntry] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type", "")
+            text = block.get("text")
+            if block_type in {"input_text", "output_text", "text"} and isinstance(
+                text, str
+            ):
+                entries.append(
+                    TranscriptEntry(
+                        role=role,
+                        content=text,
+                        timestamp=timestamp,
+                    )
+                )
+        return entries
+
+    def _read_gemini(self, _path: Path) -> list[TranscriptEntry]:
         raise NotImplementedError("Gemini transcript parser not yet implemented")
 
-    def _read_opencode(self, path: Path) -> list[TranscriptEntry]:
+    def _read_opencode(self, _path: Path) -> list[TranscriptEntry]:
         raise NotImplementedError("OpenCode transcript parser not yet implemented")
 
 
-_SYNTHESIS_SYSTEM_PROMPT = (
-    "You are synthesising a coding session transcript into structured notes "
-    "for a task management system. Be concise. Focus on what was accomplished, "
-    "what was found, and what decisions were made."
-)
-
-
-class CaptureSynthesiser:
-    """Synthesise agent transcripts into structured Note objects."""
-
-    def __init__(
-        self,
-        reader: TranscriptReader,
-        note_repo: NoteRepository,
-        security: SecurityService,
-    ):
-        self._reader = reader
-        self._note_repo = note_repo
-        self._security = security
-
-    async def synthesise(self, db, ctx, wizard_session, tasks=None) -> SynthesisResult:
-        if not wizard_session.transcript_path or not wizard_session.agent:
-            return SynthesisResult(
-                notes_created=0, task_ids_touched=[], synthesised_via="fallback",
-            )
-        try:
-            entries = self._reader.read(
-                wizard_session.transcript_path, wizard_session.agent,
-            )
-        except (FileNotFoundError, NotImplementedError) as e:
-            logger.warning("CaptureSynthesiser: could not read transcript: %s", e)
-            return SynthesisResult(
-                notes_created=0, task_ids_touched=[], synthesised_via="fallback",
-            )
-        if not entries:
-            return SynthesisResult(
-                notes_created=0, task_ids_touched=[], synthesised_via="fallback",
-            )
-        tasks = tasks or []
-        notes_data, via = await self._try_sampling(ctx, entries, tasks)
-        if notes_data is None:
-            summary, via = self._synthetic_summary(entries)
-            clean = self._security.scrub(summary).clean
-            note = Note(
-                note_type=NoteType.SESSION_SUMMARY,
-                content=clean,
-                session_id=wizard_session.id,
-            )
-            self._note_repo.save(db, note)
-            return SynthesisResult(
-                notes_created=1, task_ids_touched=[], synthesised_via=via,
-            )
-        saved_count = 0
-        task_ids: list[int] = []
-        for nd in notes_data:
-            clean_content = self._security.scrub(nd.content).clean
-            clean_model = (
-                self._security.scrub(nd.mental_model).clean if nd.mental_model else None
-            )
-            note = Note(
-                note_type=self._resolve_note_type(nd.note_type),
-                content=clean_content,
-                mental_model=clean_model,
-                task_id=nd.task_id,
-                session_id=wizard_session.id,
-            )
-            self._note_repo.save(db, note)
-            saved_count += 1
-            if nd.task_id is not None:
-                task_ids.append(nd.task_id)
-        return SynthesisResult(
-            notes_created=saved_count,
-            task_ids_touched=list(set(task_ids)),
-            synthesised_via=via,
-        )
-
-    async def _try_sampling(self, ctx, entries, tasks):
-        chunks = self._chunk_entries(entries)
-        all_notes: list[SynthesisNote] = []
-        for chunk in chunks:
-            prompt = self._build_synthesis_prompt(chunk, tasks)
-            try:
-                result = await ctx.sample(
-                    messages=prompt,
-                    system_prompt=_SYNTHESIS_SYSTEM_PROMPT,
-                    result_type=list[SynthesisNote],
-                    max_tokens=2000,
-                    temperature=0.3,
-                )
-                all_notes.extend(result.result)
-            except Exception as e:
-                logger.warning("CaptureSynthesiser sampling failed: %s", e)
-                return None, ""
-        if not all_notes:
-            return None, ""
-        return all_notes[:5], "sampling"
-
-    def _build_synthesis_prompt(self, entries, tasks) -> str:
-        lines = ["Session transcript (chronological):\n"]
-        for e in entries:
-            prefix = e.role.upper()
-            if e.tool_name:
-                prefix = f"{prefix} [{e.tool_name}]"
-            content = e.content[:2000] if len(e.content) > 2000 else e.content
-            lines.append(f"  {prefix}: {content}")
-        if tasks:
-            lines.append("\nKnown tasks in this session:")
-            for t in tasks:
-                lines.append(f"  - Task {t.id}: {t.name}")
-        lines.append(
-            "\nFor each distinct task or workstream, produce a JSON array of notes:\n"
-            '[{"task_id": <int or null>, "note_type": '
-            '"investigation"|"decision"|"docs"|"learnings", '
-            '"content": "<what was done/found/changed>", '
-            '"mental_model": "<2-3 sentence snapshot>"}]\n\n'
-            "Rules:\n"
-            "- Focus on WHAT and WHY, not mechanical tool calls.\n"
-            "- Reads followed by Edits = 'investigated X, changed Y because Z'.\n"
-            "- Test runs = 'tests passed/failed, specifically: ...'.\n"
-            "- Decisions get note_type 'decision' with rationale.\n"
-            "- Ignore noise (ls, pwd, git status with no follow-up).\n"
-            "- Maximum 5 notes. Merge related work."
-        )
-        return "\n".join(lines)
-
-    def _chunk_entries(self, entries, max_chars=50_000):
-        chunks: list[list[TranscriptEntry]] = []
-        current: list[TranscriptEntry] = []
-        current_size = 0
-        for entry in entries:
-            entry_size = len(entry.content) + len(entry.role) + 20
-            if current and current_size + entry_size > max_chars:
-                chunks.append(current)
-                current = []
-                current_size = 0
-            current.append(entry)
-            current_size += entry_size
-        if current:
-            chunks.append(current)
-        return chunks
-
-    def _synthetic_summary(self, entries):
-        tool_names = sorted({e.tool_name for e in entries if e.tool_name})
-        tools_str = ", ".join(tool_names) if tool_names else "none"
-        return (
-            f"Auto-synthesised: {len(entries)} transcript entries. "
-            f"Tools used: {tools_str}."
-        ), "synthetic"
-
-    def _resolve_note_type(self, raw: str) -> NoteType:
-        mapping = {
-            "investigation": NoteType.INVESTIGATION,
-            "decision": NoteType.DECISION,
-            "docs": NoteType.DOCS,
-            "learnings": NoteType.LEARNINGS,
-        }
-        return mapping.get(raw, NoteType.INVESTIGATION)

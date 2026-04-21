@@ -15,22 +15,20 @@ def signal_types(resp) -> set[str]:
 async def test_signal_progression(
     db_session, fake_ctx,
     task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer, capture_synthesiser,
+    seed_task, session_closer,
 ):
-    task = seed_task(name="Signal test task")
+    task = await seed_task(name="Signal test task")
     await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
-        capture_synthesiser=capture_synthesiser,
     )
 
     # 1. No notes -> no_context signal
     resp = await what_am_i_missing(
-        ctx=fake_ctx, task_id=task.id, t_repo=task_repo, n_repo=note_repo,
+        task_id=task.id, t_repo=task_repo, n_repo=note_repo,
     )
     assert "no_context" in signal_types(resp)
 
@@ -42,7 +40,7 @@ async def test_signal_progression(
         t_state_repo=task_state_repo,
     )
     resp = await what_am_i_missing(
-        ctx=fake_ctx, task_id=task.id, t_repo=task_repo, n_repo=note_repo,
+        task_id=task.id, t_repo=task_repo, n_repo=note_repo,
     )
     types = signal_types(resp)
     assert "no_context" not in types
@@ -57,7 +55,7 @@ async def test_signal_progression(
             t_state_repo=task_state_repo,
         )
     resp = await what_am_i_missing(
-        ctx=fake_ctx, task_id=task.id, t_repo=task_repo, n_repo=note_repo,
+        task_id=task.id, t_repo=task_repo, n_repo=note_repo,
     )
     assert "analysis_loop" in signal_types(resp)
 
@@ -70,7 +68,7 @@ async def test_signal_progression(
         t_state_repo=task_state_repo,
     )
     resp = await what_am_i_missing(
-        ctx=fake_ctx, task_id=task.id, t_repo=task_repo, n_repo=note_repo,
+        task_id=task.id, t_repo=task_repo, n_repo=note_repo,
     )
     types = signal_types(resp)
     assert "analysis_loop" not in types

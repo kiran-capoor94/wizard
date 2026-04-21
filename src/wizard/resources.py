@@ -45,9 +45,7 @@ def current_session(t_repo: TaskRepository = Depends(get_task_repo)):
                     content=SessionResource(
                         session_id=session.id,
                         open_task_count=len(t_repo.get_open_task_contexts(db)),
-                        blocked_task_count=len(
-                            t_repo.get_blocked_task_contexts(db)
-                        ),
+                        blocked_task_count=len(t_repo.get_blocked_task_contexts(db)),
                     ).model_dump_json(),
                     mime_type="application/json",
                 )

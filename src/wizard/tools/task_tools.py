@@ -1,17 +1,13 @@
 import logging
 
+import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
 
 from ..database import get_session
-from ..deps import (
-    get_note_repo,
-    get_security,
-    get_task_repo,
-    get_task_state_repo,
-)
+from ..deps import get_note_repo, get_security, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
 from ..models import (
     MeetingTasks,
@@ -23,11 +19,7 @@ from ..models import (
     TaskState,
     TaskStatus,
 )
-from ..repositories import (
-    NoteRepository,
-    TaskRepository,
-    TaskStateRepository,
-)
+from ..repositories import NoteRepository, TaskRepository, TaskStateRepository
 from ..schemas import (
     CreateTaskResponse,
     MissingResponse,
@@ -46,9 +38,46 @@ from ..skills import SKILL_TASK_START, load_skill
 from .task_helpers import apply_task_fields
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-_VALID_STATUSES = {"todo", "in_progress", "blocked", "done", "archived"}
+_VALID_STATUSES = {s.value for s in TaskStatus}
 
 logger = logging.getLogger(__name__)
+
+
+_KEY_NOTES_CAP = 5  # max notes returned by task_start
+
+
+def _select_key_notes(notes_desc: list) -> list:
+    """Select the most informative notes for task_start context.
+
+    Priority (hard-ordered, total capped at _KEY_NOTES_CAP):
+    1. All decision notes — resolved choices are always load-bearing.
+    2. Notes with mental_models — explicit understanding captures; already
+       distilled into rolling_summary but useful as anchors.
+    3. Fill remaining slots with most recent notes not already selected.
+
+    Returns notes sorted oldest-first for readability.
+    """
+    selected = []
+    seen: set[int] = set()
+
+    for n in notes_desc:
+        if n.note_type == NoteType.DECISION and n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+    for n in notes_desc:
+        if n.mental_model is not None and n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+    for n in notes_desc:
+        if len(selected) >= _KEY_NOTES_CAP:
+            break
+        if n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+    return sorted(selected, key=lambda x: x.created_at)
 
 
 async def task_start(
@@ -57,7 +86,10 @@ async def task_start(
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
 ) -> TaskStartResponse:
-    """Returns full task context + all prior notes for compounding context.
+    """Returns task context + rolling_summary + key notes (decisions, mental models, recent).
+
+    Returns at most 5 notes, prioritising decisions and notes with mental models.
+    For full note history use rewind_task.
 
     task_id: integer task ID from the open_tasks or blocked_tasks list
     returned by session_start. Call session_start first to get available IDs.
@@ -68,30 +100,51 @@ async def task_start(
             task = t_repo.get_by_id(db, task_id)
             task_ctx = t_repo.get_task_context(db, task)
 
-            notes = n_repo.get_for_task(db, task_id=task.id)
+            # All notes descending: used for counts, selection, and rolling_summary lookup.
+            all_notes = n_repo.get_for_task(db, task_id=task.id)
             notes_by_type: dict[str, int] = {}
-            for note in notes:
+            for note in all_notes:
                 key = note.note_type.value
                 notes_by_type[key] = notes_by_type.get(key, 0) + 1
 
-            prior_notes = [NoteDetail.from_model(n) for n in reversed(notes) if n.id is not None]
+            key_notes = _select_key_notes(all_notes)
+            prior_notes = [
+                NoteDetail.from_model(n) for n in key_notes if n.id is not None
+            ]
 
             latest_mental_model = next(
-                (n.mental_model for n in notes if n.mental_model is not None),
+                (n.mental_model for n in all_notes if n.mental_model is not None),
                 None,
             )
 
+            task_state = db.get(TaskState, task.id)
+            rolling_summary = task_state.rolling_summary if task_state else None
+            total_notes = len(all_notes)
+
+            # Dedup skill_instructions within the session: send only on first task_start call
+            skill_delivered = await ctx.get_state("task_start_skill_delivered")
+            skill = None if skill_delivered else load_skill(SKILL_TASK_START)
+            if not skill_delivered:
+                await ctx.set_state("task_start_skill_delivered", True)
+
             return TaskStartResponse(
                 task=task_ctx,
-                compounding=len(notes) > 0,
+                compounding=total_notes > 0,
                 notes_by_type=notes_by_type,
                 prior_notes=prior_notes,
+                total_notes=total_notes,
+                older_notes_available=len(key_notes) < total_notes,
+                rolling_summary=rolling_summary,
                 latest_mental_model=latest_mental_model,
-                skill_instructions=load_skill(SKILL_TASK_START),
+                skill_instructions=skill,
             )
     except ValueError as e:
         logger.warning("task_start failed: %s", e)
         raise ToolError(str(e)) from e
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 async def save_note(
@@ -111,7 +164,10 @@ async def save_note(
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             task = t_repo.get_by_id(db, task_id)
-            if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
+            if (
+                note_type in (NoteType.INVESTIGATION, NoteType.DECISION)
+                and mental_model is None
+            ):
                 try:
                     result = await ctx.elicit(
                         "Optional: summarise what you now understand in 1-2 sentences "
@@ -122,6 +178,8 @@ async def save_note(
                         mental_model = sec.scrub(result.data).clean
                 except (NotImplementedError, AttributeError) as e:
                     logger.debug("ctx.elicit unavailable for mental_model: %s", e)
+            if len(content) > 100_000:
+                raise ToolError("Content exceeds 100k character limit")
             clean = sec.scrub(content).clean
             if mental_model is not None:
                 mental_model = sec.scrub(mental_model).clean
@@ -134,7 +192,9 @@ async def save_note(
             )
             saved = n_repo.save(db, note)
             if saved.id is None:
-                raise ToolError("Internal error: note was not assigned an id after flush")
+                raise ToolError(
+                    "Internal error: note was not assigned an id after flush"
+                )
             t_state_repo.on_note_saved(db, task_id)
             return SaveNoteResponse(
                 note_id=saved.id,
@@ -143,16 +203,13 @@ async def save_note(
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
-
-
-
-
-
-
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 async def update_task(
-    ctx: Context,
     task_id: int,
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
@@ -189,25 +246,32 @@ async def update_task(
             db.add(task)
             db.flush()
 
+            task_id_int = task.id
+            if task_id_int is None:
+                raise ToolError(
+                    "Internal error: task was not assigned an id after flush"
+                )
+
             task_state_updated = False
             if "status" in updated_fields:
-                if task.id is None:
-                    raise ToolError("Internal error: task was not assigned an id after flush")
-                t_state_repo.on_status_changed(db, task.id)
+                t_state_repo.on_status_changed(db, task_id_int)
                 task_state_updated = True
 
             return UpdateTaskResponse(
-                task_id=task.id,
+                task_id=task_id_int,
                 updated_fields=updated_fields,
                 task_state_updated=task_state_updated,
             )
     except ValueError as e:
         logger.warning("update_task failed: %s", e)
         raise ToolError(str(e)) from e
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 async def create_task(
-    ctx: Context,
     name: str,
     priority: TaskPriority = TaskPriority.MEDIUM,
     category: TaskCategory = TaskCategory.ISSUE,
@@ -234,9 +298,14 @@ async def create_task(
         if source_id:
             existing = t_repo.get_by_source_id(db, source_id)
             if existing:
+                existing_id = existing.id
+                if existing_id is None:
+                    raise ToolError(
+                        "Internal error: existing task has no id"
+                    )
                 # Don't update completed or archived tasks
                 if existing.status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
-                    return CreateTaskResponse(task_id=existing.id, already_existed=True)
+                    return CreateTaskResponse(task_id=existing_id, already_existed=True)
                 scrubbed_name = sec.scrub(name).clean
                 existing.name = scrubbed_name
                 existing.priority = priority
@@ -244,7 +313,7 @@ async def create_task(
                     existing.source_url = source_url
                 db.add(existing)
                 db.flush()
-                return CreateTaskResponse(task_id=existing.id, already_existed=True)
+                return CreateTaskResponse(task_id=existing_id, already_existed=True)
 
         clean_name = sec.scrub(name).clean
         task_status = TaskStatus(status)
@@ -275,7 +344,6 @@ async def create_task(
 
 
 async def rewind_task(
-    ctx: Context,
     task_id: int,
     n_repo: NoteRepository = Depends(get_note_repo),
 ) -> RewindResponse:
@@ -324,7 +392,6 @@ async def rewind_task(
 
 
 async def what_am_i_missing(
-    ctx: Context,
     task_id: int,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
