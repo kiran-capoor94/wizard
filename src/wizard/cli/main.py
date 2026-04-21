@@ -9,11 +9,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import click
 import typer
+from rich import print as rprint
+from rich.panel import Panel
 
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
 from wizard.cli.capture import capture
+from wizard.cli.configure import synthesis_app
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
@@ -36,6 +40,27 @@ WIZARD_HOME = Path.home() / ".wizard"
 
 _DEFAULT_CONFIG = {
     "scrubbing": {"enabled": True, "allowlist": []},
+    "synthesis": {
+        "model": "ollama/gemma4:latest-64k",
+        "base_url": "http://localhost:11434",
+        "api_key": "",
+        "enabled": True,
+        "context_chars": 200000,
+        "backends": [
+            {
+                "model": "ollama/gemma4:latest-64k",
+                "base_url": "http://localhost:11434",
+                "api_key": "",
+                "description": "Local Ollama (primary)",
+            },
+            {
+                "model": "openai/unsloth/gemma-4-E2B-it-GGUF",
+                "base_url": "http://localhost:8888/v1",
+                "api_key": "",
+                "description": "Local Unsloth server (secondary)",
+            },
+        ],
+    },
 }
 
 _AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "copilot", "all"]
@@ -87,25 +112,6 @@ def _refresh_skills(dest: Path) -> None:
         typer.echo("No skills found in package — skipping skill install")
 
 
-def _install_skills_for_agents(agent_ids: list[str]) -> None:
-    """Copy wizard skills into each agent's native skills directory."""
-    source = _package_skills_dir()
-    if not source.exists():
-        return
-    for aid in agent_ids:
-        if agent_registration.install_skills(aid, source):
-            dest = agent_registration._AGENT_SKILLS_DIRS[aid]
-            typer.echo(f"  Installed skills for {aid} → {dest}")
-
-
-def _uninstall_skills_for_agents(agent_ids: list[str]) -> None:
-    """Remove wizard-managed skills from each agent's native skills directory."""
-    source = _package_skills_dir()
-    if not source.exists():
-        return
-    for aid in agent_ids:
-        if agent_registration.uninstall_skills(aid, source):
-            typer.echo(f"  Removed skills for {aid}")
 
 
 def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
@@ -113,20 +119,39 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
     typer.echo(f"  {label}...", nl=False)
     result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
     ok = result.returncode == 0
-    typer.echo(" ok" if ok else " FAILED")
+    status = (
+        typer.style(" ok", fg=typer.colors.GREEN)
+        if ok
+        else typer.style(" FAILED", fg=typer.colors.RED, bold=True)
+    )
+    typer.echo(status)
     return ok, (result.stdout + result.stderr).strip()
 
 
-def _register_agents(agent_ids: list[str], verb: str = "Registered") -> None:
-    """Register MCP, install hooks, and install skills for each agent ID."""
+def _register_agents(agent_ids: list[str]) -> None:
+    """Register MCP, install hooks, and install skills for each agent. Shows a Rich table."""
+    from rich.table import Table
+
+    source = _package_skills_dir()
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column(width=2)
+    table.add_column(min_width=16)
+    table.add_column(style="dim")
+
     for aid in agent_ids:
         try:
             agent_registration.register(aid)
-            hook_ok = agent_registration.register_hook(aid)
-            typer.echo(f"  {verb} {aid}" + (" + hook" if hook_ok else ""))
+            parts = ["MCP"]
+            if agent_registration.register_hook(aid):
+                parts.append("hook")
+            if source.exists() and agent_registration.install_skills(aid, source):
+                parts.append("skills")
+            table.add_row("[green]✓[/green]", aid, " + ".join(parts))
         except Exception as exc:
             typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
-    _install_skills_for_agents(agent_ids)
+            table.add_row("[red]✗[/red]", aid, str(exc))
+
+    rprint(table)
 
 
 def _prompt_and_register_agents(agent: str | None) -> list[str]:
@@ -135,26 +160,17 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
     Returns list of registered agent IDs.
     """
     if agent is None:
-        typer.echo("Which agent would you like to register?")
-        for i, choice in enumerate(_AGENT_CHOICES, 1):
-            typer.echo(f"  {i}. {choice}")
-        selection = typer.prompt(f"Enter number (1-{len(_AGENT_CHOICES)})")
-        try:
-            idx = int(selection) - 1
-            agent = _AGENT_CHOICES[idx]
-        except (ValueError, IndexError):
-            typer.echo("Invalid selection.", err=True)
-            raise typer.Exit(1) from None
+        agent = typer.prompt(
+            "Agent to register",
+            type=click.Choice(_AGENT_CHOICES, case_sensitive=False),
+            default="claude-code",
+        )
 
-    if agent == "all":
-        agents_to_register = [a for a in _AGENT_CHOICES if a != "all"]
-    elif agent not in [a for a in _AGENT_CHOICES if a != "all"]:
-        typer.echo(f"Unknown agent: {agent}", err=True)
-        raise typer.Exit(1)
-    else:
-        agents_to_register = [agent]
-
-    _register_agents(agents_to_register, verb="Registered")
+    selected: str = str(agent)
+    agents_to_register: list[str] = (
+        [a for a in _AGENT_CHOICES if a != "all"] if selected == "all" else [selected]
+    )
+    _register_agents(agents_to_register)
     agent_registration.write_registered_agents(agents_to_register)
     return agents_to_register
 
@@ -197,12 +213,12 @@ def setup(
 
     agents_to_register = _prompt_and_register_agents(agent)
 
-    typer.echo("\n" + "─" * 45)
-    typer.echo("Setup complete.")
-    typer.echo(f"  Agent  {', '.join(agents_to_register)}")
-    typer.echo(
-        "\nTo configure a knowledge store, run: wizard configure knowledge-store"
-    )
+    rprint(Panel(
+        f"Agent: [bold]{', '.join(agents_to_register)}[/bold]\n\n"
+        "Next: [dim]wizard configure knowledge-store[/dim]",
+        title="[green]Setup complete[/green]",
+        border_style="green",
+    ))
 
 
 @configure_app.command("knowledge-store")
@@ -211,23 +227,12 @@ def configure_knowledge_store() -> None:
     config_file = Path.home() / ".wizard" / "config.json"
     existing = json.loads(config_file.read_text()) if config_file.exists() else {}
 
-    ks_type = (
-        typer.prompt(
-            "Knowledge store type",
-            default="",
-            prompt_suffix=" [notion/obsidian/none]: ",
-        )
-        .strip()
-        .lower()
+    raw = typer.prompt(
+        "Knowledge store type",
+        type=click.Choice(["notion", "obsidian", "none"], case_sensitive=False),
+        default="none",
     )
-    if ks_type == "none":
-        ks_type = ""
-
-    if ks_type not in ("notion", "obsidian", ""):
-        typer.echo(
-            f"Unknown type: {ks_type}. Valid: notion, obsidian, or leave blank for none."
-        )
-        raise typer.Exit(1)
+    ks_type = "" if raw == "none" else raw
 
     ks_config: dict = {"type": ks_type, "notion": {}, "obsidian": {}}
 
@@ -255,34 +260,53 @@ def configure_knowledge_store() -> None:
     typer.echo(f"Knowledge store configured: {ks_type or 'none'}")
 
 
+configure_app.add_typer(synthesis_app, name="synthesis")
+
+
 def _confirm_uninstall(
     registered: list[str],
     existing_files: list[tuple[str, str | None]],
     has_wizard_dir: bool,
 ) -> bool:
     """Print deletion manifest and prompt for confirmation. Returns True if confirmed."""
-    typer.echo("This will permanently delete:")
+    items: list[str] = []
     for name, desc in existing_files:
-        suffix = f"  ({desc})" if desc else ""
-        typer.echo(f"  ~/.wizard/{name}{suffix}")
+        items.append(f"~/.wizard/{name}" + (f"  [dim]({desc})[/dim]" if desc else ""))
     if has_wizard_dir and not existing_files:
-        typer.echo("  ~/.wizard/")
+        items.append("~/.wizard/")
     for aid in registered:
-        typer.echo(f"  wizard MCP entry for {aid}")
-    typer.echo("")
+        items.append(f"wizard MCP entry for [bold]{aid}[/bold]")
+    rprint(Panel(
+        "\n".join(items),
+        title="[red]This will permanently delete[/red]",
+        border_style="red",
+    ))
     return typer.confirm("Are you sure?")
 
 
 def _deregister_agents(registered: list[str]) -> None:
-    """Deregister MCP, remove hooks, and remove skills for all agents."""
+    """Deregister MCP, remove hooks, and remove skills for all agents. Shows a Rich table."""
+    from rich.table import Table
+
+    source = _package_skills_dir()
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column(width=2)
+    table.add_column(min_width=16)
+    table.add_column(style="dim")
+
     for aid in registered:
         try:
             agent_registration.deregister(aid)
-            agent_registration.deregister_hook(aid)
-            typer.echo(f"  Removed wizard from {aid}")
+            parts = ["MCP"]
+            if agent_registration.deregister_hook(aid):
+                parts.append("hook")
+            if source.exists() and agent_registration.uninstall_skills(aid, source):
+                parts.append("skills")
+            table.add_row("[red]✗[/red]", aid, " + ".join(parts))
         except Exception as exc:
             typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
-    _uninstall_skills_for_agents(registered)
+
+    rprint(table)
 
 
 @app.command()
@@ -385,12 +409,12 @@ def analytics(
         "tasks": tasks_data,
         "compounding": compounding,
     }
-    typer.echo(analytics_module.format_table(combined, start, end))
+    analytics_module.print_analytics(combined, start, end)
 
 
 @app.command()
 def update() -> None:
-    """Pull latest code, sync deps, run migrations, and refresh skills."""
+    """Pull latest code, sync deps, run migrations, re-register agents, and refresh skills."""
     repo_root = Path(__file__).resolve().parents[3]
     sync_args = (
         ["uv", "sync"]
@@ -403,12 +427,11 @@ def update() -> None:
         else [sys.executable, "-m", "alembic", "upgrade", "head"]
     )
 
-    steps: list[tuple[str, list[str]]] = [
+    steps = [
         ("git pull", ["git", "pull"]),
         ("sync deps", sync_args),
         ("run migrations", alembic_args),
     ]
-
     for label, args in steps:
         ok, output = _run_update_step(label, args, repo_root)
         if not ok:
@@ -416,11 +439,23 @@ def update() -> None:
             raise typer.Exit(1)
 
     _ensure_editable_pth()
-    _refresh_skills(WIZARD_HOME / "skills")
+
+    skills_dest = WIZARD_HOME / "skills"
+    _refresh_skills(skills_dest)
 
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
-    _register_agents(registered, verb="Re-registered")
 
-    typer.echo("Wizard updated.")
+    if registered:
+        typer.echo("\nAgents:")
+        _register_agents(registered)
+    else:
+        typer.echo("\nNo registered agents found — run: wizard setup --agent <agent>")
+
+    rprint(Panel(
+        f"Skills cache: [dim]{skills_dest}[/dim]\n"
+        f"Agents updated: [bold]{', '.join(registered) if registered else 'none'}[/bold]",
+        title="[green]Wizard updated[/green]",
+        border_style="green",
+    ))

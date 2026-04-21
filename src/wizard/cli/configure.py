@@ -1,11 +1,16 @@
 import json
 import logging
 from pathlib import Path
+from typing import Optional
 
 import httpx
 import typer
 from notion_client import Client as NotionSdkClient
 from notion_client.errors import APIResponseError
+from rich import print as rprint
+from rich.table import Table
+
+from wizard.llm_adapters import probe_backend_health
 
 logger = logging.getLogger(__name__)
 
@@ -182,4 +187,121 @@ def run_notion_discovery(config_path: Path) -> None:
     for k, v in schema.items():
         typer.echo(f"    {k:<20} -> {v}")
     typer.echo("  Schema saved.")
+
+
+synthesis_app = typer.Typer(help="Manage LLM backends for transcript synthesis.")
+
+_CONFIG_PATH = Path.home() / ".wizard" / "config.json"
+
+
+def _load_config() -> tuple[dict, list[dict]]:
+    if not _CONFIG_PATH.exists():
+        typer.echo("Config not found. Run 'wizard setup' first.", err=True)
+        raise typer.Exit(1)
+    cfg = json.loads(_CONFIG_PATH.read_text())
+    backends: list[dict] = cfg.setdefault("synthesis", {}).setdefault("backends", [])
+    return cfg, backends
+
+
+def _save_config(cfg: dict) -> None:
+    _CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+
+
+def _backends_table(backends: list[dict]) -> Table:
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Description")
+    table.add_column("Model")
+    table.add_column("Base URL")
+    for i, b in enumerate(backends, 1):
+        table.add_row(
+            str(i),
+            b.get("description", ""),
+            b.get("model", ""),
+            b.get("base_url", "") or "[dim](cloud)[/dim]",
+        )
+    return table
+
+
+def _validate_index(index: int, backends: list[dict]) -> None:
+    if not 1 <= index <= len(backends):
+        typer.echo(f"Invalid index {index}. Have {len(backends)} backend(s).", err=True)
+        raise typer.Exit(1)
+
+
+@synthesis_app.callback(invoke_without_command=True)
+def synthesis_list(ctx: typer.Context) -> None:
+    """List configured backends (tried in order — first healthy wins)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    _, backends = _load_config()
+    if not backends:
+        typer.echo("No backends configured. Run: wizard configure synthesis add")
+        return
+    rprint(_backends_table(backends))
+
+
+@synthesis_app.command("add")
+def synthesis_add(
+    model: str = typer.Option(..., prompt="Model (e.g. ollama/gemma4:latest-64k)"),
+    base_url: str = typer.Option("", prompt="Base URL (blank for cloud APIs)"),
+    api_key: str = typer.Option("", prompt="API key", hide_input=True),
+    description: str = typer.Option("", prompt="Description"),
+) -> None:
+    """Add a backend. Prompts interactively if options are omitted."""
+    cfg, backends = _load_config()
+    backends.append(
+        {"model": model, "base_url": base_url, "api_key": api_key, "description": description}
+    )
+    _save_config(cfg)
+    typer.echo(f"Added backend #{len(backends)}: {model}")
+
+
+@synthesis_app.command("remove")
+def synthesis_remove(
+    index: int = typer.Argument(..., help="Backend number to remove (see list)."),
+) -> None:
+    """Remove a backend by number."""
+    cfg, backends = _load_config()
+    _validate_index(index, backends)
+    removed = backends.pop(index - 1)
+    _save_config(cfg)
+    typer.echo(f"Removed #{index}: {removed.get('model', '')}")
+
+
+@synthesis_app.command("move")
+def synthesis_move(
+    from_pos: int = typer.Argument(..., help="Current position."),
+    to_pos: int = typer.Argument(..., help="Target position (1 = highest priority)."),
+) -> None:
+    """Reorder backends. Position 1 has highest priority."""
+    cfg, backends = _load_config()
+    _validate_index(from_pos, backends)
+    _validate_index(to_pos, backends)
+    entry = backends.pop(from_pos - 1)
+    backends.insert(to_pos - 1, entry)
+    _save_config(cfg)
+    typer.echo(f"Moved '{entry.get('model', '')}' to position {to_pos}.")
+
+
+@synthesis_app.command("test")
+def synthesis_test(
+    index: Optional[int] = typer.Argument(None, help="Backend number to test. Omit to test all."),
+) -> None:
+    """Probe backend reachability. Local servers are probed; cloud APIs always pass."""
+    _, backends = _load_config()
+    if not backends:
+        typer.echo("No backends configured.")
+        return
+    if index is not None:
+        _validate_index(index, backends)
+        targets = [(index, backends[index - 1])]
+    else:
+        targets = list(enumerate(backends, 1))
+    for i, b in targets:
+        model = b.get("model", "")
+        base_url = b.get("base_url") or None
+        typer.echo(f"  #{i} {model} ...", nl=False)
+        ok = probe_backend_health(base_url)
+        typer.echo(" reachable" if ok else " unreachable")
 
