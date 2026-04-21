@@ -48,7 +48,7 @@ from ..skills import (
     SKILL_SESSION_START,
     load_skill,
 )
-from ..synthesis import OllamaSynthesiser
+from ..synthesis import Synthesiser
 from ..toon import encode_task_contexts
 from ..transcript import TranscriptReader, find_transcript, read_new_lines
 
@@ -76,13 +76,13 @@ def _build_wizard_context() -> dict | None:
     return None
 
 
-def _make_synthesiser() -> OllamaSynthesiser:
-    """Construct a fully-wired OllamaSynthesiser for background mid-session synthesis."""
+def _make_synthesiser() -> Synthesiser:
+    """Construct a fully-wired Synthesiser for background mid-session synthesis."""
     security = SecurityService(
         allowlist=settings.scrubbing.allowlist,
         enabled=settings.scrubbing.enabled,
     )
-    return OllamaSynthesiser(
+    return Synthesiser(
         reader=TranscriptReader(),
         note_repo=NoteRepository(),
         security=security,

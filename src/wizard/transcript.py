@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +46,7 @@ def read_new_lines(path: Path, skip: int) -> list[str]:
     return new[:-1] if len(new) > 1 else []
 
 
-_SYNTHESIS_SYSTEM_PROMPT = (
-    "You are synthesising a coding session transcript into structured notes "
-    "for a task management system. Be concise. Focus on what was accomplished, "
-    "what was found, and what decisions were made."
-)
-
-
-@dataclass
-class TranscriptEntry:
+class TranscriptEntry(BaseModel):
     """One normalised entry from an agent transcript."""
 
     role: str  # "user" | "assistant" | "tool_call" | "tool_result"

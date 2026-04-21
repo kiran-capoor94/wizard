@@ -159,7 +159,7 @@ class WizardSession(TimestampMixin, table=True):
     )
     is_synthesised: bool = Field(
         default=False,
-        description="True once OllamaSynthesiser has processed transcript_path into notes.",
+        description="True once Synthesiser has processed transcript_path into notes.",
     )
     notes: list["Note"] = Relationship(back_populates="session")
 
