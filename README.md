@@ -220,6 +220,31 @@ Set `"enabled": false` to disable synthesis (e.g. on machines without a
 running LLM server). The `wizard capture --close` command will mark the
 session and exit cleanly without synthesising.
 
+### Sentry Monitoring (Optional)
+
+Wizard can send error and performance data to [Sentry](https://sentry.io/) for enhanced observability.
+Configure in `config.json`:
+
+```json
+"sentry": {
+  "dsn": "your-sentry-dsn-here",
+  "enabled": false,
+  "traces_sample_rate": 0.1,
+  "profiles_sample_rate": 0.1
+}
+```
+
+- `dsn`: Your Sentry Data Source Name (found in Project Settings > Client Keys (DSN))
+- `enabled`: Set to `true` to activate Sentry monitoring
+- `traces_sample_rate`: Percentage of transactions to send to Sentry (0.0 to 1.0)
+- `profiles_sample_rate`: Percentage of transactions to profile (0.0 to 1.0)
+
+When enabled, Wizard will:
+- Automatically initialize Sentry on server startup
+- Create spans for all MCP tool executions with session context
+- Capture exceptions with full stack traces and contextual data
+- Respect existing PII scrubbing before sending data to Sentry
+
 ### Knowledge Store (optional)
 
 A knowledge store enables optional write-back — session summaries and

@@ -3,6 +3,7 @@
 import logging
 from typing import Literal
 
+import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from sqlmodel import Session
@@ -125,7 +126,9 @@ async def _sample_reason(
     try:
         result = await ctx.sample(prompt, max_tokens=60)
         return result.result.strip()
-    except Exception:
+    except Exception as e:
+        # Capture exception in Sentry
+        sentry_sdk.capture_exception(e)
         logger.warning("Reason sampling failed for task %d, using fallback", task.id)
         return _fallback_reason(task, dominant)
 

@@ -1,5 +1,6 @@
 import logging
 
+import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
@@ -140,6 +141,10 @@ async def task_start(
     except ValueError as e:
         logger.warning("task_start failed: %s", e)
         raise ToolError(str(e)) from e
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 async def save_note(
@@ -198,6 +203,10 @@ async def save_note(
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 async def update_task(
@@ -256,6 +265,10 @@ async def update_task(
     except ValueError as e:
         logger.warning("update_task failed: %s", e)
         raise ToolError(str(e)) from e
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 async def create_task(

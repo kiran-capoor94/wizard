@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
+import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
@@ -357,6 +358,10 @@ async def session_end(
     except ValueError as e:
         logger.warning("session_end failed: %s", e)
         raise ToolError(str(e)) from e
+    except Exception as e:
+        # Capture unexpected exceptions in Sentry
+        sentry_sdk.capture_exception(e)
+        raise
 
 
 def _deserialise_session_state(
