@@ -69,6 +69,13 @@ class SynthesisSettings(BaseModel):
             model = data.get("model", "")
             if provider and model and "/" not in str(model):
                 data["model"] = f"{provider}/{model}"
+            elif model and "/" not in str(model):
+                logger.warning(
+                    "SynthesisSettings: model %r has no provider prefix "
+                    "(expected '<provider>/<model>', e.g. 'ollama/gemma4:latest-64k'). "
+                    "LiteLLM may route incorrectly.",
+                    model,
+                )
         return data
 
 

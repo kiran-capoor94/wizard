@@ -124,8 +124,15 @@ class LiteLLMAdapter:
 
     @staticmethod
     def _extract_json(text: str) -> str:
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-        return match.group(1).strip() if match else text.strip()
+        # 1. Fenced code block (```json ... ``` or ``` ... ```)
+        fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        if fenced:
+            return fenced.group(1).strip()
+        # 2. Bare JSON array anywhere in prose (e.g. "Here are the notes: [...]")
+        bare = re.search(r"(\[[\s\S]*\])", text)
+        if bare:
+            return bare.group(1).strip()
+        return text.strip()
 
 
 class Synthesiser:
