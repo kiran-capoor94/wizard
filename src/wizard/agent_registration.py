@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -250,7 +251,7 @@ def register_hook(agent_id: str) -> bool:
     if config_path.exists():
         try:
             data = json.loads(config_path.read_text())
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             data = {}
     else:
         data = {}
@@ -270,15 +271,17 @@ def register_hook(agent_id: str) -> bool:
         if already:
             continue
 
-        event_hooks.append({
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": f"bash {script}",
-                    "timeout": 10,
-                }
-            ],
-        })
+        event_hooks.append(
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f"bash {script}",
+                        "timeout": 10,
+                    }
+                ],
+            }
+        )
         changed = True
 
     if changed:
@@ -300,7 +303,7 @@ def deregister_hook(agent_id: str) -> bool:
 
     try:
         data = json.loads(config_path.read_text())
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         return False
 
     hooks = data.get(hooks_key, {})
@@ -322,6 +325,58 @@ def deregister_hook(agent_id: str) -> bool:
         data[hooks_key] = hooks
         config_path.write_text(json.dumps(data, indent=2))
     return removed_any
+
+
+_AGENT_SKILLS_DIRS: dict[str, Path] = {
+    "claude-code": Path.home() / ".claude" / "skills",
+    "claude-desktop": Path.home() / ".claude" / "skills",
+    "gemini": Path.home() / ".gemini" / "skills",
+    "codex": Path.home() / ".agents" / "skills",
+    "opencode": Path.home() / ".config" / "opencode" / "skills",
+}
+
+
+def install_skills(agent_id: str, source_dir: Path) -> bool:
+    """Copy skills from source_dir into the agent's native skills directory.
+
+    Merges — existing skills not in source_dir are left untouched.
+    Returns True if agent has a known skills dir, False otherwise.
+    """
+    if agent_id not in _AGENT_SKILLS_DIRS or not source_dir.exists():
+        return False
+    dest = _AGENT_SKILLS_DIRS[agent_id]
+    dest.mkdir(parents=True, exist_ok=True)
+    for skill_dir in source_dir.iterdir():
+        if not skill_dir.is_dir():
+            continue
+        skill_dest = dest / skill_dir.name
+        if skill_dest.exists():
+            shutil.rmtree(skill_dest)
+        shutil.copytree(skill_dir, skill_dest)
+    return True
+
+
+def uninstall_skills(agent_id: str, source_dir: Path) -> bool:
+    """Remove wizard-managed skills from the agent's native skills directory.
+
+    Only removes skill subdirectories that exist in source_dir — never touches
+    skills the user added manually.
+    Returns True if any skills were removed.
+    """
+    if agent_id not in _AGENT_SKILLS_DIRS or not source_dir.exists():
+        return False
+    dest = _AGENT_SKILLS_DIRS[agent_id]
+    if not dest.exists():
+        return False
+    removed = False
+    for skill_dir in source_dir.iterdir():
+        if not skill_dir.is_dir():
+            continue
+        skill_dest = dest / skill_dir.name
+        if skill_dest.exists():
+            shutil.rmtree(skill_dest)
+            removed = True
+    return removed
 
 
 def scan_all_registered() -> list[str]:

@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class JsonConfigSettingsSource(PydanticBaseSettingsSource):
-    def get_field_value(self, field, field_name) -> tuple[Any, str, bool]:  # noqa: ARG002
+    def get_field_value(
+        self, field, field_name
+    ) -> tuple[Any, str, bool]:  # noqa: ARG002
         return None, field_name, False
 
     def __call__(self) -> dict[str, Any]:
@@ -46,7 +48,6 @@ class ObsidianKSSettings(BaseModel):
     tasks_folder: str = "Tasks"
 
 
-
 class KnowledgeStoreSettings(BaseModel):
     type: str = ""  # "notion" | "obsidian" | ""
     notion: NotionKSSettings = Field(default_factory=NotionKSSettings)
@@ -57,6 +58,7 @@ class SynthesisSettings(BaseModel):
     provider: str = "ollama"
     model: str = "gemma4:latest-64k"
     base_url: str = "http://localhost:11434"
+    api_key: str = ""
     enabled: bool = True
 
 
@@ -67,7 +69,9 @@ class Settings(BaseSettings):
     version: str = "2.2.0"
     db: str = str(Path.home() / ".wizard" / "wizard.db")
     scrubbing: ScrubbingSettings = Field(default_factory=ScrubbingSettings)
-    knowledge_store: KnowledgeStoreSettings = Field(default_factory=KnowledgeStoreSettings)
+    knowledge_store: KnowledgeStoreSettings = Field(
+        default_factory=KnowledgeStoreSettings
+    )
     synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
 
     @classmethod

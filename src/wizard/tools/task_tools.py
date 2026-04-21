@@ -6,12 +6,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
 
 from ..database import get_session
-from ..deps import (
-    get_note_repo,
-    get_security,
-    get_task_repo,
-    get_task_state_repo,
-)
+from ..deps import get_note_repo, get_security, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
 from ..models import (
     MeetingTasks,
@@ -23,11 +18,7 @@ from ..models import (
     TaskState,
     TaskStatus,
 )
-from ..repositories import (
-    NoteRepository,
-    TaskRepository,
-    TaskStateRepository,
-)
+from ..repositories import NoteRepository, TaskRepository, TaskStateRepository
 from ..schemas import (
     CreateTaskResponse,
     MissingResponse,
@@ -116,7 +107,9 @@ async def task_start(
                 notes_by_type[key] = notes_by_type.get(key, 0) + 1
 
             key_notes = _select_key_notes(all_notes)
-            prior_notes = [NoteDetail.from_model(n) for n in key_notes if n.id is not None]
+            prior_notes = [
+                NoteDetail.from_model(n) for n in key_notes if n.id is not None
+            ]
 
             latest_mental_model = next(
                 (n.mental_model for n in all_notes if n.mental_model is not None),
@@ -166,7 +159,10 @@ async def save_note(
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
             task = t_repo.get_by_id(db, task_id)
-            if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
+            if (
+                note_type in (NoteType.INVESTIGATION, NoteType.DECISION)
+                and mental_model is None
+            ):
                 try:
                     result = await ctx.elicit(
                         "Optional: summarise what you now understand in 1-2 sentences "
@@ -191,7 +187,9 @@ async def save_note(
             )
             saved = n_repo.save(db, note)
             if saved.id is None:
-                raise ToolError("Internal error: note was not assigned an id after flush")
+                raise ToolError(
+                    "Internal error: note was not assigned an id after flush"
+                )
             t_state_repo.on_note_saved(db, task_id)
             return SaveNoteResponse(
                 note_id=saved.id,
@@ -200,12 +198,6 @@ async def save_note(
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
-
-
-
-
-
-
 
 
 async def update_task(
@@ -246,15 +238,19 @@ async def update_task(
             db.add(task)
             db.flush()
 
+            task_id_int = task.id
+            if task_id_int is None:
+                raise ToolError(
+                    "Internal error: task was not assigned an id after flush"
+                )
+
             task_state_updated = False
             if "status" in updated_fields:
-                if task.id is None:
-                    raise ToolError("Internal error: task was not assigned an id after flush")
-                t_state_repo.on_status_changed(db, task.id)
+                t_state_repo.on_status_changed(db, task_id_int)
                 task_state_updated = True
 
             return UpdateTaskResponse(
-                task_id=task.id,
+                task_id=task_id_int,
                 updated_fields=updated_fields,
                 task_state_updated=task_state_updated,
             )
@@ -291,9 +287,14 @@ async def create_task(
         if source_id:
             existing = t_repo.get_by_source_id(db, source_id)
             if existing:
+                existing_id = existing.id
+                if existing_id is None:
+                    raise ToolError(
+                        "Internal error: existing task has no id"
+                    )
                 # Don't update completed or archived tasks
                 if existing.status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
-                    return CreateTaskResponse(task_id=existing.id, already_existed=True)
+                    return CreateTaskResponse(task_id=existing_id, already_existed=True)
                 scrubbed_name = sec.scrub(name).clean
                 existing.name = scrubbed_name
                 existing.priority = priority
@@ -301,7 +302,7 @@ async def create_task(
                     existing.source_url = source_url
                 db.add(existing)
                 db.flush()
-                return CreateTaskResponse(task_id=existing.id, already_existed=True)
+                return CreateTaskResponse(task_id=existing_id, already_existed=True)
 
         clean_name = sec.scrub(name).clean
         task_status = TaskStatus(status)

@@ -106,7 +106,9 @@ class TaskContext(BaseModel):
         latest_note: Note | None = None,
     ) -> "TaskContext":
         if task.id is None:
-            raise ValueError("Cannot build TaskContext from an unpersisted Task (id is None)")
+            raise ValueError(
+                "Cannot build TaskContext from an unpersisted Task (id is None)"
+            )
         return cls(
             id=task.id,
             name=task.name,
@@ -165,7 +167,9 @@ class NoteDetail(BaseModel):
     @classmethod
     def from_model(cls, note) -> "NoteDetail":
         if note.id is None:
-            raise ValueError("Cannot build NoteDetail from an unpersisted Note (id is None)")
+            raise ValueError(
+                "Cannot build NoteDetail from an unpersisted Note (id is None)"
+            )
         return cls(
             id=note.id,
             note_type=note.note_type,
@@ -205,8 +209,8 @@ class PriorSessionSummary(BaseModel):
 class SessionStartResponse(BaseModel):
     session_id: int
     continued_from_id: int | None = None
-    open_tasks: str = ""        # TOON-encoded; see encode_task_contexts
-    blocked_tasks: str = ""     # TOON-encoded; see encode_task_contexts
+    open_tasks: str = ""  # TOON-encoded; see encode_task_contexts
+    blocked_tasks: str = ""  # TOON-encoded; see encode_task_contexts
     unsummarised_meetings: list[MeetingContext]
     wizard_context: dict | None = None
     skill_instructions: str | None = None
@@ -222,7 +226,9 @@ class TaskStartResponse(BaseModel):
     notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
     prior_notes: list[NoteDetail]  # 3 most recent notes, oldest first
     total_notes: int = 0  # total note count including older notes not returned
-    older_notes_available: bool = False  # True if note_count > 3; use rewind_task for full history
+    older_notes_available: bool = (
+        False  # True if note_count > 3; use rewind_task for full history
+    )
     rolling_summary: str | None = None  # synthesised from mental_models of all notes
     latest_mental_model: str | None = None
     skill_instructions: str | None = None

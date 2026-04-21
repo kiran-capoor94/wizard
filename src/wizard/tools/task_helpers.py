@@ -32,9 +32,13 @@ def apply_task_fields(
         updated.append("priority")
     if due_date is not None:
         try:
-            due_date_dt = datetime.datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+            due_date_dt = datetime.datetime.fromisoformat(
+                due_date.replace("Z", "+00:00")
+            )
         except ValueError as exc:
-            raise ToolError(f"Invalid due_date format: {due_date}. Use ISO 8601.") from exc
+            raise ToolError(
+                f"Invalid due_date format: {due_date}. Use ISO 8601."
+            ) from exc
         task.due_date = due_date_dt
         updated.append("due_date")
     if name is not None:
@@ -44,5 +48,3 @@ def apply_task_fields(
         task.source_url = source_url
         updated.append("source_url")
     return updated
-
-

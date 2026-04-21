@@ -14,7 +14,8 @@ from wizard.database import get_session as get_db_session
 from wizard.models import WizardSession
 from wizard.repositories import NoteRepository, TaskRepository
 from wizard.security import SecurityService
-from wizard.transcript import OllamaSynthesiser, TranscriptReader
+from wizard.synthesis import OllamaSynthesiser
+from wizard.transcript import TranscriptReader
 
 
 def _find_capture_session(db, session_id: int | None) -> WizardSession | None:

@@ -43,7 +43,8 @@ class SessionCloser:
         """Synthetically close sessions older than 24h with no summary. Opens its own DB session.
 
         Hook-marked sessions (with transcripts) are handled inline in session_start so that
-        ctx.sample() is available. This task only handles sessions with closed_by=None."""
+        ctx.sample() is available. This task only handles sessions with closed_by=None.
+        """
         try:
             with get_session() as db:
                 old = self._find_old_abandoned(db, current_session_id)
@@ -55,7 +56,8 @@ class SessionCloser:
                     except Exception as e:
                         logger.warning(
                             "close_abandoned_background: failed for session %d: %s",
-                            session.id, e,
+                            session.id,
+                            e,
                         )
                 logger.info("close_abandoned_background: closed %d session(s)", count)
         except Exception as e:
@@ -84,7 +86,7 @@ class SessionCloser:
             .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
             .limit(limit)
         )
-        return list(db.execute(stmt).scalars().all())
+        return list(db.exec(stmt).all())
 
     def _find_old_abandoned(
         self,
@@ -107,7 +109,7 @@ class SessionCloser:
             )
             .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
         )
-        return list(db.execute(stmt).scalars().all())
+        return list(db.exec(stmt).all())
 
     async def _close_one(
         self,
@@ -126,8 +128,12 @@ class SessionCloser:
         task_ids = list({n.task_id for n in notes if n.task_id is not None})
         note_count = len(notes)
         state = SessionState(
-            intent="", working_set=task_ids, state_delta="",
-            open_loops=[], next_actions=[], closure_status="interrupted",
+            intent="",
+            working_set=task_ids,
+            state_delta="",
+            open_loops=[],
+            next_actions=[],
+            closure_status="interrupted",
         )
         summary_text: str | None = None
         closed_via = ""
@@ -143,13 +149,17 @@ class SessionCloser:
         db.add(session)
         db.flush()
         note = Note(
-            note_type=NoteType.SESSION_SUMMARY, content=clean_summary,
+            note_type=NoteType.SESSION_SUMMARY,
+            content=clean_summary,
             session_id=session_id,
         )
         self._note_repo.save(db, note)
         return ClosedSessionSummary(
-            session_id=session_id, summary=clean_summary,
-            closed_via=closed_via, task_ids=task_ids, note_count=note_count,
+            session_id=session_id,
+            summary=clean_summary,
+            closed_via=closed_via,
+            task_ids=task_ids,
+            note_count=note_count,
         )
 
     def _get_session_notes(self, db: Session, session_id: int) -> list[Note]:

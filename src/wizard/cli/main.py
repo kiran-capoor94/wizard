@@ -75,7 +75,8 @@ def _package_skills_dir() -> Path:
 
 
 def _refresh_skills(dest: Path) -> None:
-    """Copy skills from the package into dest, replacing any existing copy."""
+    """Copy skills from the package into dest (wizard internal cache),
+    replacing any existing copy."""
     source = _package_skills_dir()
     if source.exists():
         if dest.exists():
@@ -84,6 +85,27 @@ def _refresh_skills(dest: Path) -> None:
         typer.echo(f"Installed skills to {dest}")
     else:
         typer.echo("No skills found in package — skipping skill install")
+
+
+def _install_skills_for_agents(agent_ids: list[str]) -> None:
+    """Copy wizard skills into each agent's native skills directory."""
+    source = _package_skills_dir()
+    if not source.exists():
+        return
+    for aid in agent_ids:
+        if agent_registration.install_skills(aid, source):
+            dest = agent_registration._AGENT_SKILLS_DIRS[aid]
+            typer.echo(f"  Installed skills for {aid} → {dest}")
+
+
+def _uninstall_skills_for_agents(agent_ids: list[str]) -> None:
+    """Remove wizard-managed skills from each agent's native skills directory."""
+    source = _package_skills_dir()
+    if not source.exists():
+        return
+    for aid in agent_ids:
+        if agent_registration.uninstall_skills(aid, source):
+            typer.echo(f"  Removed skills for {aid}")
 
 
 def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
@@ -96,7 +118,7 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
 
 
 def _register_agents(agent_ids: list[str], verb: str = "Registered") -> None:
-    """Register + install hooks for each agent ID, echoing the result."""
+    """Register MCP, install hooks, and install skills for each agent ID."""
     for aid in agent_ids:
         try:
             agent_registration.register(aid)
@@ -104,6 +126,7 @@ def _register_agents(agent_ids: list[str], verb: str = "Registered") -> None:
             typer.echo(f"  {verb} {aid}" + (" + hook" if hook_ok else ""))
         except Exception as exc:
             typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
+    _install_skills_for_agents(agent_ids)
 
 
 def _prompt_and_register_agents(agent: str | None) -> list[str]:
@@ -119,7 +142,7 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
         try:
             idx = int(selection) - 1
             agent = _AGENT_CHOICES[idx]
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             typer.echo("Invalid selection.", err=True)
             raise typer.Exit(1) from None
 
@@ -251,7 +274,7 @@ def _confirm_uninstall(
 
 
 def _deregister_agents(registered: list[str]) -> None:
-    """Deregister all agents, printing status for each."""
+    """Deregister MCP, remove hooks, and remove skills for all agents."""
     for aid in registered:
         try:
             agent_registration.deregister(aid)
@@ -259,6 +282,7 @@ def _deregister_agents(registered: list[str]) -> None:
             typer.echo(f"  Removed wizard from {aid}")
         except Exception as exc:
             typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
+    _uninstall_skills_for_agents(registered)
 
 
 @app.command()

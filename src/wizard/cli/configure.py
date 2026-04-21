@@ -107,7 +107,7 @@ def discover_data_sources(
     response = client.search(
         filter={"property": "object", "value": "data_source"},
     )
-    results = response.get("results", [])
+    results = response.get("results", [])  # type: ignore[union-attr]
 
     return [
         (ds["id"], ds.get("title", [{}])[0].get("plain_text", "(untitled)"))
