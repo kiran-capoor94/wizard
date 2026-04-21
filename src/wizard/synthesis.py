@@ -114,7 +114,9 @@ class LiteLLMAdapter:
                 },
             )
             raw = response.choices[0].message.content
-        except Exception:
+        except litellm.BadRequestError as e:
+            # Provider does not support structured output — retry as plain text.
+            logger.debug("LiteLLMAdapter: structured output not supported, falling back: %s", e)
             response = litellm.completion(**kwargs)
             raw = response.choices[0].message.content
         raw = self._extract_json(raw or "")
