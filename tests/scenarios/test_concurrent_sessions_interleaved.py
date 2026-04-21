@@ -21,7 +21,6 @@ async def test_concurrent_sessions(
     start_a = await session_start(
         ctx=ctx_a,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -33,7 +32,6 @@ async def test_concurrent_sessions(
     start_b = await session_start(
         ctx=ctx_b,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,

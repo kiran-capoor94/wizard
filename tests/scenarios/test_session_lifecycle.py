@@ -22,7 +22,6 @@ async def test_session_lifecycle(
     start_resp = await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -69,7 +68,6 @@ async def test_session_lifecycle(
 
     # 5. what_am_i_missing
     missing_resp = await what_am_i_missing(
-        ctx=fake_ctx,
         task_id=task.id,
         t_repo=task_repo,
         n_repo=note_repo,
@@ -98,7 +96,7 @@ async def test_session_lifecycle(
 @pytest.mark.asyncio
 async def test_session_start_writes_wizard_id_to_keyed_dir(
     tmp_path, db_session, fake_ctx,
-    task_repo, note_repo, meeting_repo, task_state_repo, session_closer,
+    task_repo, meeting_repo, task_state_repo, session_closer,
 ):
     """session_start must write wizard_id to SESSIONS_DIR/<uuid>/wizard_id."""
     uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
@@ -111,7 +109,6 @@ async def test_session_start_writes_wizard_id_to_keyed_dir(
             ctx=fake_ctx,
             agent_session_id=uuid,
             t_repo=task_repo,
-            n_repo=note_repo,
             m_repo=meeting_repo,
             ts_repo=task_state_repo,
             session_closer=session_closer,

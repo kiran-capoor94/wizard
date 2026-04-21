@@ -22,7 +22,6 @@ async def test_task_creation_flow(
     await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -30,7 +29,6 @@ async def test_task_creation_flow(
 
     # 1. create_task
     create_resp = await create_task(
-        ctx=fake_ctx,
         name="Fix login bug",
         priority=TaskPriority.HIGH,
         category=TaskCategory.BUG,
@@ -42,7 +40,6 @@ async def test_task_creation_flow(
 
     # 2. update_task -- status to in_progress
     update_resp = await update_task(
-        ctx=fake_ctx,
         task_id=task_id,
         status=TaskStatus.IN_PROGRESS,
         t_repo=task_repo,
@@ -61,7 +58,6 @@ async def test_task_creation_flow(
 
     # 4. update_task -- done
     done_resp = await update_task(
-        ctx=fake_ctx,
         task_id=task_id,
         status=TaskStatus.DONE,
         t_repo=task_repo,
@@ -72,7 +68,7 @@ async def test_task_creation_flow(
 
     # 5. rewind_task -- should show timeline
     rewind_resp = await rewind_task(
-        ctx=fake_ctx, task_id=task_id, n_repo=note_repo,
+        task_id=task_id, n_repo=note_repo,
     )
     assert rewind_resp.summary.total_notes == 1
     assert len(rewind_resp.timeline) == 1

@@ -13,7 +13,6 @@ async def test_prior_summaries_empty_on_first_session(
     response = await session_start(
         ctx=fake_ctx,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -30,7 +29,6 @@ async def test_prior_summaries_contains_most_recent_closed_session(
     start1 = await session_start(
         ctx=ctx1,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -53,7 +51,6 @@ async def test_prior_summaries_contains_most_recent_closed_session(
     start2 = await session_start(
         ctx=ctx2,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -74,7 +71,6 @@ async def test_prior_summaries_capped_at_three(
         resp = await session_start(
             ctx=ctx,
             t_repo=task_repo,
-            n_repo=note_repo,
             m_repo=meeting_repo,
             ts_repo=task_state_repo,
             session_closer=session_closer,
@@ -97,7 +93,6 @@ async def test_prior_summaries_capped_at_three(
     response = await session_start(
         ctx=ctx_final,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -118,7 +113,6 @@ async def test_prior_summaries_task_ids_from_working_set(
     start1 = await session_start(
         ctx=ctx1,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,
@@ -141,7 +135,6 @@ async def test_prior_summaries_task_ids_from_working_set(
     start2 = await session_start(
         ctx=ctx2,
         t_repo=task_repo,
-        n_repo=note_repo,
         m_repo=meeting_repo,
         ts_repo=task_state_repo,
         session_closer=session_closer,

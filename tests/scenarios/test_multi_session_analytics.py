@@ -25,7 +25,6 @@ async def test_multi_session_analytics(
         start = await session_start(
             ctx=ctx,
             t_repo=task_repo,
-            n_repo=note_repo,
             m_repo=meeting_repo,
             ts_repo=task_state_repo,
             session_closer=session_closer,

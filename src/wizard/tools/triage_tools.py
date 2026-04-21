@@ -81,7 +81,7 @@ def _score_task(
     return round(score, 4)
 
 
-def _dominant_signal(task: TaskContext, mode: str, time_budget: str | None) -> str:
+def _dominant_signal(task: TaskContext, mode: str) -> str:
     weights = _MODE_WEIGHTS.get(mode, _MODE_WEIGHTS["focus"])
     priority_score = _PRIORITY_SCORES.get(task.priority.value, 0.2)
     recency_score = 1.0 / (1.0 + task.stale_days)
@@ -108,9 +108,8 @@ async def _sample_reason(
     ctx: Context,
     task: TaskContext,
     mode: str,
-    time_budget: str | None,
 ) -> str:
-    dominant = _dominant_signal(task, mode, time_budget)
+    dominant = _dominant_signal(task, mode)
     momentum = _classify_momentum(task)
     prompt = (
         f"Task: {task.name!r}\n"
@@ -147,6 +146,8 @@ async def what_should_i_work_on(
         mode: Scoring mode — 'focus' (default), 'quick-wins', or 'unblock'.
         time_budget: Available time — '30m', '2h', 'half-day', 'full-day'.
     """
+    # session_id is a schema contract — callers must have an active session.
+    _ = session_id
     # Always fetch all workable tasks including blocked so we can count skipped ones
     # without a second query. Filter post-fetch based on mode.
     all_workable = t_repo.get_workable_task_contexts(db, include_blocked=True)
@@ -186,7 +187,7 @@ async def what_should_i_work_on(
     # Build recommendations with LLM-sampled reasons
     recs: list[TaskRecommendation] = []
     for task in shortlist:
-        reason = await _sample_reason(ctx, task, mode, time_budget)
+        reason = await _sample_reason(ctx, task, mode)
         recs.append(
             TaskRecommendation(
                 task_id=task.id,
