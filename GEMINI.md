@@ -20,13 +20,16 @@ Wizard is a local memory layer for AI agents, providing persistent context acros
 
 ### Core Commands
 ```bash
-uv sync                              # Sync dependencies
-uv run wizard setup --agent [agent]  # Initialize ~/.wizard/ and register agent
-uv run server.py                     # Run MCP server (stdio transport)
-uv run alembic upgrade head          # Run pending DB migrations
-uv run pytest                        # Run full test suite
-uv run wizard doctor                 # Run health checks
-uv run wizard analytics              # View usage stats
+uv sync                                       # Sync dependencies
+uv run wizard setup --agent [agent]           # Initialize ~/.wizard/ and register agent
+uv run server.py                              # Run MCP server (stdio transport)
+uv run alembic upgrade head                   # Run pending DB migrations
+uv run pytest                                 # Run full test suite
+uv run wizard doctor                          # Run health checks
+uv run wizard analytics                       # View usage stats
+uv run wizard configure synthesis             # List/manage LLM backends
+uv run wizard configure synthesis add         # Add a backend interactively
+uv run wizard configure synthesis test [N]    # Probe backend reachability
 ```
 
 Always run via `uv run` to ensure the project's virtualenv dependencies are resolved correctly.
@@ -36,23 +39,32 @@ Always run via `uv run` to ensure the project's virtualenv dependencies are reso
 ```text
 server.py                    # Entry point — imports mcp_instance, tools, resources, prompts
 src/wizard/
-  cli/                       # Typer app subcommands (setup, configure, doctor, analytics, etc.)
+  cli/                       # Typer app subcommands
+    main.py                  # setup, configure, doctor, analytics, update, uninstall
+    capture.py               # wizard capture — synthesis trigger (called by hooks)
+    configure.py             # configure knowledge-store + synthesis backends subcommands
+    doctor.py                # 8-point health checks
+    analytics.py             # Session/note/task analytics
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
   skills.py                  # Skill loader (reads ~/.wizard/skills/ at startup)
   tools/                     # MCP tools package (split by domain: session, task, triage, meeting, query)
+  repositories/              # Query layer (package: task, note, meeting, session, task_state)
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
   transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
-  synthesis.py               # Synthesiser (auto-capture via LiteLLM — any compatible provider)
+  synthesis.py               # Synthesiser (auto-capture via LiteLLM — ordered backend failover)
+  llm_adapters.py            # LiteLLM completion wrapper, probe_backend_health, JSON parsing
+  mid_session.py             # Background mid-session synthesis state
+  toon.py                    # TOON encoder — compact tabular format for bulk task delivery
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
-  repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, etc.)
   services.py                # SessionCloser — auto-closes abandoned sessions
   security.py                # SecurityService — regex PII scrubbing with allowlist
-  config.py                  # Pydantic Settings + JsonConfigSettingsSource
+  config.py                  # Pydantic Settings + BackendConfig + JsonConfigSettingsSource
   database.py                # SQLite session factory (SQLModel engine)
   deps.py                    # FastMCP Depends() provider functions
+  exceptions.py              # ConfigurationError
   agent_registration.py      # Write MCP + hook config into agent files
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
 hooks/                       # Agent hook scripts (SessionEnd, SessionStart)
@@ -89,8 +101,10 @@ Wizard tracks three layers: Agent session (UUID), Wizard session (Integer PK), a
 
 ### Auto-Capture (Transcript Synthesis)
 - **SessionEnd hook** calls `wizard capture --close`.
-- `Synthesiser` reads agent transcripts (JSONL) and calls any LiteLLM-compatible provider via `LiteLLMAdapter`. Model is configured as a LiteLLM model string (e.g. `"ollama/gemma4:latest-64k"`).
+- `Synthesiser` tries backends in priority order — first healthy local server wins, cloud providers always pass the health check. Backends are configured in `synthesis.backends` (ordered list of `BackendConfig` objects).
+- `llm_adapters.complete()` handles the LiteLLM call, streaming for local servers, and JSON repair.
 - Decoupled from MCP server; runs at hook time to avoid round-trip costs.
+- Manage backends with `wizard configure synthesis` (list, add, remove, move, test).
 
 ### Session Personalization
 - **SessionStart hook** fires with 80% probability gate.

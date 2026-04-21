@@ -137,7 +137,7 @@ graph TD
     C --> P[Synthesiser]
     N[SessionEnd hook] --> O[wizard capture --close]
     O --> P
-    P --> Q[llama_server / Gemma 4]
+    P --> Q[LiteLLM — any provider]
     P --> I
     C -.->|optional write-back| L[Knowledge Store\nNotion / Obsidian]
 ```
@@ -198,27 +198,40 @@ That's the minimal config. Wizard works without a knowledge store.
 
 ### Transcript Synthesis
 
-Transcript synthesis runs via any llama_server-compatible endpoint (e.g.
-[llama.cpp](https://github.com/ggerganov/llama.cpp), [Unsloth](https://github.com/unslothai/unsloth)).
-Configure in `config.json`:
+Transcript synthesis routes through [LiteLLM](https://docs.litellm.ai/) to any compatible
+provider (Ollama, Unsloth, llama.cpp, OpenAI, Gemini, etc.). Wizard tries backends in
+priority order — first healthy local server wins, cloud providers always pass the health
+check. Configure in `config.json`:
 
 ```json
 "synthesis": {
-  "model": "ollama/gemma4:latest-64k",
-  "base_url": "http://localhost:11434",
-  "api_key": "",
-  "enabled": true
+  "enabled": true,
+  "backends": [
+    {
+      "model": "ollama/gemma4:latest-64k",
+      "base_url": "http://localhost:11434",
+      "api_key": "",
+      "description": "Local Ollama (primary)"
+    },
+    {
+      "model": "gemini/gemini-2.5-flash-lite",
+      "api_key": "YOUR_GEMINI_API_KEY",
+      "description": "Cloud fallback"
+    }
+  ]
 }
 ```
 
 The `model` field uses [LiteLLM model string format](https://docs.litellm.ai/docs/providers):
 `"<provider>/<model>"`. Examples: `"ollama/gemma4:latest-64k"`, `"openai/gpt-4o-mini"`,
-`"openai/local-model"` with `base_url` pointing to a llama.cpp or Unsloth endpoint.
-`api_key` is required for cloud providers (OpenAI, Anthropic, etc.); leave empty for local endpoints.
+`"gemini/gemini-2.5-flash-lite"`. `api_key` is required for cloud providers; leave empty for
+local endpoints. `base_url` is required for local servers; omit for cloud providers.
 
-Set `"enabled": false` to disable synthesis (e.g. on machines without a
-running LLM server). The `wizard capture --close` command will mark the
-session and exit cleanly without synthesising.
+Manage backends interactively with `wizard configure synthesis` — list, add, remove, reorder,
+and test backends without editing JSON directly.
+
+Set `"enabled": false` to disable synthesis entirely (e.g. on machines without any LLM
+server). The `wizard capture --close` command will mark the session and exit cleanly.
 
 ### Sentry Monitoring (Optional)
 
@@ -294,16 +307,21 @@ Override the config path with the `WIZARD_CONFIG_FILE` environment variable.
 ## CLI
 
 ```bash
-uv run wizard setup [--agent AGENT]         # Initialize ~/.wizard/, config, skills, MCP + hook registration
-uv run wizard configure knowledge-store     # Configure optional Notion/Obsidian write-back
-uv run wizard doctor [--all]                # Health check — config, database, skills, migrations
-uv run wizard analytics [--week]            # Session/task/note usage stats
-uv run wizard update                        # Pull latest, sync deps, migrate DB, re-register agents + hooks
-uv run wizard uninstall [--yes]             # Clean removal of all state, MCP, and hook registration
-uv run wizard capture --close               # (Called by hooks) Synthesise transcript into notes
+uv run wizard setup [--agent AGENT]             # Initialize ~/.wizard/, config, skills, MCP + hook registration
+uv run wizard configure knowledge-store         # Configure optional Notion/Obsidian write-back
+uv run wizard configure synthesis               # List configured LLM backends (tried in priority order)
+uv run wizard configure synthesis add           # Add a backend (prompts interactively)
+uv run wizard configure synthesis remove N      # Remove backend by position
+uv run wizard configure synthesis move M N      # Reorder backends (position 1 = highest priority)
+uv run wizard configure synthesis test [N]      # Probe backend reachability
+uv run wizard doctor [--all]                    # Health check — config, database, skills, migrations
+uv run wizard analytics [--day|--week|--from/--to]  # Session/task/note usage stats
+uv run wizard update                            # Pull latest, sync deps, migrate DB, re-register agents + hooks
+uv run wizard uninstall [--yes]                 # Clean removal of all state, MCP, and hook registration
+uv run wizard capture --close                   # (Called by hooks) Synthesise transcript into notes
 ```
 
-**Supported agents for `--agent`:** `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `all`
+**Supported agents for `--agent`:** `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `copilot`, `all`
 
 ## Development
 
@@ -319,10 +337,11 @@ uv run alembic upgrade head    # Run migrations
 server.py                    # FastMCP server entry point (stdio)
 src/wizard/
   cli/
-    main.py                  # Typer CLI (setup, configure, doctor, analytics, update, uninstall, capture)
-    configure.py             # configure knowledge-store subcommand
+    main.py                  # Typer CLI (setup, configure, doctor, analytics, update, uninstall)
+    capture.py               # wizard capture — transcript synthesis trigger (called by hooks)
+    configure.py             # configure knowledge-store + synthesis backends subcommands
     doctor.py                # 8-point health checks
-    analytics.py             # Session/note/task analytics
+    analytics.py             # Session/note/task analytics (3-column Rich layout)
   mcp_instance.py            # FastMCP app factory + ToolLoggingMiddleware
   skills.py                  # Skill loader (reads ~/.wizard/skills/)
   tools/                     # MCP tools (split by domain)
@@ -332,19 +351,28 @@ src/wizard/
     triage_tools.py          # what_should_i_work_on (mode-based scoring + LLM reasons)
     meeting_tools.py         # get_meeting, save_meeting_summary, ingest_meeting
     query_tools.py           # get_tasks, get_task, get_sessions, get_session (paginated)
+  repositories/              # Query layer (package)
+    task.py                  # TaskRepository
+    note.py                  # NoteRepository
+    meeting.py               # MeetingRepository
+    session.py               # SessionRepository
+    task_state.py            # TaskStateRepository
   resources.py               # 5 MCP read-only resources
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware
   transcript.py              # TranscriptReader (JSONL parser)
-  synthesis.py               # Synthesiser (auto-capture via LiteLLM — any compatible provider)
+  synthesis.py               # Synthesiser (auto-capture via LiteLLM — ordered backend failover)
+  llm_adapters.py            # LiteLLM completion wrapper, probe_backend_health, JSON parsing
+  mid_session.py             # Background mid-session synthesis state (MID_SESSION_TASKS)
+  toon.py                    # TOON encoder — compact tabular format for bulk task delivery
   models.py                  # SQLModel entities (task, note, meeting, wizardsession, toolcall, task_state)
   schemas.py                 # Pydantic response schemas
-  repositories.py            # Query layer
   services.py                # SessionCloser
   security.py                # PII scrubbing (regex + allowlist)
-  config.py                  # Pydantic settings + JsonConfigSettingsSource
+  config.py                  # Pydantic settings + BackendConfig + JsonConfigSettingsSource
   database.py                # SQLite connection management
   deps.py                    # FastMCP Depends() provider functions
+  exceptions.py              # ConfigurationError
   agent_registration.py      # Register MCP + hooks in agent configs
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ on setup)
 hooks/

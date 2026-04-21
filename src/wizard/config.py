@@ -54,12 +54,26 @@ class KnowledgeStoreSettings(BaseModel):
     obsidian: ObsidianKSSettings = Field(default_factory=ObsidianKSSettings)
 
 
+class BackendConfig(BaseModel):
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    provider: str = ""  # informational only; routing is via model prefix
+    description: str = ""  # human-readable label shown in logs
+
+
 class SynthesisSettings(BaseModel):
     provider: str = ""  # deprecated; kept so existing configs don't error on load
     model: str = "ollama/gemma4:latest-64k"
     base_url: str = "http://localhost:11434"
     api_key: str = ""
     enabled: bool = True
+    # Maximum characters to send per chunk when the model's context is exceeded.
+    # Increase this to match larger local servers (e.g. Unsloth/Unsloth configured for 262144).
+    context_chars: int = 200000
+    # Ordered list of backends; first healthy one wins.
+    # See wizard configure synthesis for interactive management.
+    backends: list[BackendConfig] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
