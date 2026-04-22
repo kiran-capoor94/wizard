@@ -101,7 +101,7 @@ def _ensure_editable_pth() -> None:
     if getattr(st, "st_flags", 0) & stat.UF_HIDDEN:
         os.chflags(pth_file, st.st_flags & ~stat.UF_HIDDEN)
 
-def _is_editable_install() -> bool:
+def is_editable_install() -> bool:
     """Return True for editable dev install; False for `uv tool install`."""
     try:
         dist = importlib_metadata.distribution("wizard")
@@ -441,7 +441,7 @@ def update() -> None:
 
     skills_dest = WIZARD_HOME / "skills"
 
-    if _is_editable_install():
+    if is_editable_install():
         # Dev mode: git pull + uv sync
         repo_root = Path(__file__).resolve().parents[3]
         sync_args = (
