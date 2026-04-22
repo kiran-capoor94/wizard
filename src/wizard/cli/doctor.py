@@ -83,7 +83,7 @@ def _check_allowlist_file() -> tuple[bool, str]:
     allowlist = Path.home() / ".wizard" / "allowlist.txt"
     if allowlist.exists():
         return True, f"Allowlist found: {allowlist}"
-    return False, f"Allowlist not found: {allowlist}"
+    return True, f"Allowlist not found at {allowlist} — run 'wizard setup' to create it"
 
 
 def _check_agent_registrations() -> tuple[bool, str]:
