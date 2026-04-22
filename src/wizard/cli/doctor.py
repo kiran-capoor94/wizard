@@ -5,6 +5,8 @@ from pathlib import Path
 
 import typer
 from alembic.runtime.migration import MigrationContext
+from rich import print as rprint
+from rich.table import Table
 from sqlalchemy import create_engine
 
 from wizard import agent_registration
@@ -165,14 +167,20 @@ def doctor(
     """Run health checks on the wizard installation."""
     results = run_checks(stop_on_failure=not all_checks)
 
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Check", min_width=22)
+    table.add_column("Status", width=6)
+    table.add_column("Details")
+
     failures = []
     for i, (name, passed, message) in enumerate(results, 1):
-        status = "PASS" if passed else "FAIL"
-        typer.echo(f"  [{i:2d}] {status}  {name}: {message}")
-
+        status = "[green]PASS[/green]" if passed else "[bold red]FAIL[/bold red]"
+        table.add_row(str(i), name, status, message)
         if not passed:
             failures.append((i, name, message))
 
+    rprint(table)
     if failures:
         raise typer.Exit(1)
     typer.echo("All checks passed.")

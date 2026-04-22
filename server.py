@@ -4,7 +4,9 @@ import sys
 from pathlib import Path
 
 import sentry_sdk
+from sentry_sdk.integrations.litellm import LiteLLMIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
+from sentry_sdk.integrations.mcp import MCPIntegration
 
 import wizard.prompts  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.prompt decorators
 import wizard.resources  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.resource decorators
@@ -40,12 +42,15 @@ if __name__ == "__main__":
             profiles_sample_rate=settings.sentry.profiles_sample_rate,
             # Add wizard-specific context
             release=f"wizard@{settings.version}",
+            enable_logs=True,
             integrations=[
+                LiteLLMIntegration(),
+                MCPIntegration(),
                 LoggingIntegration(
                     level=None,  # Capture all logs as breadcrumbs
                     event_level=None,  # Don't send logs as events
                 ),
             ],
         )
-    
+
     mcp.run()
