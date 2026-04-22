@@ -47,7 +47,7 @@ from ..skills import (
     SKILL_SESSION_END,
     SKILL_SESSION_RESUME,
     SKILL_SESSION_START,
-    load_skill,
+    load_skill_post,
 )
 from ..synthesis import Synthesiser
 from ..toon import encode_task_contexts
@@ -255,7 +255,7 @@ async def session_start(
             blocked_tasks=encode_task_contexts("blocked_tasks", blocked_list),
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             wizard_context=_build_wizard_context(),
-            skill_instructions=load_skill(SKILL_SESSION_START),
+            skill_instructions=load_skill_post(SKILL_SESSION_START),
             closed_sessions=closed_sessions,
             prior_summaries=prior_summaries,
         )
@@ -353,7 +353,7 @@ async def session_end(
                 open_loops_count=len(open_loops),
                 next_actions_count=len(next_actions),
                 intent=intent,
-                skill_instructions=load_skill(SKILL_SESSION_END),
+                skill_instructions=load_skill_post(SKILL_SESSION_END),
             )
     except ValueError as e:
         logger.warning("session_end failed: %s", e)
@@ -486,7 +486,7 @@ async def resume_session(
             working_set_tasks=working_set_tasks,
             prior_notes=prior_notes,
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
-            skill_instructions=load_skill(SKILL_SESSION_RESUME),
+            skill_instructions=load_skill_post(SKILL_SESSION_RESUME),
         )
 
 

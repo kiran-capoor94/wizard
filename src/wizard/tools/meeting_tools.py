@@ -17,7 +17,7 @@ from ..schemas import (
     SaveMeetingSummaryResponse,
 )
 from ..security import SecurityService
-from ..skills import SKILL_MEETING, load_skill
+from ..skills import SKILL_MEETING, load_skill_post
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ async def get_meeting(
                 already_summarised=meeting.summary is not None,
                 existing_summary=meeting.summary,
                 open_tasks=linked_tasks,
-                skill_instructions=load_skill(SKILL_MEETING),
+                skill_instructions=load_skill_post(SKILL_MEETING),
             )
     except ValueError as e:
         logger.warning("get_meeting failed: %s", e)
