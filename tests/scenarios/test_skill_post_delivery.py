@@ -2,8 +2,8 @@
 SKILL.md is read for registered-skill delivery — they are independent.
 """
 
-from wizard.skills import load_skill_post
 import wizard.agent_registration as ar
+from wizard.skills import load_skill_post
 
 
 def test_load_skill_post_returns_skill_post_md_content(tmp_path, monkeypatch):
