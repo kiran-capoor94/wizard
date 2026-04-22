@@ -10,7 +10,6 @@ import csv
 import io
 
 from .schemas import TaskContext
-from .transcript import TranscriptEntry
 
 _TASK_FIELDS = (
     "id",
@@ -68,23 +67,4 @@ def encode_task_contexts(label: str, tasks: list[TaskContext]) -> str:
     return "\n".join(lines)
 
 
-def encode_transcript_entries(entries: list[TranscriptEntry]) -> str:
-    """Encode transcript entries as a TOON tabular string.
 
-    Format: transcript[N]{role,tool,content}:
-              one CSV row per entry (CSV handles quoting of commas/newlines).
-    Returns ``transcript[0]`` for empty lists.
-    """
-    if not entries:
-        return "transcript[0]"
-
-    header = f"transcript[{len(entries)}]{{role,tool,content}}:"
-    lines = [header]
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    for e in entries:
-        buf.seek(0)
-        buf.truncate(0)
-        writer.writerow([e.role, e.tool_name or "", e.content])
-        lines.append("  " + buf.getvalue().rstrip("\r\n"))
-    return "\n".join(lines)
