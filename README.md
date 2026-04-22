@@ -31,6 +31,37 @@ skills, registers the MCP server with your chosen agent, and installs
 the auto-capture hook. For optional write-back to Notion or Obsidian,
 run `uv run wizard configure knowledge-store` after setup.
 
+## Your first session
+
+After `wizard setup`, Wizard runs automatically — no manual invocation needed.
+
+**Confirm it's working**
+
+```bash
+wizard verify
+```
+
+**Claude Code**
+
+The `wizard:` tools appear in your MCP tool list. The `SessionStart` hook
+calls `wizard:session_start` at the start of every conversation. The
+`SessionEnd` hook synthesises your transcript into structured notes at
+session end.
+
+You don't need to invoke any MCP tool manually — just start working.
+
+**Gemini CLI / Copilot CLI / Codex**
+
+Same hooks apply after `wizard setup --agent <agent>`. Run `wizard verify`
+to confirm the connection.
+
+**What gets captured automatically**
+
+- Session start and end recorded in SQLite
+- Transcript synthesised into structured notes at session end (requires a
+  running Ollama instance or a cloud API key — see [Configuration](#configuration))
+- Run `wizard analytics` to review your session history
+
 ## How It Works
 
 Wizard is built around a **session lifecycle** that keeps your agent
