@@ -144,58 +144,51 @@ def complete(
     base_url: str | None = None,
     api_key: str | None = None,
 ) -> list[SynthesisNote]:
-    """Call litellm and return validated SynthesisNotes.
+    """Call the appropriate backend and return validated SynthesisNotes.
 
-    litellm routes by model prefix (gemini/*, openai/*, etc.).
-    For local OpenAI-compatible servers: use the openai/ prefix and include
-    /v1 in base_url (e.g. http://localhost:8888/v1).
-
-    Local servers often stream regardless of the stream param, so we force
-    stream=True for localhost endpoints and collect the chunks ourselves.
+    Ollama backends: native /api/chat via OllamaAdapter (format:'json', no LiteLLM).
+    Cloud backends: LiteLLM routing by model prefix (gemini/*, openai/*, etc.).
+    Local non-Ollama backends: LiteLLM with stream=False + thinking disabled.
     """
+    if "ollama" in model:
+        options = {
+            "num_ctx": 16384,
+            "num_predict": 512,
+            "num_thread": 4,
+            "temperature": 0.1,
+        }
+        adapter = OllamaAdapter(
+            base_url or "http://localhost:11434", model, options
+        )
+        return adapter.complete(messages)
+
     kwargs: dict = {
         "model": model,
         "messages": messages,
-        "timeout": 90,  # Prevent indefinite hangs (90s)
-        "max_tokens": 1024,  # Synthesis should be short
+        "timeout": 90,
+        "max_tokens": 1024,
     }
     if base_url:
         kwargs["base_url"] = base_url
     if api_key:
         kwargs["api_key"] = api_key
 
-    logger.info("llm_adapters: calling %s at %s", model, base_url or "cloud")
-    chunk_count = 0
+    logger.info(
+        "llm_adapters: calling %s at %s (local=%s)",
+        model,
+        base_url or "cloud",
+        _is_local(base_url),
+    )
     if _is_local(base_url):
-        # Disable streaming for local servers to ensure the full JSON is collected.
         kwargs["stream"] = False
-        kwargs["timeout"] = 300  # Allow 5 mins for local generation
+        kwargs["timeout"] = 300
+        kwargs["extra_body"] = {"enable_thinking": False}
 
-        # Ollama-specific optimizations
-        extra_body = {"enable_thinking": False}
-        if "ollama" in model.lower():
-            extra_body.update({
-                "num_ctx": 16384,
-                "num_predict": 512,
-                "num_thread": 4,
-                "flash_attention": False,
-            })
-        kwargs["extra_body"] = extra_body
+    response = litellm.completion(**kwargs)  # type: ignore[call-overload]
+    try:
+        raw = response.choices[0].message.content  # type: ignore[union-attr]
+    except Exception:
+        raw = getattr(response.choices[0], "text", "") or ""  # type: ignore[union-attr]
 
-        try:
-            response = litellm.completion(**kwargs)  # type: ignore[call-overload]
-            raw = response.choices[0].message.content or ""  # type: ignore[union-attr]
-        except Exception as e:
-            logger.error("llm_adapters: local completion failed: %s", e)
-            raise
-    else:
-        # Cloud providers handle timeouts well.
-        response = litellm.completion(**kwargs)  # type: ignore[call-overload]
-        try:
-            raw = response.choices[0].message.content  # type: ignore[union-attr]
-        except Exception:
-            raw = getattr(response.choices[0], "text", "") or ""  # type: ignore[union-attr]
-
-    logger.info("llm_adapters: synthesis complete (%d chars, %d chunks)",
-                len(raw) if raw else 0, chunk_count if _is_local(base_url) else 1)
+    logger.info("llm_adapters: synthesis complete (%d chars)", len(raw) if raw else 0)
     return _parse_notes(raw or "")
