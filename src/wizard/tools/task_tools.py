@@ -34,7 +34,7 @@ from ..schemas import (
     UpdateTaskResponse,
 )
 from ..security import SecurityService
-from ..skills import SKILL_TASK_START, load_skill
+from ..skills import SKILL_TASK_START, load_skill_post
 from .task_helpers import apply_task_fields
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -123,7 +123,7 @@ async def task_start(
 
             # Dedup skill_instructions within the session: send only on first task_start call
             skill_delivered = await ctx.get_state("task_start_skill_delivered")
-            skill = None if skill_delivered else load_skill(SKILL_TASK_START)
+            skill = None if skill_delivered else load_skill_post(SKILL_TASK_START)
             if not skill_delivered:
                 await ctx.set_state("task_start_skill_delivered", True)
 

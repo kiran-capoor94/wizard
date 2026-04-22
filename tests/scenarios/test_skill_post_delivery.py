@@ -2,8 +2,10 @@
 SKILL.md is read for registered-skill delivery — they are independent.
 """
 
+import pytest
 import wizard.agent_registration as ar
 from wizard.skills import load_skill_post
+from wizard.tools.session_tools import session_start
 
 
 def test_load_skill_post_returns_skill_post_md_content(tmp_path, monkeypatch):
@@ -47,3 +49,29 @@ def test_install_skills_excludes_skill_post_md(tmp_path, monkeypatch):
 
     assert (dest / "my-skill" / "SKILL.md").exists(), "SKILL.md must be installed"
     assert not (dest / "my-skill" / "SKILL-POST.md").exists(), "SKILL-POST.md must NOT be installed"
+
+
+@pytest.mark.asyncio
+async def test_session_start_skill_instructions_contains_post_call_content(
+    db_session, fake_ctx, task_repo, meeting_repo, task_state_repo, session_closer,
+):
+    """session_start must inject SKILL-POST.md content, not full SKILL.md.
+
+    SKILL-POST.md starts with '# Session Start — Post-Call Guidance'.
+    The pre-call SKILL.md starts with '# Session Start' and contains the Role section.
+    After the split, skill_instructions must come from SKILL-POST.md.
+    """
+    resp = await session_start(
+        ctx=fake_ctx,
+        t_repo=task_repo,
+        m_repo=meeting_repo,
+        ts_repo=task_state_repo,
+        session_closer=session_closer,
+    )
+    assert resp.skill_instructions is not None
+    assert "Post-Call Guidance" in resp.skill_instructions, (
+        "skill_instructions must be from SKILL-POST.md, not the full SKILL.md"
+    )
+    assert "## Role" not in resp.skill_instructions, (
+        "Role section belongs in SKILL.md (pre-call), not in tool response"
+    )
