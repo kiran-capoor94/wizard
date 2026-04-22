@@ -217,6 +217,7 @@ def write_registered_agents(agents: list[str]) -> None:
 
 _HOOK_SCRIPT_SESSION_END = _PROJECT_DIR / "hooks" / "session-end.sh"
 _HOOK_SCRIPT_SESSION_START = _PROJECT_DIR / "hooks" / "session-start.sh"
+_HOOK_SCRIPT_SESSION_START_MINIMAL = _PROJECT_DIR / "hooks" / "session-start-minimal.sh"
 
 _HOOK_CONFIGS: dict[str, tuple[Path, str]] = {
     # agent_id -> (config_path, hooks_key_path)
@@ -243,9 +244,18 @@ _HOOK_SCRIPTS: dict[str, dict[str, Path]] = {
         "SessionEnd": _HOOK_SCRIPT_SESSION_END,
         "SessionStart": _HOOK_SCRIPT_SESSION_START,
     },
-    "codex": {"Stop": _HOOK_SCRIPT_SESSION_END},
-    "gemini": {"SessionEnd": _HOOK_SCRIPT_SESSION_END},
-    "copilot": {"sessionEnd": _HOOK_SCRIPT_SESSION_END},
+    "codex": {
+        "Stop": _HOOK_SCRIPT_SESSION_END,
+        "SessionStart": _HOOK_SCRIPT_SESSION_START_MINIMAL,
+    },
+    "gemini": {
+        "SessionEnd": _HOOK_SCRIPT_SESSION_END,
+        "SessionStart": _HOOK_SCRIPT_SESSION_START_MINIMAL,
+    },
+    "copilot": {
+        "sessionEnd": _HOOK_SCRIPT_SESSION_END,
+        "sessionStart": _HOOK_SCRIPT_SESSION_START_MINIMAL,
+    },
 }
 
 
