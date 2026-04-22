@@ -33,3 +33,22 @@ def load_skill(name: str) -> str | None:
                 return None
     logger.debug("Skill %s not found in installed or package paths", name)
     return None
+
+
+def load_skill_post(name: str) -> str | None:
+    """Read SKILL-POST.md for the named skill. Internal only — never registered.
+
+    Checks installed dir first, then package. Returns None if not found.
+    Post-call content (schema reference, hard gates, presentation rules)
+    is injected in tool responses; it is NOT copied to agent skill dirs.
+    """
+    for root in (_INSTALLED_SKILLS, _PACKAGE_SKILLS):
+        path = root / name / "SKILL-POST.md"
+        if path.is_file():
+            try:
+                return path.read_text(encoding="utf-8")
+            except OSError as e:
+                logger.warning("Failed to read skill-post %s from %s: %s", name, path, e)
+                return None
+    logger.debug("Skill-post %s not found in installed or package paths", name)
+    return None
