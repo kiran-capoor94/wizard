@@ -80,6 +80,45 @@ def _is_local(base_url: str | None) -> bool:
     return bool(base_url and ("localhost" in base_url or "127.0.0.1" in base_url))
 
 
+class OllamaAdapter:
+    """Native Ollama API client using /api/chat with JSON format enforcement.
+
+    Bypasses LiteLLM to call Ollama directly, which eliminates LiteLLM's
+    overhead and allows use of Ollama's format:'json' option for reliable
+    structured output.
+    """
+
+    def __init__(self, base_url: str, model: str, options: dict):
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._options = options
+
+    def complete(self, messages: list[dict]) -> list[SynthesisNote]:
+        """Call /api/chat and return validated SynthesisNotes.
+
+        format:'json' constrains Ollama to emit syntactically valid JSON.
+        ValidationError for schema mismatches propagates to the caller.
+        """
+        payload = {
+            "model": self._model,
+            "messages": messages,
+            "stream": False,
+            "format": "json",
+            "options": self._options,
+        }
+        response = httpx.post(
+            f"{self._base_url}/api/chat",
+            json=payload,
+            timeout=300.0,
+        )
+        response.raise_for_status()
+        content = response.json()["message"]["content"]
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        return [SynthesisNote.model_validate(n) for n in parsed]
+
+
 def probe_backend_health(base_url: str | None) -> bool:
     """Health-check a backend.
 
