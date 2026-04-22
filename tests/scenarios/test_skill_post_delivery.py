@@ -53,7 +53,12 @@ def test_install_skills_excludes_skill_post_md(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_session_start_skill_instructions_contains_post_call_content(
-    db_session, fake_ctx, task_repo, meeting_repo, task_state_repo, session_closer,
+    db_session,  # patches get_session for all tool modules — required for DB isolation
+    fake_ctx,
+    task_repo,
+    meeting_repo,
+    task_state_repo,
+    session_closer,
 ):
     """session_start must inject SKILL-POST.md content, not full SKILL.md.
 
