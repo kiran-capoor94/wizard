@@ -71,7 +71,8 @@ def test_ollama_adapter_posts_to_api_chat_with_json_format():
     payload = mock_post.call_args.kwargs["json"]
     assert payload["format"] == "json"
     assert payload["stream"] is False
-    assert payload["model"] == "ollama/gemma4:latest-64k"
+    # Provider prefix stripped — Ollama native API takes bare model name
+    assert payload["model"] == "gemma4:latest-64k"
     assert payload["options"] == {"num_ctx": 16384}
     assert payload["messages"] == [{"role": "user", "content": "summarise this"}]
 
