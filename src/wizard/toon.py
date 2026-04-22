@@ -1,7 +1,7 @@
 """TOON (Token-Oriented Object Notation) encoder for wizard response payloads.
 
-Encodes uniform arrays of TaskContext objects into the compact TOON tabular
-format, reducing token consumption by ~40% vs JSON for large task lists.
+Encodes uniform arrays of structured objects into the compact TOON tabular
+format, reducing token consumption vs JSON for large structured payloads.
 
 Only encoding is implemented — wizard never needs to decode TOON server-side.
 """
@@ -10,6 +10,7 @@ import csv
 import io
 
 from .schemas import TaskContext
+from .transcript import TranscriptEntry
 
 _TASK_FIELDS = (
     "id",
@@ -64,4 +65,26 @@ def encode_task_contexts(label: str, tasks: list[TaskContext]) -> str:
         writer.writerow(row)
         lines.append("  " + buf.getvalue().rstrip("\r\n"))
 
+    return "\n".join(lines)
+
+
+def encode_transcript_entries(entries: list[TranscriptEntry]) -> str:
+    """Encode transcript entries as a TOON tabular string.
+
+    Format: transcript[N]{role,tool,content}:
+              one CSV row per entry (CSV handles quoting of commas/newlines).
+    Returns ``transcript[0]`` for empty lists.
+    """
+    if not entries:
+        return "transcript[0]"
+
+    header = f"transcript[{len(entries)}]{{role,tool,content}}:"
+    lines = [header]
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    for e in entries:
+        buf.seek(0)
+        buf.truncate(0)
+        writer.writerow([e.role, e.tool_name or "", e.content])
+        lines.append("  " + buf.getvalue().rstrip("\r\n"))
     return "\n".join(lines)

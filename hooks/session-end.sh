@@ -44,9 +44,15 @@ if [ -n "$SESSION_ID" ]; then
     fi
 fi
 
-uv --directory "$WIZARD_DIR" run wizard "${ARGS[@]}" 2>/dev/null || true
+# Keyed session directory — cleaned up after synthesis completes.
+CLEANUP_DIR=""
+[ -n "$SESSION_ID" ] && CLEANUP_DIR="$HOME/.wizard/sessions/$SESSION_ID"
 
-# Clean up keyed session directory.
-if [ -n "$SESSION_ID" ]; then
-    rm -rf "$HOME/.wizard/sessions/$SESSION_ID" 2>/dev/null || true
-fi
+# Run synthesis in background so the hook returns immediately.
+# Local LLMs can take minutes; blocking the hook causes hook timeouts.
+(
+    uv --directory "$WIZARD_DIR" run wizard "${ARGS[@]}" \
+        >> "$HOME/.wizard/synthesis.log" 2>&1 || true
+    [ -n "$CLEANUP_DIR" ] && rm -rf "$CLEANUP_DIR" 2>/dev/null || true
+) &
+disown $!

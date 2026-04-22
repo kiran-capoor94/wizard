@@ -295,6 +295,8 @@ def register_hook(agent_id: str) -> bool:
                     {
                         "type": "command",
                         "command": expected_cmd,
+                        # Synthesis runs in a detached background process (disown);
+                        # this timeout covers only hook script startup (~sub-second).
                         "timeout": 10,
                     }
                 ],

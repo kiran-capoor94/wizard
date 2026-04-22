@@ -1,6 +1,8 @@
 import datetime
 import logging
 
+from rich.console import Console
+from rich.table import Table
 from sqlmodel import col, func, select
 
 from wizard.models import Note, NoteType, TaskState, ToolCall, WizardSession
@@ -233,3 +235,71 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
 
     lines.append("")
     return "\n".join(lines)
+
+
+def print_analytics(data: dict, start: datetime.date, end: datetime.date) -> None:
+    """Render analytics to the terminal using a compact 3-column Rich layout."""
+    from rich.text import Text
+
+    sessions = data.get("sessions", {})
+    notes = data.get("notes", {})
+    tasks = data.get("tasks", {})
+    compounding = data.get("compounding", 0.0)
+
+    session_count = sessions.get("session_count", 0)
+    synthesised = notes.get("session_summaries", 0)
+    abandoned = sessions.get("abandoned_count", 0)
+    by_type = {k: v for k, v in notes.get("by_type", {}).items() if k != "session_summary"}
+    worked = tasks.get("worked", 0)
+    stale = tasks.get("stale_count", 0)
+
+    # ── Sessions column ──────────────────────────────────────────
+    sess_col = Text()
+    sess_col.append(f"{session_count}", style="bold")
+    sess_col.append(" sessions\n")
+    sess_col.append(f"{synthesised}", style="bold")
+    sess_col.append(" synthesised")
+    if abandoned:
+        sess_col.append(f"\n{abandoned}", style="bold yellow")
+        sess_col.append(" abandoned", style="yellow")
+
+    # ── Notes column ─────────────────────────────────────────────
+    notes_col = Text()
+    for note_type, count in sorted(by_type.items(), key=lambda x: -x[1]):
+        notes_col.append(f"{count:3d}", style="bold")
+        notes_col.append(f"  {note_type}\n")
+    if not by_type:
+        notes_col.append("(none)", style="dim")
+
+    # ── Tasks column ─────────────────────────────────────────────
+    tasks_col = Text()
+    tasks_col.append(f"{worked}", style="bold")
+    tasks_col.append(" worked\n")
+    if stale:
+        tasks_col.append(f"{stale}", style="bold yellow")
+        tasks_col.append(" stale (>3 days)\n", style="yellow")
+    if compounding > 0:
+        tasks_col.append(f"\n{compounding:.0%}", style="bold")
+        tasks_col.append(" compounding")
+
+    grid = Table(box=None, show_header=True, header_style="bold", padding=(0, 3))
+    grid.add_column("Sessions", min_width=18)
+    grid.add_column("Notes", min_width=22)
+    grid.add_column("Tasks", min_width=18)
+    grid.add_row(sess_col, notes_col, tasks_col)
+
+    console = Console()
+    date_label = str(start) if start == end else f"{start} → {end}"
+    console.rule(f"[bold]Wizard[/bold]  {date_label}")
+    console.print()
+    console.print(grid)
+
+    health: list[str] = []
+    if sessions.get("abandoned_rate", 0.0) > 0.5:
+        health.append(f"{abandoned} sessions abandoned — call session_end before closing")
+    if worked > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5:
+        health.append("Notes aren't linking to tasks — set task_id in save_note calls")
+    if health:
+        console.print()
+        for msg in health:
+            console.print(f"  [yellow]⚠[/yellow]  {msg}")

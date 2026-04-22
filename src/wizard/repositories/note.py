@@ -78,9 +78,7 @@ class NoteRepository:
             select(func.count()).select_from(Note).where(Note.session_id == session_id)
         ).one()
 
-    def count_for_sessions(
-        self, db: Session, session_ids: list[int]
-    ) -> dict[int, int]:
+    def count_for_sessions(self, db: Session, session_ids: list[int]) -> dict[int, int]:
         """Batch-count notes per session. Returns {session_id: count}."""
         if not session_ids:
             return {}
