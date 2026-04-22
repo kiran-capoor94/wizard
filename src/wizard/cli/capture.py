@@ -4,6 +4,7 @@ Extracted from main.py to keep it under the 500-line cap.
 """
 
 import datetime
+import logging
 from pathlib import Path
 
 import typer
@@ -13,9 +14,12 @@ from wizard.config import settings
 from wizard.database import get_session as get_db_session
 from wizard.models import WizardSession
 from wizard.repositories import NoteRepository, TaskRepository
+from wizard.schemas import SynthesisNote
 from wizard.security import SecurityService
 from wizard.synthesis import Synthesiser
 from wizard.transcript import TranscriptReader
+
+logger = logging.getLogger(__name__)
 
 
 def _find_capture_session(db, session_id: int | None) -> WizardSession | None:
@@ -93,7 +97,7 @@ def _collect_transcripts(session: WizardSession) -> list[Path]:
     return [main_path] + siblings
 
 
-def capture(
+def capture(  # noqa: C901
     close: bool = typer.Option(False, "--close", help="Mark session as closed by hook"),
     transcript: str = typer.Option("", "--transcript", help="Path to transcript file"),
     agent: str = typer.Option("", "--agent", help="Agent name"),
@@ -109,6 +113,18 @@ def capture(
         typer.echo("Only --close mode is supported.")
         raise typer.Exit(0)
 
+    security = SecurityService(
+        allowlist=settings.scrubbing.allowlist, enabled=settings.scrubbing.enabled
+    )
+    synthesiser = Synthesiser(
+        reader=TranscriptReader(),
+        note_repo=NoteRepository(),
+        security=security,
+        t_repo=TaskRepository(),
+    )
+
+    # 1. Fetch metadata and open tasks in a brief transaction.
+    logger.info("capture: opening transaction 1 (metadata fetch)")
     with get_db_session() as db:
         session = _find_capture_session(db, session_id)
         if session is None:
@@ -118,6 +134,7 @@ def capture(
         _apply_hook_metadata(session, transcript, agent, agent_session_id)
         db.add(session)
         db.flush()
+
         if not settings.synthesis.enabled:
             typer.echo(f"Session {session.id} marked (synthesis disabled).")
             return
@@ -127,24 +144,45 @@ def capture(
             typer.echo(f"Session {session.id}: no transcript path, skipping synthesis.")
             return
 
-        security = SecurityService(
-            allowlist=settings.scrubbing.allowlist, enabled=settings.scrubbing.enabled
+        # Prepare data for synthesis outside the session
+        agent_name = session.agent
+        session_db_id = session.id
+        task_table, valid_task_ids = synthesiser.prepare_task_table(db)
+    logger.info("capture: transaction 1 closed")
+
+    # 2. Perform slow LLM synthesis (DB is unlocked).
+    logger.info("capture: starting LLM phase (DB unlocked)")
+    total_notes_data: list[SynthesisNote] = []
+    for path in transcripts:
+        try:
+            notes = synthesiser.generate_notes(path, agent_name, task_table)
+            if notes:
+                total_notes_data.extend(notes)
+        except Exception as e:
+            typer.echo(f"Synthesis failed for {path}: {e}", err=True)
+            raise typer.Exit(1) from None
+    logger.info("capture: LLM phase complete")
+
+    # 3. Persist all results in a final transaction.
+    if not total_notes_data:
+        typer.echo(f"Session {session_db_id}: no notes generated, marking as synthesised.")
+        with get_db_session() as db:
+            session = db.get(WizardSession, session_db_id)
+            if session:
+                session.is_synthesised = True
+                db.add(session)
+        return
+
+    logger.info("capture: opening transaction 2 (persistence)")
+    with get_db_session() as db:
+        session = db.get(WizardSession, session_db_id)
+        if not session:
+            typer.echo(f"Error: Session {session_db_id} disappeared during synthesis.", err=True)
+            raise typer.Exit(1)
+
+        result = synthesiser.persist(
+            db, total_notes_data, session, valid_task_ids, terminal=True
         )
-        synthesiser = Synthesiser(
-            reader=TranscriptReader(),
-            note_repo=NoteRepository(),
-            security=security,
-            t_repo=TaskRepository(),
-        )
-        total_notes, synthesised_via = 0, "fallback"
-        for path in transcripts:
-            try:
-                result = synthesiser.synthesise_path(db, session, path)
-                total_notes += result.notes_created
-                synthesised_via = result.synthesised_via
-            except Exception as e:
-                typer.echo(f"Synthesis failed for {path}: {e}", err=True)
-                raise typer.Exit(1) from None
         typer.echo(
-            f"Session {session.id}: {total_notes} note(s) via {synthesised_via}."
+            f"Session {session.id}: {result.notes_created} note(s) via {result.synthesised_via}."
         )

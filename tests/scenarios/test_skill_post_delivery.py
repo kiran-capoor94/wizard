@@ -5,6 +5,7 @@ SKILL.md is read for registered-skill delivery — they are independent.
 import json
 
 import pytest
+
 import wizard.agent_registration as ar
 from wizard.skills import load_skill_post
 from wizard.tools.session_tools import session_start
@@ -116,3 +117,45 @@ def test_register_hook_installs_session_start_for_copilot(tmp_path, monkeypatch)
 
     data = json.loads(config.read_text())
     assert "sessionStart" in data["hooks"], "Copilot must have a sessionStart hook registered"
+
+
+def test_deregister_hook_removes_session_start_for_gemini(tmp_path, monkeypatch):
+    """deregister_hook must remove the SessionStart hook previously registered for Gemini."""
+    config = tmp_path / "settings.json"
+    monkeypatch.setitem(ar._HOOK_CONFIGS, "gemini", (config, "hooks"))
+
+    ar.register_hook("gemini")
+    assert "SessionStart" in json.loads(config.read_text())["hooks"]
+
+    ar.deregister_hook("gemini")
+
+    data = json.loads(config.read_text())
+    assert not data["hooks"].get("SessionStart"), "SessionStart hook must be removed for Gemini"
+
+
+def test_deregister_hook_removes_session_start_for_codex(tmp_path, monkeypatch):
+    """deregister_hook must remove the SessionStart hook previously registered for Codex."""
+    config = tmp_path / "hooks.json"
+    monkeypatch.setitem(ar._HOOK_CONFIGS, "codex", (config, "hooks"))
+
+    ar.register_hook("codex")
+    assert "SessionStart" in json.loads(config.read_text())["hooks"]
+
+    ar.deregister_hook("codex")
+
+    data = json.loads(config.read_text())
+    assert not data["hooks"].get("SessionStart"), "SessionStart hook must be removed for Codex"
+
+
+def test_deregister_hook_removes_session_start_for_copilot(tmp_path, monkeypatch):
+    """deregister_hook must remove the sessionStart hook previously registered for Copilot."""
+    config = tmp_path / "config.json"
+    monkeypatch.setitem(ar._HOOK_CONFIGS, "copilot", (config, "hooks"))
+
+    ar.register_hook("copilot")
+    assert "sessionStart" in json.loads(config.read_text())["hooks"]
+
+    ar.deregister_hook("copilot")
+
+    data = json.loads(config.read_text())
+    assert not data["hooks"].get("sessionStart"), "sessionStart hook must be removed for Copilot"
