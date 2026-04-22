@@ -162,11 +162,12 @@ def complete(
     """
     if "ollama" in model.lower():
         options = {
-            # num_ctx deliberately omitted — use the model's own configured default
-            # to avoid Ollama reloading the KV cache on every request when the
-            # override differs from the modelfile default.
+            # num_ctx and num_thread deliberately omitted — both are model-loading
+            # parameters. Any value that differs from the modelfile default forces
+            # Ollama to destroy and reinitialise the loaded model, causing the
+            # 60-120s "onboarding" delay on every synthesis call. Let Ollama pick
+            # optimal values from the modelfile (num_thread via Metal on Apple Silicon).
             "num_predict": 2048,
-            "num_thread": 4,
             "temperature": 0.1,
         }
         adapter = OllamaAdapter(
