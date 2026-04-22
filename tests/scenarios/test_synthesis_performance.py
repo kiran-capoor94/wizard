@@ -3,6 +3,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from wizard.llm_adapters import OllamaAdapter
@@ -83,8 +84,6 @@ def test_ollama_adapter_posts_to_api_chat_with_json_format():
 
 def test_ollama_adapter_raises_on_http_error():
     """OllamaAdapter propagates HTTP errors so _call_adapter can catch them."""
-    import httpx
-
     mock_response = MagicMock()
     mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
         "500", request=MagicMock(), response=MagicMock()
