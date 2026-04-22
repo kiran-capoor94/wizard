@@ -3,7 +3,7 @@
 Wizard is a local memory layer for AI agents, providing persistent context across sessions, compounding knowledge over time, and on-demand work triage.
 
 ## Core Technologies
-- **Language:** Python 3.14+
+- **Language:** Python 3.13+
 - **Agent Protocol:** [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) via [FastMCP](https://github.com/jlowin/fastmcp)
 - **Database:** SQLite with [SQLModel](https://sqlmodel.tiangolo.com/) (SQLAlchemy + Pydantic)
 - **Migrations:** [Alembic](https://alembic.sqlalchemy.org/)
@@ -14,25 +14,37 @@ Wizard is a local memory layer for AI agents, providing persistent context acros
 ## Building and Running
 
 ### Prerequisites
-- Python 3.14+
+- Python 3.13+
 - `uv` installed
 - A local [Ollama](https://ollama.com/) server with `qwen3.5:4b` (optional but recommended for synthesis; cloud providers also supported)
 
-### Core Commands
+### Install and Core Commands
 ```bash
-uv sync                                       # Sync dependencies
-uv run wizard setup --agent [agent]           # Initialize ~/.wizard/ and register agent
-uv run server.py                              # Run MCP server (stdio transport)
-uv run alembic upgrade head                   # Run pending DB migrations
+# Install (one-time)
+uv tool install git+https://github.com/kiran-capoor94/wizard.git
+
+# Setup
+wizard setup --agent [agent]                  # Initialize ~/.wizard/ and register agent
+
+# MCP server
+wizard-server                                 # Installed MCP server entry point (stdio)
+uv run server.py                              # Run MCP server from repo (dev only)
+
+# Migrations
+wizard update                                 # Upgrade install, run migrations, re-register agents
+uv run alembic upgrade head                   # Run migrations from repo (dev only)
+
+# Development
+uv sync                                       # Sync dependencies (dev)
 uv run pytest                                 # Run full test suite
-uv run wizard doctor                          # Run health checks
-uv run wizard analytics                       # View usage stats
-uv run wizard configure synthesis             # List/manage LLM backends
-uv run wizard configure synthesis add         # Add a backend interactively
-uv run wizard configure synthesis test [N]    # Probe backend reachability
+wizard doctor                                 # Run health checks
+wizard analytics                              # View usage stats
+wizard configure synthesis                    # List/manage LLM backends
+wizard configure synthesis add                # Add a backend interactively
+wizard configure synthesis test [N]           # Probe backend reachability
 ```
 
-Always run via `uv run` to ensure the project's virtualenv dependencies are resolved correctly.
+For development from repo, use `uv run` prefix. For installed packages, `wizard` and `wizard-server` are available directly.
 
 ## Project Layout
 
@@ -41,6 +53,7 @@ server.py                    # Entry point — imports mcp_instance, tools, reso
 src/wizard/
   cli/                       # Typer app subcommands
     main.py                  # setup, configure, doctor, analytics, update, uninstall
+    serve.py                 # wizard-server entry point (installed MCP binary)
     capture.py               # wizard capture — synthesis trigger (called by hooks)
     configure.py             # configure knowledge-store + synthesis backends subcommands
     doctor.py                # 8-point health checks
@@ -62,13 +75,15 @@ src/wizard/
   services.py                # SessionCloser — auto-closes abandoned sessions
   security.py                # SecurityService — regex PII scrubbing with allowlist
   config.py                  # Pydantic Settings + BackendConfig + JsonConfigSettingsSource
-  database.py                # SQLite session factory (SQLModel engine)
+  database.py                # SQLite session factory (SQLModel engine) + run_migrations()
   deps.py                    # FastMCP Depends() provider functions
   exceptions.py              # ConfigurationError
-  agent_registration.py      # Write MCP + hook config into agent files
+  agent_registration.py      # Write MCP + hook config into agent files; refresh_hooks()
+  alembic/                   # DB migrations — bundled in package for `wizard update`
+  hooks/                     # Hook scripts — bundled in package, copied to ~/.wizard/hooks/ on setup
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
-hooks/                       # Agent hook scripts (SessionEnd, SessionStart)
-alembic/                     # DB migration scripts
+hooks/                       # Hook scripts source (also bundled as src/wizard/hooks/ for installs)
+alembic/                     # DB migration scripts (dev use; bundled copy lives in src/wizard/alembic/)
 tests/                       # pytest suite
 ```
 

@@ -1,7 +1,7 @@
 # Wizard
 
 [![Version](https://img.shields.io/badge/version-2.2.1-blue)](https://github.com/kiran-capoor94/wizard)
-[![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](https://www.python.org/downloads/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Built with FastMCP](https://img.shields.io/badge/built%20with-FastMCP-purple)](https://github.com/jlowin/fastmcp)
 [![SQLite](https://img.shields.io/badge/database-SQLite-lightblue)](https://www.sqlite.org/)
@@ -17,19 +17,17 @@ quick-wins, and unblock.
 
 ## Quick Start
 
-**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/), a local or cloud LLM endpoint for synthesis (e.g. [Ollama](https://ollama.com/) with `qwen3.5:4b`, or a cloud provider like Gemini). Synthesis is optional — set `"enabled": false` to skip it entirely.
+**Prerequisites:** Python 3.13+, [uv](https://docs.astral.sh/uv/), a local or cloud LLM endpoint for synthesis (e.g. [Ollama](https://ollama.com/) with `qwen3.5:4b`, or a cloud provider like Gemini). Synthesis is optional — set `"enabled": false` to skip it entirely.
 
 ```bash
-git clone https://github.com/kiran-capoor94/wizard.git
-cd wizard
-uv sync
-uv run wizard setup --agent claude-code
+uv tool install git+https://github.com/kiran-capoor94/wizard.git
+wizard setup --agent claude-code
 ```
 
 `wizard setup` creates `~/.wizard/`, scaffolds `config.json`, installs
 skills, registers the MCP server with your chosen agent, and installs
 the auto-capture hook. For optional write-back to Notion or Obsidian,
-run `uv run wizard configure knowledge-store` after setup.
+run `wizard configure knowledge-store` after setup.
 
 ## Your first session
 
@@ -346,18 +344,18 @@ Override the config path with the `WIZARD_CONFIG_FILE` environment variable.
 ## CLI
 
 ```bash
-uv run wizard setup [--agent AGENT]             # Initialize ~/.wizard/, config, skills, MCP + hook registration
-uv run wizard configure knowledge-store         # Configure optional Notion/Obsidian write-back
-uv run wizard configure synthesis               # List configured LLM backends (tried in priority order)
-uv run wizard configure synthesis add           # Add a backend (prompts interactively)
-uv run wizard configure synthesis remove N      # Remove backend by position
-uv run wizard configure synthesis move M N      # Reorder backends (position 1 = highest priority)
-uv run wizard configure synthesis test [N]      # Probe backend reachability
-uv run wizard doctor [--all]                    # Health check — config, database, skills, migrations
-uv run wizard analytics [--day|--week|--from/--to]  # Session/task/note usage stats
-uv run wizard update                            # Pull latest, sync deps, migrate DB, re-register agents + hooks
-uv run wizard uninstall [--yes]                 # Clean removal of all state, MCP, and hook registration
-uv run wizard capture --close                   # (Called by hooks) Synthesise transcript into notes
+wizard setup [--agent AGENT]             # Initialize ~/.wizard/, config, skills, MCP + hook registration
+wizard configure knowledge-store         # Configure optional Notion/Obsidian write-back
+wizard configure synthesis               # List configured LLM backends (tried in priority order)
+wizard configure synthesis add           # Add a backend (prompts interactively)
+wizard configure synthesis remove N      # Remove backend by position
+wizard configure synthesis move M N      # Reorder backends (position 1 = highest priority)
+wizard configure synthesis test [N]      # Probe backend reachability
+wizard doctor [--all]                    # Health check — config, database, skills, migrations
+wizard analytics [--day|--week|--from/--to]  # Session/task/note usage stats
+wizard update                            # Upgrade install, migrate DB, re-register agents + hooks
+wizard uninstall [--yes]                 # Clean removal of all state, MCP, and hook registration
+wizard capture --close                   # (Called by hooks) Synthesise transcript into notes
 ```
 
 **Supported agents for `--agent`:** `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `copilot`, `all`
@@ -366,17 +364,18 @@ uv run wizard capture --close                   # (Called by hooks) Synthesise t
 
 ```bash
 uv run pytest                  # Run tests (always use uv run — not plain python)
-uv run server.py               # Run server locally
-uv run alembic upgrade head    # Run migrations
+uv run server.py               # Run MCP server locally (dev only)
+uv run alembic upgrade head    # Run migrations (dev only — `wizard update` does this for installs)
 ```
 
 ### Project Structure
 
 ```text
-server.py                    # FastMCP server entry point (stdio)
+server.py                    # FastMCP server entry point for dev use (stdio)
 src/wizard/
   cli/
     main.py                  # Typer CLI (setup, configure, doctor, analytics, update, uninstall)
+    serve.py                 # wizard-server entry point (installed MCP binary)
     capture.py               # wizard capture — transcript synthesis trigger (called by hooks)
     configure.py             # configure knowledge-store + synthesis backends subcommands
     doctor.py                # 8-point health checks
@@ -409,12 +408,14 @@ src/wizard/
   services.py                # SessionCloser
   security.py                # PII scrubbing (regex + allowlist)
   config.py                  # Pydantic settings + BackendConfig + JsonConfigSettingsSource
-  database.py                # SQLite connection management
+  database.py                # SQLite connection management + run_migrations()
   deps.py                    # FastMCP Depends() provider functions
   exceptions.py              # ConfigurationError
-  agent_registration.py      # Register MCP + hooks in agent configs
+  agent_registration.py      # Register MCP + hooks in agent configs; refresh_hooks()
+  alembic/                   # DB migrations — bundled in package for `wizard update`
+  hooks/                     # Hook scripts — bundled in package, copied to ~/.wizard/hooks/ on setup
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ on setup)
-hooks/
+hooks/                       # Hook scripts source (also bundled as src/wizard/hooks/ for installs)
   session-end.sh             # Claude Code SessionEnd hook — transcript synthesis trigger
   session-start.sh           # Claude Code SessionStart hook — personalization + session boot injection
 ```
