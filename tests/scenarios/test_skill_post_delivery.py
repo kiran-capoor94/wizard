@@ -3,6 +3,7 @@ SKILL.md is read for registered-skill delivery — they are independent.
 """
 
 from wizard.skills import load_skill_post
+import wizard.agent_registration as ar
 
 
 def test_load_skill_post_returns_skill_post_md_content(tmp_path, monkeypatch):
@@ -29,3 +30,20 @@ def test_load_skill_post_returns_none_when_file_absent(tmp_path, monkeypatch):
 
     result = load_skill_post("my-skill")
     assert result is None
+
+
+def test_install_skills_excludes_skill_post_md(tmp_path, monkeypatch):
+    """SKILL-POST.md must never be copied to agent skill directories."""
+    source = tmp_path / "source"
+    dest = tmp_path / "dest"
+    skill_dir = source / "my-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("pre-call content")
+    (skill_dir / "SKILL-POST.md").write_text("post-call content — internal only")
+
+    monkeypatch.setitem(ar._AGENT_SKILLS_DIRS, "claude-code", dest)
+
+    ar.install_skills("claude-code", source)
+
+    assert (dest / "my-skill" / "SKILL.md").exists(), "SKILL.md must be installed"
+    assert not (dest / "my-skill" / "SKILL-POST.md").exists(), "SKILL-POST.md must NOT be installed"

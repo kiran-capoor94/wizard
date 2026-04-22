@@ -373,7 +373,8 @@ def install_skills(agent_id: str, source_dir: Path) -> bool:
         skill_dest = dest / skill_dir.name
         if skill_dest.exists():
             shutil.rmtree(skill_dest)
-        shutil.copytree(skill_dir, skill_dest)
+        shutil.copytree(skill_dir, skill_dest,
+                        ignore=shutil.ignore_patterns("SKILL-POST.md"))
     return True
 
 
