@@ -90,7 +90,9 @@ class OllamaAdapter:
 
     def __init__(self, base_url: str, model: str, options: dict):
         self._base_url = base_url.rstrip("/")
-        self._model = model
+        # Strip the litellm provider prefix ("ollama/") — Ollama's native API
+        # takes only the bare model name (e.g. "gemma4:latest-64k").
+        self._model = model.removeprefix("ollama/")
         self._options = options
 
     def complete(self, messages: list[dict]) -> list[SynthesisNote]:
