@@ -63,7 +63,15 @@ _DEFAULT_CONFIG = {
     },
 }
 
-_AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "copilot", "all"]
+_AGENT_CHOICES = [
+    "claude-code",
+    "claude-desktop",
+    "gemini",
+    "opencode",
+    "codex",
+    "copilot",
+    "all",
+]
 
 
 def _ensure_editable_pth() -> None:
@@ -110,8 +118,6 @@ def _refresh_skills(dest: Path) -> None:
         typer.echo(f"Installed skills to {dest}")
     else:
         typer.echo("No skills found in package — skipping skill install")
-
-
 
 
 def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
@@ -213,12 +219,14 @@ def setup(
 
     agents_to_register = _prompt_and_register_agents(agent)
 
-    rprint(Panel(
-        f"Agent: [bold]{', '.join(agents_to_register)}[/bold]\n\n"
-        "Next: [dim]wizard configure knowledge-store[/dim]",
-        title="[green]Setup complete[/green]",
-        border_style="green",
-    ))
+    rprint(
+        Panel(
+            f"Agent: [bold]{', '.join(agents_to_register)}[/bold]\n\n"
+            "Next: [dim]wizard configure knowledge-store[/dim]",
+            title="[green]Setup complete[/green]",
+            border_style="green",
+        )
+    )
 
 
 @configure_app.command("knowledge-store")
@@ -276,11 +284,13 @@ def _confirm_uninstall(
         items.append("~/.wizard/")
     for aid in registered:
         items.append(f"wizard MCP entry for [bold]{aid}[/bold]")
-    rprint(Panel(
-        "\n".join(items),
-        title="[red]This will permanently delete[/red]",
-        border_style="red",
-    ))
+    rprint(
+        Panel(
+            "\n".join(items),
+            title="[red]This will permanently delete[/red]",
+            border_style="red",
+        )
+    )
     return typer.confirm("Are you sure?")
 
 
@@ -359,6 +369,7 @@ def uninstall(
 def analytics(
     day: bool = typer.Option(False, "--day", help="Show today's analytics"),
     week: bool = typer.Option(False, "--week", help="Show last 7 days (default)"),
+    month: bool = typer.Option(False, "--month", help="Show last 30 days"),
     from_date: Optional[str] = typer.Option(
         None, "--from", help="Start date YYYY-MM-DD"
     ),
@@ -370,7 +381,8 @@ def analytics(
     options_set = sum([day, week, bool(from_date or to_date)])
     if options_set > 1:
         typer.echo(
-            "Options --day, --week, --from/--to are mutually exclusive.", err=True
+            "Options --day, --week, --month, --year, --from/--to are mutually exclusive.",
+            err=True,
         )
         raise typer.Exit(1)
 
@@ -388,8 +400,14 @@ def analytics(
         except ValueError as exc:
             typer.echo(f"Invalid date format: {exc}", err=True)
             raise typer.Exit(1) from exc
-    else:
+    elif week:
         start = today - datetime.timedelta(days=7)
+        end = today
+    elif month:
+        start = today - datetime.timedelta(days=30)
+        end = today
+    else:  # year
+        start = today - datetime.timedelta(days=365)
         end = today
 
     db_path = Path(os.environ.get("WIZARD_DB", settings.db))
@@ -453,9 +471,11 @@ def update() -> None:
     else:
         typer.echo("\nNo registered agents found — run: wizard setup --agent <agent>")
 
-    rprint(Panel(
-        f"Skills cache: [dim]{skills_dest}[/dim]\n"
-        f"Agents updated: [bold]{', '.join(registered) if registered else 'none'}[/bold]",
-        title="[green]Wizard updated[/green]",
-        border_style="green",
-    ))
+    rprint(
+        Panel(
+            f"Skills cache: [dim]{skills_dest}[/dim]\n"
+            f"Agents updated: [bold]{', '.join(registered) if registered else 'none'}[/bold]",
+            title="[green]Wizard updated[/green]",
+            border_style="green",
+        )
+    )

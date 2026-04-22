@@ -81,11 +81,13 @@ def _is_local(base_url: str | None) -> bool:
 
 
 class OllamaAdapter:
-    """Native Ollama API client using /api/chat with JSON format enforcement.
+    """Native Ollama API client using /api/chat.
 
     Bypasses LiteLLM to call Ollama directly, which eliminates LiteLLM's
-    overhead and allows use of Ollama's format:'json' option for reliable
-    structured output.
+    overhead. Uses instruction following + _parse_notes rather than
+    grammar-constrained format:'json' (grammar sampling can deadlock on small
+    models). Passes think:false to suppress chain-of-thought on models like
+    Qwen 3.5 that enable it by default.
     """
 
     def __init__(self, base_url: str, model: str, options: dict):
@@ -98,14 +100,19 @@ class OllamaAdapter:
     def complete(self, messages: list[dict]) -> list[SynthesisNote]:
         """Call /api/chat and return validated SynthesisNotes.
 
-        format:'json' constrains Ollama to emit syntactically valid JSON.
+        Uses instruction following and _parse_notes for robust JSON extraction.
         ValidationError for schema mismatches propagates to the caller.
         """
         payload = {
             "model": self._model,
             "messages": messages,
             "stream": False,
-            "format": "json",
+            # think:false suppresses chain-of-thought on models that support it
+            # (e.g. Qwen 3.5). No-op on models that don't.
+            "think": False,
+            # No format:"json" — grammar-constrained sampling can deadlock on small
+            # models (logits for valid JSON tokens all suppressed → empty response).
+            # _parse_notes handles free-form model output robustly instead.
             "options": self._options,
         }
         response = httpx.post(
@@ -115,10 +122,11 @@ class OllamaAdapter:
         )
         response.raise_for_status()
         content = response.json()["message"]["content"]
-        parsed = json.loads(content)
-        if isinstance(parsed, dict):
-            parsed = [parsed]
-        return [SynthesisNote.model_validate(n) for n in parsed]
+        if not content or not content.strip():
+            raise ValueError(
+                "Ollama returned empty content — model may have failed to generate a response"
+            )
+        return _parse_notes(content)
 
 
 def probe_backend_health(base_url: str | None) -> bool:
@@ -148,14 +156,16 @@ def complete(
 ) -> list[SynthesisNote]:
     """Call the appropriate backend and return validated SynthesisNotes.
 
-    Ollama backends: native /api/chat via OllamaAdapter (format:'json', no LiteLLM).
+    Ollama backends: native /api/chat via OllamaAdapter (no LiteLLM, no grammar constraint).
     Cloud backends: LiteLLM routing by model prefix (gemini/*, openai/*, etc.).
     Local non-Ollama backends: LiteLLM with stream=False + thinking disabled.
     """
     if "ollama" in model.lower():
         options = {
-            "num_ctx": 16384,
-            "num_predict": 512,
+            # num_ctx deliberately omitted — use the model's own configured default
+            # to avoid Ollama reloading the KV cache on every request when the
+            # override differs from the modelfile default.
+            "num_predict": 2048,
             "num_thread": 4,
             "temperature": 0.1,
         }

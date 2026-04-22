@@ -258,7 +258,7 @@ class TranscriptReader:
                 except json.JSONDecodeError:
                     continue
                 entry_type = raw.get("type", "")
-                if entry_type in {"info", "error", "warning"}:
+                if entry_type not in {"user", "gemini"}:
                     continue
                 timestamp = raw.get("timestamp")
                 role = "user" if entry_type == "user" else "assistant"

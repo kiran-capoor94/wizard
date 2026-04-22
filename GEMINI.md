@@ -8,7 +8,7 @@ Wizard is a local memory layer for AI agents, providing persistent context acros
 - **Database:** SQLite with [SQLModel](https://sqlmodel.tiangolo.com/) (SQLAlchemy + Pydantic)
 - **Migrations:** [Alembic](https://alembic.sqlalchemy.org/)
 - **CLI:** [Typer](https://typer.tiangolo.com/)
-- **Synthesis:** [LiteLLM](https://docs.litellm.ai/) (default model: `ollama/gemma4:latest-64k`)
+- **Synthesis:** `OllamaAdapter` (native `/api/chat`) for Ollama backends; [LiteLLM](https://docs.litellm.ai/) for cloud providers (default model: `ollama/qwen3.5:4b`)
 - **Package Manager:** [uv](https://docs.astral.sh/uv/)
 
 ## Building and Running
@@ -16,7 +16,7 @@ Wizard is a local memory layer for AI agents, providing persistent context acros
 ### Prerequisites
 - Python 3.14+
 - `uv` installed
-- A [LiteLLM-compatible](https://docs.litellm.ai/docs/providers) endpoint with `gemma4:latest-64k` (optional but recommended for synthesis)
+- A local [Ollama](https://ollama.com/) server with `qwen3.5:4b` (optional but recommended for synthesis; cloud providers also supported)
 
 ### Core Commands
 ```bash
@@ -53,8 +53,8 @@ src/wizard/
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
   transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
-  synthesis.py               # Synthesiser (auto-capture via LiteLLM — ordered backend failover)
-  llm_adapters.py            # LiteLLM completion wrapper, probe_backend_health, JSON parsing
+  synthesis.py               # Synthesiser (auto-capture — ordered backend failover)
+  llm_adapters.py            # OllamaAdapter + LiteLLM completion wrapper, probe_backend_health, JSON parsing
   mid_session.py             # Background mid-session synthesis state
   toon.py                    # TOON encoder — compact tabular format for bulk task delivery
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
@@ -102,7 +102,8 @@ Wizard tracks three layers: Agent session (UUID), Wizard session (Integer PK), a
 ### Auto-Capture (Transcript Synthesis)
 - **SessionEnd hook** calls `wizard capture --close`.
 - `Synthesiser` tries backends in priority order — first healthy local server wins, cloud providers always pass the health check. Backends are configured in `synthesis.backends` (ordered list of `BackendConfig` objects).
-- `llm_adapters.complete()` handles the LiteLLM call, streaming for local servers, and JSON repair.
+- Ollama backends use `OllamaAdapter` (native `/api/chat`, no grammar constraint, `think:false`); cloud backends route through LiteLLM.
+- Raw transcript JSONL is persisted to `wizardsession.transcript_raw` at capture time, enabling re-synthesis after the agent deletes the file.
 - Decoupled from MCP server; runs at hook time to avoid round-trip costs.
 - Manage backends with `wizard configure synthesis` (list, add, remove, move, test).
 
