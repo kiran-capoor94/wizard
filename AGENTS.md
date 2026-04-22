@@ -18,8 +18,10 @@ dependencies live in the uv venv, not the system Python.
 ## Running the Server
 
 ```bash
-uv run server.py          # stdio transport (as used by MCP clients)
-uv run alembic upgrade head   # run pending DB migrations
+uv run server.py          # stdio transport — dev use from repo
+wizard-server             # installed entry point (after `uv tool install`)
+uv run alembic upgrade head   # run pending DB migrations (dev only)
+wizard update             # upgrade install + run migrations + re-register agents (installed use)
 ```
 
 ## Project Layout
@@ -29,6 +31,7 @@ server.py                    # Entry point — imports mcp_instance, tools, reso
 src/wizard/
   cli/
     main.py                  # Typer app: setup, configure, doctor, analytics, update, uninstall
+    serve.py                 # wizard-server entry point (installed MCP binary)
     capture.py               # wizard capture — transcript synthesis trigger (called by hooks)
     configure.py             # configure knowledge-store + synthesis backends subcommands
     doctor.py                # 8-point health checks (wizard doctor)
@@ -65,12 +68,14 @@ src/wizard/
   database.py                # SQLite session factory (SQLModel engine)
   deps.py                    # FastMCP Depends() provider functions
   exceptions.py              # ConfigurationError
-  agent_registration.py      # Write MCP + hook config into agent JSON/TOML files
+  agent_registration.py      # Write MCP + hook config into agent JSON/TOML files; refresh_hooks()
+  alembic/                   # DB migrations — bundled in package for `wizard update`
+  hooks/                     # Hook scripts — bundled in package, copied to ~/.wizard/hooks/ on setup
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
-hooks/                       # Agent hook scripts (installed by wizard setup)
+hooks/                       # Hook scripts source (also bundled as src/wizard/hooks/ for installs)
   session-end.sh             # Claude Code SessionEnd hook — calls `wizard capture --close` to synthesise transcript
   session-start.sh           # Claude Code SessionStart hook — personalization refresh (80%) + session boot injection
-alembic/                     # DB migration scripts
+alembic/                     # DB migration scripts (dev use; bundled copy lives in src/wizard/alembic/)
 tests/                       # pytest suite
 ```
 
@@ -217,8 +222,9 @@ MCP entry point:
 
 ```json
 {
-  "command": "uv",
-  "args": ["--directory", "<repo-path>", "run", "server.py"]
+  "command": "wizard-server",
+  "args": [],
+  "type": "stdio"
 }
 ```
 

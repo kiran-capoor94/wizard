@@ -49,7 +49,9 @@ NOTE_TYPE_MAP: dict[str, NoteType] = {
 }
 
 # Maximum chars per synthesis chunk. Default to 15k for extremely fast local prefill.
-CHUNK_CHAR_LIMIT: int = min(settings.synthesis.context_chars, 15000)  # 15k for fast local prefill
+CHUNK_CHAR_LIMIT: int = min(
+    settings.synthesis.context_chars, 15000
+)  # 15k for fast local prefill
 
 
 def _format_transcript(entries: list[TranscriptEntry]) -> str:
@@ -119,18 +121,24 @@ class Synthesiser:
                 notes_created=0, task_ids_touched=[], synthesised_via="fallback"
             )
 
-        with sentry_sdk.start_span(op="synthesis.path", description=str(transcript_path)) as span:
+        with sentry_sdk.start_span(
+            op="synthesis.path", description=str(transcript_path)
+        ) as span:
             span.set_tag("session_id", wizard_session.id)
             span.set_tag("agent", wizard_session.agent)
 
             task_table, valid_task_ids = self.prepare_task_table(db)
-            notes_data = self.generate_notes(transcript_path, wizard_session.agent, task_table)
+            notes_data = self.generate_notes(
+                transcript_path, wizard_session.agent, task_table
+            )
 
             if not notes_data:
                 return SynthesisResult(
                     notes_created=0, task_ids_touched=[], synthesised_via="fallback"
                 )
-            return self.persist(db, notes_data, wizard_session, valid_task_ids, terminal)
+            return self.persist(
+                db, notes_data, wizard_session, valid_task_ids, terminal
+            )
 
     def prepare_task_table(self, db: Session) -> tuple[str, set[int]]:
         """Fetch open tasks and format them for the LLM prompt. Used by prepare stage."""
@@ -351,9 +359,7 @@ class Synthesiser:
         lines = [_format_transcript(entries)]
 
         if task_table:
-            lines.append(
-                f"\nAvailable tasks (id<TAB>name):\n{task_table}\n\n"
-            )
+            lines.append(f"\nAvailable tasks (id<TAB>name):\n{task_table}\n\n")
         else:
             lines.append("\ntask_id must always be null — no task list available.")
 
