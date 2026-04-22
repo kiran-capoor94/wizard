@@ -4,15 +4,14 @@ def serve() -> None:
     Registered in pyproject.toml [project.scripts] as wizard-server.
     Used by agent configs installed via `wizard setup`.
     """
-    import wizard.prompts  # noqa: F401 — registers @mcp.prompt decorators
-    import wizard.resources  # noqa: F401 — registers @mcp.resource decorators
-    import wizard.tools  # noqa: F401 — registers MCP tools via submodule imports
-
     import sentry_sdk
     from sentry_sdk.integrations.litellm import LiteLLMIntegration
     from sentry_sdk.integrations.logging import LoggingIntegration
     from sentry_sdk.integrations.mcp import MCPIntegration
 
+    import wizard.prompts  # noqa: F401 — registers @mcp.prompt decorators
+    import wizard.resources  # noqa: F401 — registers @mcp.resource decorators
+    import wizard.tools  # noqa: F401 — registers MCP tools via submodule imports
     from wizard.config import settings
     from wizard.mcp_instance import mcp
 
