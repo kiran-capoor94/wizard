@@ -19,6 +19,7 @@ from wizard.cli import analytics as analytics_module
 from wizard.cli.capture import capture
 from wizard.cli.configure import synthesis_app
 from wizard.cli.doctor import db_is_healthy, doctor
+from wizard.cli.verify import verify
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
 
@@ -32,6 +33,7 @@ app = typer.Typer(
 
 app.command()(doctor)
 app.command()(capture)
+app.command()(verify)
 
 configure_app = typer.Typer(help="Configure wizard settings.")
 app.add_typer(configure_app, name="configure")
@@ -199,6 +201,11 @@ def setup(
     else:
         typer.echo(f"Config already exists at {config_path}")
 
+    allowlist_path = WIZARD_HOME / "allowlist.txt"
+    if not allowlist_path.exists():
+        allowlist_path.touch()
+        typer.echo(f"Created allowlist file at {allowlist_path}")
+
     _ensure_editable_pth()
     _refresh_skills(WIZARD_HOME / "skills")
 
@@ -219,10 +226,22 @@ def setup(
 
     agents_to_register = _prompt_and_register_agents(agent)
 
+    agent_line = (
+        f"  ✅  [bold]{', '.join(agents_to_register)}[/bold] registered\n"
+        if agents_to_register
+        else ""
+    )
     rprint(
         Panel(
-            f"Agent: [bold]{', '.join(agents_to_register)}[/bold]\n\n"
-            "Next: [dim]wizard configure knowledge-store[/dim]",
+            "  ✅  Installed\n"
+            f"{agent_line}"
+            "\n"
+            "  Next steps:\n"
+            "    1. Run [bold]wizard verify[/bold] to confirm MCP is working.\n"
+            "    2. Open your agent — the wizard: tools are available automatically.\n"
+            "    3. The SessionStart hook calls wizard:session_start for you.\n"
+            "\n"
+            "  Optionally: [dim]wizard configure knowledge-store[/dim]",
             title="[green]Setup complete[/green]",
             border_style="green",
         )
