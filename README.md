@@ -17,7 +17,7 @@ quick-wins, and unblock.
 
 ## Quick Start
 
-**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/), a [LiteLLM-compatible](https://docs.litellm.ai/docs/providers) LLM endpoint (e.g. [Ollama](https://ollama.com/), [llama.cpp](https://github.com/ggerganov/llama.cpp), [Unsloth](https://github.com/unslothai/unsloth)) with `gemma4:latest-64k`
+**Prerequisites:** Python 3.14+, [uv](https://docs.astral.sh/uv/), a local or cloud LLM endpoint for synthesis (e.g. [Ollama](https://ollama.com/) with `qwen3.5:4b`, or a cloud provider like Gemini). Synthesis is optional — set `"enabled": false` to skip it entirely.
 
 ```bash
 git clone https://github.com/kiran-capoor94/wizard.git
@@ -48,10 +48,12 @@ grounded across work sessions.
    using a custom, compact tabular format that reduces token consumption
    by ~40% vs JSON. This allows the agent to ingest more context without
    hitting window limits.
-4. **Transcript synthesis** — Wizard uses any [LiteLLM-compatible](https://docs.litellm.ai/docs/providers)
-   provider (default: `ollama/gemma4:latest-64k`) to synthesise conversation
-   transcripts into structured notes. This happens in the background every 5 minutes
-   during the session, and a final full synthesis is triggered by the `SessionEnd`
+4. **Transcript synthesis** — At session end, Wizard synthesises the conversation
+   transcript into structured notes using a local or cloud LLM. Ollama backends
+   (e.g. `qwen3.5:4b`) are called via the native `/api/chat` API for low overhead;
+   cloud backends (Gemini, OpenAI) go through LiteLLM. The raw transcript content is
+   persisted to the DB at capture time, so re-synthesis remains possible even after
+   the agent deletes the transcript file. Synthesis is triggered by the `SessionEnd`
    hook calling `wizard capture --close`.
 5. **Session personalization** — A `SessionStart` hook refreshes
    `~/.claude/settings.json` in 80% of sessions with Wizard-aware content:
@@ -137,7 +139,7 @@ graph TD
     C --> P[Synthesiser]
     N[SessionEnd hook] --> O[wizard capture --close]
     O --> P
-    P --> Q[LiteLLM — any provider]
+    P --> Q[OllamaAdapter / LiteLLM]
     P --> I
     C -.->|optional write-back| L[Knowledge Store\nNotion / Obsidian]
 ```
@@ -153,12 +155,13 @@ recency, momentum, and simplicity signals with mode-based weight vectors
 for the top candidates.
 
 **Session Management** — `SessionCloser` auto-closes abandoned sessions at
-`session_start`. Transcript synthesis is handled by `Synthesiser`
-both mid-session (polling every 5 minutes) and inside `wizard capture --close`
-(hook-based final capture). It routes through `LiteLLMAdapter` to any
-LiteLLM-compatible provider (default: `ollama/gemma4:latest-64k`), producing
-notes (investigation / decision / docs / learnings) and writing them directly to
-SQLite.
+`session_start`. Transcript synthesis runs inside `wizard capture --close`
+(hook-based final capture). Ollama backends use `OllamaAdapter` (native
+`/api/chat`, no grammar constraint, `think:false` for chain-of-thought models);
+cloud backends route through LiteLLM. Backends are tried in priority order —
+first healthy local server wins, cloud providers always pass the health check.
+Raw transcript JSONL is persisted to `wizardsession.transcript_raw` at capture
+time, enabling re-synthesis after the agent deletes the file.
 
 **TOON (Token-Oriented Object Notation)** — Custom compact tabular format
 used for bulk task delivery in `session_start`, reducing the context window
@@ -208,7 +211,7 @@ check. Configure in `config.json`:
   "enabled": true,
   "backends": [
     {
-      "model": "ollama/gemma4:latest-64k",
+      "model": "ollama/qwen3.5:4b",
       "base_url": "http://localhost:11434",
       "api_key": "",
       "description": "Local Ollama (primary)"
@@ -223,9 +226,14 @@ check. Configure in `config.json`:
 ```
 
 The `model` field uses [LiteLLM model string format](https://docs.litellm.ai/docs/providers):
-`"<provider>/<model>"`. Examples: `"ollama/gemma4:latest-64k"`, `"openai/gpt-4o-mini"`,
+`"<provider>/<model>"`. Examples: `"ollama/qwen3.5:4b"`, `"openai/gpt-4o-mini"`,
 `"gemini/gemini-2.5-flash-lite"`. `api_key` is required for cloud providers; leave empty for
 local endpoints. `base_url` is required for local servers; omit for cloud providers.
+
+**Recommended local model:** `qwen3.5:4b` (3.4 GB at Q4, fast on Apple Silicon, excellent
+instruction following). Avoid large-context model variants (e.g. `-64k`, `-128k`) as
+their modelfile defaults require large KV cache allocations. `ollama/qwen3.5:4b` or
+`ollama/qwen3.5:4b-32k` are good defaults.
 
 Manage backends interactively with `wizard configure synthesis` — list, add, remove, reorder,
 and test backends without editing JSON directly.

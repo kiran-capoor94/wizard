@@ -161,6 +161,13 @@ class WizardSession(TimestampMixin, table=True):
         default=False,
         description="True once Synthesiser has processed transcript_path into notes.",
     )
+    transcript_raw: str | None = Field(
+        default=None,
+        description=(
+            "Raw JSONL content of all synthesised transcript files, persisted at capture "
+            "time so re-synthesis remains possible after the agent deletes the file."
+        ),
+    )
     notes: list["Note"] = Relationship(back_populates="session")
 
 

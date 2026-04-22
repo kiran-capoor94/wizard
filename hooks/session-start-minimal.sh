@@ -11,7 +11,11 @@ INPUT=$(cat)
 
 # Sub-agent suppression: exit silently if agent_id is present in payload.
 # Top-level sessions never have agent_id — this is the suppression signal.
-AGENT_ID=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('agent_id',''))" 2>/dev/null || true)
-[ -n "$AGENT_ID" ] && exit 0
+if ! command -v python3 >/dev/null 2>&1; then
+    >&2 echo "wizard: python3 not found; sub-agent suppression skipped"
+else
+    AGENT_ID=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('agent_id',''))" 2>/dev/null || true)
+    [ -n "$AGENT_ID" ] && exit 0
+fi
 
 echo '{"additionalContext": "Invoke the session-start skill now to open your wizard session."}'

@@ -43,8 +43,8 @@ def test_format_transcript_no_tool_name():
     assert result == "[user] hello"
 
 
-def test_ollama_adapter_posts_to_api_chat_with_json_format():
-    """OllamaAdapter calls /api/chat with format='json' and stream=False."""
+def test_ollama_adapter_posts_to_api_chat():
+    """OllamaAdapter calls /api/chat with think=False, stream=False, no format constraint."""
     mock_response = MagicMock()
     mock_response.json.return_value = {
         "message": {
@@ -58,8 +58,8 @@ def test_ollama_adapter_posts_to_api_chat_with_json_format():
     with patch("wizard.llm_adapters.httpx.post", return_value=mock_response) as mock_post:
         adapter = OllamaAdapter(
             base_url="http://localhost:11434",
-            model="ollama/gemma4:latest-64k",
-            options={"num_ctx": 16384},
+            model="ollama/qwen3.5:4b",
+            options={"num_predict": 2048, "temperature": 0.1},
         )
         notes = adapter.complete([{"role": "user", "content": "summarise this"}])
 
@@ -69,11 +69,13 @@ def test_ollama_adapter_posts_to_api_chat_with_json_format():
 
     # Required payload fields
     payload = mock_post.call_args.kwargs["json"]
-    assert payload["format"] == "json"
+    # No grammar constraint — instruction following + _parse_notes instead
+    assert "format" not in payload
+    # Thinking suppressed for models that support it (e.g. Qwen 3.5)
+    assert payload["think"] is False
     assert payload["stream"] is False
     # Provider prefix stripped — Ollama native API takes bare model name
-    assert payload["model"] == "gemma4:latest-64k"
-    assert payload["options"] == {"num_ctx": 16384}
+    assert payload["model"] == "qwen3.5:4b"
     assert payload["messages"] == [{"role": "user", "content": "summarise this"}]
 
     # Parsed output

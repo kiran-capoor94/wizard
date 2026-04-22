@@ -3,8 +3,10 @@
 Extracted from main.py to keep it under the 500-line cap.
 """
 
+import contextlib
 import datetime
 import logging
+import tempfile
 from pathlib import Path
 
 import typer
@@ -58,6 +60,19 @@ def _apply_hook_metadata(
         session.closed_by = "hook"
 
 
+def _read_transcript_raw(paths: list[Path]) -> str | None:
+    """Concatenate raw JSONL content from all transcript paths.
+
+    Returns None if every read fails (file vanished between glob and read).
+    JSONL files can be safely concatenated — each line is an independent record.
+    """
+    parts: list[str] = []
+    for p in paths:
+        with contextlib.suppress(OSError):
+            parts.append(p.read_text(encoding="utf-8", errors="replace"))
+    return "\n".join(parts) if parts else None
+
+
 def _collect_transcripts(session: WizardSession) -> list[Path]:
     """Return all transcript paths to synthesise for this session.
 
@@ -83,18 +98,11 @@ def _collect_transcripts(session: WizardSession) -> list[Path]:
     main_path = Path(session.transcript_path)
     if not main_path.exists():
         return []
-    project_dir = main_path.parent
-    session_start_ts = session.created_at.timestamp() if session.created_at else 0.0
-    siblings = []
-    for p in project_dir.glob("*.jsonl"):
-        if p == main_path:
-            continue
-        try:
-            if p.stat().st_mtime >= session_start_ts:
-                siblings.append(p)
-        except OSError:
-            pass  # file deleted between glob and stat
-    return [main_path] + siblings
+    # Synthesise only the main transcript. Sub-agent work is already captured in
+    # the main transcript via Agent tool results, so sibling .jsonl files in the
+    # same project directory add no new signal and each require a separate LLM
+    # call — multiplying synthesis time by the number of recent sessions.
+    return [main_path]
 
 
 def capture(  # noqa: C901
@@ -140,9 +148,29 @@ def capture(  # noqa: C901
             return
 
         transcripts = _collect_transcripts(session)
+        tmp_raw_path: Path | None = None
+
         if not transcripts:
-            typer.echo(f"Session {session.id}: no transcript path, skipping synthesis.")
-            return
+            # File(s) gone — fall back to DB-persisted raw content if available.
+            if session.transcript_raw:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+                ) as tmp:
+                    tmp.write(session.transcript_raw)
+                    tmp_raw_path = Path(tmp.name)
+                transcripts = [tmp_raw_path]
+                logger.info("capture: using stored transcript_raw for session %s", session.id)
+            else:
+                typer.echo(f"Session {session.id}: no transcript path, skipping synthesis.")
+                return
+
+        # Persist raw transcript content before synthesis so re-synthesis is
+        # possible after the agent deletes the transcript files.
+        if session.transcript_raw is None:
+            raw = _read_transcript_raw(transcripts)
+            if raw is not None:
+                session.transcript_raw = raw
+                db.add(session)
 
         # Prepare data for synthesis outside the session
         agent_name = session.agent
@@ -153,15 +181,19 @@ def capture(  # noqa: C901
     # 2. Perform slow LLM synthesis (DB is unlocked).
     logger.info("capture: starting LLM phase (DB unlocked)")
     total_notes_data: list[SynthesisNote] = []
-    for path in transcripts:
-        try:
-            notes = synthesiser.generate_notes(path, agent_name, task_table)
-            if notes:
-                total_notes_data.extend(notes)
-        except Exception as e:
-            typer.echo(f"Synthesis failed for {path}: {e}", err=True)
-            raise typer.Exit(1) from None
-    logger.info("capture: LLM phase complete")
+    try:
+        for path in transcripts:
+            try:
+                notes = synthesiser.generate_notes(path, agent_name, task_table)
+                if notes:
+                    total_notes_data.extend(notes)
+            except Exception as e:
+                typer.echo(f"Synthesis failed for {path}: {e}", err=True)
+                raise typer.Exit(1) from None
+        logger.info("capture: LLM phase complete")
+    finally:
+        if tmp_raw_path is not None:
+            tmp_raw_path.unlink(missing_ok=True)
 
     # 3. Persist all results in a final transaction.
     if not total_notes_data:

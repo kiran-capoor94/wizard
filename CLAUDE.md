@@ -53,8 +53,8 @@ src/wizard/
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
   transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
-  synthesis.py               # Synthesiser (auto-capture via LiteLLM — ordered backend failover)
-  llm_adapters.py            # LiteLLM completion wrapper, probe_backend_health, JSON parsing
+  synthesis.py               # Synthesiser (auto-capture — ordered backend failover)
+  llm_adapters.py            # OllamaAdapter + LiteLLM completion wrapper, probe_backend_health, JSON parsing
   mid_session.py             # Background mid-session synthesis state (MID_SESSION_TASKS dict)
   toon.py                    # TOON encoder — compact tabular format for bulk task delivery
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
@@ -102,7 +102,7 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
     "enabled": true,
     "backends": [
       {
-        "model": "ollama/gemma4:latest-64k",
+        "model": "ollama/qwen3.5:4b",
         "base_url": "http://localhost:11434",
         "api_key": "",
         "description": "Local Ollama (primary)"
@@ -276,9 +276,12 @@ accumulate context as you work.
 3. `wizard capture` finds the wizard session matching `--session-id` (written
    by `session_start`) or the most recent unsynthesised session within 24h,
    sets `transcript_path`, `agent`, and `agent_session_id`, then calls
-   `Synthesiser` which calls a LiteLLM-compatible provider via `LiteLLMAdapter`
-   and saves the resulting notes to SQLite.
+   `Synthesiser` which routes to `OllamaAdapter` (native `/api/chat`, no
+   grammar constraint, `think:false`) for Ollama backends, or to LiteLLM for
+   cloud providers, and saves the resulting notes to SQLite.
    On success, `WizardSession.is_synthesised` is set to `True`.
+   Raw transcript JSONL is persisted to `wizardsession.transcript_raw` before
+   synthesis so re-synthesis remains possible after the agent deletes the file.
 
 **Synthesis is fully decoupled from the MCP server.** It runs at hook time,
 before the next session starts. No `ctx.sample()` involved — no round-trip
@@ -291,7 +294,7 @@ with `wizard capture --close --session-id <id>` when the server is available.
 **Key files:**
 - `transcript.py` — `TranscriptReader` (JSONL parser)
 - `synthesis.py` — `Synthesiser` (backend selection + note persistence)
-- `llm_adapters.py` — `complete()` (LiteLLM call), `probe_backend_health()`, JSON parsing
+- `llm_adapters.py` — `OllamaAdapter`, `complete()` (LiteLLM call), `probe_backend_health()`, JSON parsing
 - `hooks/session-end.sh` — Claude Code hook script
 - `agent_registration.py` — `register_hook()` / `deregister_hook()`
 - `config.py` — `SynthesisSettings` + `BackendConfig` (ordered backends list)
@@ -313,9 +316,9 @@ Wizard owns task matching — the LLM is not shown the task list.
 
 **Limitations:**
 - No mid-session intelligence — synthesis runs at session boundaries only
-- Transcript file must exist at synthesis time (not deleted/rotated)
+- Transcript file must exist at synthesis time; if deleted, falls back to `wizardsession.transcript_raw` (persisted at capture time)
 - Parsers: Claude Code (full), Codex, Gemini, OpenCode, Copilot CLI
-- Requires a running LiteLLM-compatible instance for the configured model string
+- Ollama backends require a running Ollama server; cloud backends require a valid API key
 
 ## Session Personalization
 
