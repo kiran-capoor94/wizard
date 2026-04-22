@@ -1,4 +1,5 @@
 import datetime
+import importlib.metadata as importlib_metadata
 import json
 import logging
 import os
@@ -80,12 +81,8 @@ _AGENT_CHOICES = [
 def _ensure_editable_pth() -> None:
     """Clear the UF_HIDDEN macOS flag from the hatchling editable .pth file.
 
-    uv sets UF_HIDDEN on all .pth files it creates inside .venv. Python 3.14+
-    respects UF_HIDDEN and silently skips those files, so the editable install
-    silently breaks. os.chflags clears the bit; uv sync does not re-set it on
-    files it doesn't need to recreate, so this is persistent across syncs.
-
-    Only needs to be re-run after a full venv rebuild (uv venv / uv pip install -e .).
+    Python 3.14+ respects UF_HIDDEN and silently skips .pth files that uv
+    marks hidden, breaking the editable install. os.chflags clears the bit.
     """
     repo_root = Path(__file__).resolve().parents[3]
     py_ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
@@ -104,15 +101,22 @@ def _ensure_editable_pth() -> None:
     if getattr(st, "st_flags", 0) & stat.UF_HIDDEN:
         os.chflags(pth_file, st.st_flags & ~stat.UF_HIDDEN)
 
+def _is_editable_install() -> bool:
+    """Return True for editable dev install; False for `uv tool install`."""
+    try:
+        dist = importlib_metadata.distribution("wizard")
+        url_json = dist.read_text("direct_url.json")
+        return url_json is not None and '"editable": true' in url_json
+    except Exception:
+        return True  # default to dev mode on any error
+
 
 def _package_skills_dir() -> Path:
     """Resolve the skills directory shipped inside the wizard package."""
     return Path(__file__).resolve().parent.parent / "skills"
 
-
 def _refresh_skills(dest: Path) -> None:
-    """Copy skills from the package into dest (wizard internal cache),
-    replacing any existing copy."""
+    """Copy skills from the package into dest, replacing any existing copy."""
     source = _package_skills_dir()
     if source.exists():
         if dest.exists():
@@ -139,7 +143,6 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
 
 def _register_agents(agent_ids: list[str]) -> None:
     """Register MCP, install hooks, and install skills for each agent. Shows a Rich table."""
-
     source = _package_skills_dir()
     table = Table(show_header=False, box=None, padding=(0, 1))
     table.add_column(width=2)
@@ -163,10 +166,7 @@ def _register_agents(agent_ids: list[str]) -> None:
 
 
 def _prompt_and_register_agents(agent: str | None) -> list[str]:
-    """Run agent selection prompt (or validate --agent flag) and register.
-
-    Returns list of registered agent IDs.
-    """
+    """Run agent selection prompt (or validate --agent flag) and register. Returns agent IDs."""
     if agent is None:
         agent = typer.prompt(
             "Agent to register",
@@ -207,22 +207,18 @@ def setup(
         typer.echo(f"Created allowlist file at {allowlist_path}")
 
     _ensure_editable_pth()
+    agent_registration.refresh_hooks()
     _refresh_skills(WIZARD_HOME / "skills")
-
     _wizard_db_env = os.environ.get("WIZARD_DB")
     db_path = Path(_wizard_db_env) if _wizard_db_env else (WIZARD_HOME / "wizard.db")
     if not db_is_healthy(db_path):
+        from wizard.database import run_migrations
         typer.echo("Initialising database...")
-        repo_root = Path(__file__).resolve().parents[3]
-        alembic_args = (
-            ["uv", "run", "alembic", "upgrade", "head"]
-            if shutil.which("uv")
-            else [sys.executable, "-m", "alembic", "upgrade", "head"]
-        )
-        ok, output = _run_update_step("run migrations", alembic_args, repo_root)
-        if not ok:
-            typer.echo(output, err=True)
-            raise typer.Exit(1)
+        try:
+            run_migrations()
+        except Exception as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
 
     agents_to_register = _prompt_and_register_agents(agent)
 
@@ -231,21 +227,19 @@ def setup(
         if agents_to_register
         else ""
     )
-    rprint(
-        Panel(
-            "  ✅  Installed\n"
-            f"{agent_line}"
-            "\n"
-            "  Next steps:\n"
-            "    1. Run [bold]wizard verify[/bold] to confirm MCP is working.\n"
-            "    2. Open your agent — the wizard: tools are available automatically.\n"
-            "    3. The SessionStart hook calls wizard:session_start for you.\n"
-            "\n"
-            "  Optionally: [dim]wizard configure knowledge-store[/dim]",
-            title="[green]Setup complete[/green]",
-            border_style="green",
-        )
-    )
+    rprint(Panel(
+        "  ✅  Installed\n"
+        f"{agent_line}"
+        "\n"
+        "  Next steps:\n"
+        "    1. Run [bold]wizard verify[/bold] to confirm MCP is working.\n"
+        "    2. Open your agent — the wizard: tools are available automatically.\n"
+        "    3. The SessionStart hook calls wizard:session_start for you.\n"
+        "\n"
+        "  Optionally: [dim]wizard configure knowledge-store[/dim]",
+        title="[green]Setup complete[/green]",
+        border_style="green",
+    ))
 
 
 @configure_app.command("knowledge-store")
@@ -303,18 +297,13 @@ def _confirm_uninstall(
         items.append("~/.wizard/")
     for aid in registered:
         items.append(f"wizard MCP entry for [bold]{aid}[/bold]")
-    rprint(
-        Panel(
-            "\n".join(items),
-            title="[red]This will permanently delete[/red]",
-            border_style="red",
-        )
-    )
+    rprint(Panel(
+        "\n".join(items), title="[red]This will permanently delete[/red]", border_style="red"
+    ))
     return typer.confirm("Are you sure?")
 
 
 def _deregister_agents(registered: list[str]) -> None:
-
     source = _package_skills_dir()
     table = Table(show_header=False, box=None, padding=(0, 1))
     table.add_column(width=2)
@@ -377,9 +366,7 @@ def uninstall(
             typer.echo(f"  Failed to remove {WIZARD_HOME}: {e}", err=True)
             raise typer.Exit(code=1) from e
 
-    typer.echo(
-        "Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package."
-    )
+    typer.echo("Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package.")
 
 
 @app.command()
@@ -438,44 +425,61 @@ def analytics(
         tasks_data = analytics_module.query_tasks(db, start, end)
         compounding = analytics_module.query_compounding(db, start, end)
 
-    combined = {
-        "sessions": sessions_data,
-        "notes": notes_data,
-        "tasks": tasks_data,
-        "compounding": compounding,
-    }
-    analytics_module.print_analytics(combined, start, end)
+    analytics_module.print_analytics(
+        {
+            "sessions": sessions_data, "notes": notes_data,
+            "tasks": tasks_data, "compounding": compounding,
+        },
+        start, end,
+    )
 
 
 @app.command()
 def update() -> None:
-    """Pull latest code, sync deps, run migrations, re-register agents, and refresh skills."""
-    repo_root = Path(__file__).resolve().parents[3]
-    sync_args = (
-        ["uv", "sync"]
-        if shutil.which("uv")
-        else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
-    )
-    alembic_args = (
-        ["uv", "run", "alembic", "upgrade", "head"]
-        if shutil.which("uv")
-        else [sys.executable, "-m", "alembic", "upgrade", "head"]
-    )
+    """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
+    from wizard.database import run_migrations
 
-    steps = [
-        ("git pull", ["git", "pull"]),
-        ("sync deps", sync_args),
-        ("run migrations", alembic_args),
-    ]
-    for label, args in steps:
-        ok, output = _run_update_step(label, args, repo_root)
+    skills_dest = WIZARD_HOME / "skills"
+
+    if _is_editable_install():
+        # Dev mode: git pull + uv sync
+        repo_root = Path(__file__).resolve().parents[3]
+        sync_args = (
+            ["uv", "sync"]
+            if shutil.which("uv")
+            else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
+        )
+        steps = [
+            ("git pull", ["git", "pull"]),
+            ("sync deps", sync_args),
+        ]
+        for label, args in steps:
+            ok, output = _run_update_step(label, args, repo_root)
+            if not ok:
+                typer.echo(output, err=True)
+                raise typer.Exit(1)
+        _ensure_editable_pth()
+    else:
+        # Installed mode: uv tool upgrade
+        if not shutil.which("uv"):
+            typer.echo("uv not found — cannot upgrade", err=True)
+            raise typer.Exit(1)
+        ok, output = _run_update_step(
+            "upgrade", ["uv", "tool", "upgrade", "wizard"], Path.home()
+        )
         if not ok:
             typer.echo(output, err=True)
             raise typer.Exit(1)
 
-    _ensure_editable_pth()
+    typer.echo("  run migrations... ", nl=False)
+    try:
+        run_migrations()
+        typer.echo("ok")
+    except Exception as exc:
+        typer.echo(f"FAILED\n{exc}", err=True)
+        raise typer.Exit(1) from exc
 
-    skills_dest = WIZARD_HOME / "skills"
+    agent_registration.refresh_hooks()
     _refresh_skills(skills_dest)
 
     registered = agent_registration.read_registered_agents()
@@ -488,11 +492,9 @@ def update() -> None:
     else:
         typer.echo("\nNo registered agents found — run: wizard setup --agent <agent>")
 
-    rprint(
-        Panel(
-            f"Skills cache: [dim]{skills_dest}[/dim]\n"
-            f"Agents updated: [bold]{', '.join(registered) if registered else 'none'}[/bold]",
-            title="[green]Wizard updated[/green]",
-            border_style="green",
-        )
-    )
+    rprint(Panel(
+        f"Skills cache: [dim]{skills_dest}[/dim]\n"
+        f"Agents updated: [bold]{', '.join(registered) if registered else 'none'}[/bold]",
+        title="[green]Wizard updated[/green]",
+        border_style="green",
+    ))
