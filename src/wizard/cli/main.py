@@ -77,7 +77,6 @@ _AGENT_CHOICES = [
     "all",
 ]
 
-
 def _ensure_editable_pth() -> None:
     """Clear the UF_HIDDEN macOS flag from the hatchling editable .pth file.
 
@@ -102,11 +101,14 @@ def _ensure_editable_pth() -> None:
         os.chflags(pth_file, st.st_flags & ~stat.UF_HIDDEN)
 
 def is_editable_install() -> bool:
-    """Return True for editable dev install; False for `uv tool install`."""
+    """True for editable (dev); False for `uv tool install`."""
     try:
         dist = importlib_metadata.distribution("wizard")
         url_json = dist.read_text("direct_url.json")
-        return url_json is not None and '"editable": true' in url_json
+        if not url_json:
+            return True
+        data = json.loads(url_json)
+        return bool(data.get("editable") or data.get("dir_info", {}).get("editable"))
     except Exception:
         return True  # default to dev mode on any error
 
@@ -114,7 +116,6 @@ def is_editable_install() -> bool:
 def _package_skills_dir() -> Path:
     """Resolve the skills directory shipped inside the wizard package."""
     return Path(__file__).resolve().parent.parent / "skills"
-
 def _refresh_skills(dest: Path) -> None:
     """Copy skills from the package into dest, replacing any existing copy."""
     source = _package_skills_dir()
@@ -125,7 +126,6 @@ def _refresh_skills(dest: Path) -> None:
         typer.echo(f"Installed skills to {dest}")
     else:
         typer.echo("No skills found in package — skipping skill install")
-
 
 def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
     """Run a subprocess step, printing label and ok/FAILED. Returns (success, output)."""
