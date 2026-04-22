@@ -1,3 +1,4 @@
+import importlib.resources
 import json
 import logging
 import os
@@ -16,9 +17,7 @@ logger = logging.getLogger(__name__)
 
 _WIZARD_DIR = Path.home() / ".wizard"
 _REGISTERED_AGENTS_PATH = _WIZARD_DIR / "registered_agents.json"
-
-# Resolved at import time for the currently running project.
-_PROJECT_DIR = Path(__file__).parent.parent.parent
+_WIZARD_HOOKS_DIR = _WIZARD_DIR / "hooks"
 
 
 @dataclass
@@ -89,8 +88,8 @@ _AGENTS: dict[str, AgentConfig] = {
 
 def _json_entry() -> dict:
     return {
-        "command": "uv",
-        "args": ["--directory", str(_PROJECT_DIR), "run", "server.py"],
+        "command": "wizard-server",
+        "args": [],
         "type": "stdio",
     }
 
@@ -98,15 +97,15 @@ def _json_entry() -> dict:
 def _opencode_entry() -> dict:
     return {
         "type": "local",
-        "command": ["uv", "--directory", str(_PROJECT_DIR), "run", "server.py"],
+        "command": ["wizard-server"],
         "enabled": True,
     }
 
 
 def _toml_entry() -> dict:
     return {
-        "command": "uv",
-        "args": ["--directory", str(_PROJECT_DIR), "run", "server.py"],
+        "command": "wizard-server",
+        "args": [],
     }
 
 
@@ -215,10 +214,6 @@ def write_registered_agents(agents: list[str]) -> None:
     _REGISTERED_AGENTS_PATH.write_text(json.dumps(agents, indent=2))
 
 
-_HOOK_SCRIPT_SESSION_END = _PROJECT_DIR / "hooks" / "session-end.sh"
-_HOOK_SCRIPT_SESSION_START = _PROJECT_DIR / "hooks" / "session-start.sh"
-_HOOK_SCRIPT_SESSION_START_MINIMAL = _PROJECT_DIR / "hooks" / "session-start-minimal.sh"
-
 _HOOK_CONFIGS: dict[str, tuple[Path, str]] = {
     # agent_id -> (config_path, hooks_key_path)
     "claude-code": (
@@ -241,22 +236,37 @@ _HOOK_CONFIGS: dict[str, tuple[Path, str]] = {
 
 _HOOK_SCRIPTS: dict[str, dict[str, Path]] = {
     "claude-code": {
-        "SessionEnd": _HOOK_SCRIPT_SESSION_END,
-        "SessionStart": _HOOK_SCRIPT_SESSION_START,
+        "SessionEnd": _WIZARD_HOOKS_DIR / "session-end.sh",
+        "SessionStart": _WIZARD_HOOKS_DIR / "session-start.sh",
     },
     "codex": {
-        "Stop": _HOOK_SCRIPT_SESSION_END,
-        "SessionStart": _HOOK_SCRIPT_SESSION_START_MINIMAL,
+        "Stop": _WIZARD_HOOKS_DIR / "session-end.sh",
+        "SessionStart": _WIZARD_HOOKS_DIR / "session-start-minimal.sh",
     },
     "gemini": {
-        "SessionEnd": _HOOK_SCRIPT_SESSION_END,
-        "SessionStart": _HOOK_SCRIPT_SESSION_START_MINIMAL,
+        "SessionEnd": _WIZARD_HOOKS_DIR / "session-end.sh",
+        "SessionStart": _WIZARD_HOOKS_DIR / "session-start-minimal.sh",
     },
     "copilot": {
-        "sessionEnd": _HOOK_SCRIPT_SESSION_END,
-        "sessionStart": _HOOK_SCRIPT_SESSION_START_MINIMAL,
+        "sessionEnd": _WIZARD_HOOKS_DIR / "session-end.sh",
+        "sessionStart": _WIZARD_HOOKS_DIR / "session-start-minimal.sh",
     },
 }
+
+
+def refresh_hooks() -> None:
+    """Copy hook scripts from the installed package into ~/.wizard/hooks/.
+
+    Called by `wizard setup` and `wizard update` so the stable ~/.wizard/hooks/
+    path always reflects the currently installed version.
+    """
+    pkg_hooks = importlib.resources.files("wizard").joinpath("hooks")
+    _WIZARD_HOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    for script_name in ("session-end.sh", "session-start.sh", "session-start-minimal.sh"):
+        src = pkg_hooks.joinpath(script_name)
+        dest = _WIZARD_HOOKS_DIR / script_name
+        dest.write_bytes(src.read_bytes())
+        dest.chmod(0o755)
 
 
 def register_hook(agent_id: str) -> bool:
