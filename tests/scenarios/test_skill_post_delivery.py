@@ -2,6 +2,8 @@
 SKILL.md is read for registered-skill delivery — they are independent.
 """
 
+import json
+
 import pytest
 import wizard.agent_registration as ar
 from wizard.skills import load_skill_post
@@ -80,3 +82,37 @@ async def test_session_start_skill_instructions_contains_post_call_content(
     assert "## Role" not in resp.skill_instructions, (
         "Role section belongs in SKILL.md (pre-call), not in tool response"
     )
+
+
+def test_register_hook_installs_session_start_for_gemini(tmp_path, monkeypatch):
+    """register_hook must install a SessionStart hook for Gemini."""
+    config = tmp_path / "settings.json"
+    monkeypatch.setitem(ar._HOOK_CONFIGS, "gemini", (config, "hooks"))
+
+    ar.register_hook("gemini")
+
+    data = json.loads(config.read_text())
+    assert "SessionStart" in data["hooks"], "Gemini must have a SessionStart hook registered"
+    assert "SessionEnd" in data["hooks"], "Gemini must still have SessionEnd registered"
+
+
+def test_register_hook_installs_session_start_for_codex(tmp_path, monkeypatch):
+    """register_hook must install a SessionStart hook for Codex."""
+    config = tmp_path / "hooks.json"
+    monkeypatch.setitem(ar._HOOK_CONFIGS, "codex", (config, "hooks"))
+
+    ar.register_hook("codex")
+
+    data = json.loads(config.read_text())
+    assert "SessionStart" in data["hooks"], "Codex must have a SessionStart hook registered"
+
+
+def test_register_hook_installs_session_start_for_copilot(tmp_path, monkeypatch):
+    """register_hook must install a sessionStart hook for Copilot."""
+    config = tmp_path / "config.json"
+    monkeypatch.setitem(ar._HOOK_CONFIGS, "copilot", (config, "hooks"))
+
+    ar.register_hook("copilot")
+
+    data = json.loads(config.read_text())
+    assert "sessionStart" in data["hooks"], "Copilot must have a sessionStart hook registered"
