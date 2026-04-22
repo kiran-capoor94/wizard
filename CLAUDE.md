@@ -480,5 +480,6 @@ opportunities:
 | `setup` | `cli/main.py` | 18 | agent registration, config validation |
 | `uninstall` | `cli/main.py` | 14 | file cleanup, agent deregistration |
 | `resume_session` | `tools/session_tools.py` | 13 | state deserialization, note grouping |
+| `_check_mcp_server` | `cli/verify.py` | 11 | response parsing loop, error-path handlers |
 
 **Near-cap files:** `cli/configure.py` (~307 lines) and `cli/analytics.py` (~305 lines) are approaching the cap. The next significant addition to either may require splitting.
