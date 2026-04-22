@@ -1,3 +1,4 @@
+import importlib.resources
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -42,3 +43,19 @@ def get_session() -> Generator[Session, None, None]:
         except Exception:
             session.rollback()
             raise
+
+
+def run_migrations() -> None:
+    """Run alembic upgrade head using the bundled migrations.
+
+    Works whether wizard is an editable install (dev) or a uv tool install
+    (production) — importlib.resources resolves the correct path in both cases.
+    """
+    from alembic import command  # noqa: I001
+    from alembic.config import Config
+
+    alembic_dir = str(importlib.resources.files("wizard").joinpath("alembic"))
+    cfg = Config()
+    cfg.set_main_option("script_location", alembic_dir)
+    cfg.set_main_option("sqlalchemy.url", str(engine.url))
+    command.upgrade(cfg, "head")

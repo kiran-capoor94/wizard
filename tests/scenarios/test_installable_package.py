@@ -30,3 +30,9 @@ def test_refresh_hooks_copies_scripts_to_wizard_dir(tmp_path):
     assert (hooks_dest / "session-end.sh").exists()
     assert (hooks_dest / "session-start.sh").exists()
     assert (hooks_dest / "session-start-minimal.sh").exists()
+
+
+def test_run_migrations_is_callable():
+    """run_migrations() must be importable and callable (no import errors)."""
+    from wizard.database import run_migrations
+    assert callable(run_migrations)
