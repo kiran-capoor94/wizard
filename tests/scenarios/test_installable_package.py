@@ -39,26 +39,26 @@ def test_run_migrations_is_callable():
 
 
 def test_is_editable_install_returns_bool():
-    from wizard.cli.main import _is_editable_install
-    result = _is_editable_install()
+    from wizard.cli.main import is_editable_install
+    result = is_editable_install()
     assert isinstance(result, bool)
 
 
 def test_is_editable_install_true_when_editable():
     """Returns True when direct_url.json contains editable=true."""
-    from wizard.cli.main import _is_editable_install
+    from wizard.cli.main import is_editable_install
 
     fake_meta = MagicMock()
     fake_meta.read_text.return_value = '{"url": "file:///repo", "dir_info": {"editable": true}}'
     with patch("wizard.cli.main.importlib_metadata.distribution", return_value=fake_meta):
-        assert _is_editable_install() is True
+        assert is_editable_install() is True
 
 
 def test_is_editable_install_false_when_tool_install():
     """Returns False when direct_url.json has no editable flag (uv tool install)."""
-    from wizard.cli.main import _is_editable_install
+    from wizard.cli.main import is_editable_install
 
     fake_meta = MagicMock()
     fake_meta.read_text.return_value = '{"url": "https://github.com/...", "vcs_info": {}}'
     with patch("wizard.cli.main.importlib_metadata.distribution", return_value=fake_meta):
-        assert _is_editable_install() is False
+        assert is_editable_install() is False
