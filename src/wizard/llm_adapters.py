@@ -71,6 +71,8 @@ def _parse_notes(raw: str) -> list[SynthesisNote]:
                 return [SynthesisNote.model_validate(n) for n in parsed]
             except Exception as e:
                 last_err = e
+
+    logger.error("llm_adapters: failed to parse notes. Raw response: %s", raw)
     raise ValueError(f"Failed to parse LLM response: {last_err}")
 
 
@@ -112,28 +114,49 @@ def complete(
     Local servers often stream regardless of the stream param, so we force
     stream=True for localhost endpoints and collect the chunks ourselves.
     """
-    kwargs: dict = {"model": model, "messages": messages}
+    kwargs: dict = {
+        "model": model,
+        "messages": messages,
+        "timeout": 90,  # Prevent indefinite hangs (90s)
+        "max_tokens": 1024,  # Synthesis should be short
+    }
     if base_url:
         kwargs["base_url"] = base_url
     if api_key:
         kwargs["api_key"] = api_key
 
+    logger.info("llm_adapters: calling %s at %s", model, base_url or "cloud")
+    chunk_count = 0
     if _is_local(base_url):
-        # Force streaming: local servers (Unsloth Studio) always emit SSE.
-        # Disable chain-of-thought thinking to skip the reasoning preamble
-        # and get the JSON response faster.
-        kwargs["stream"] = True
-        kwargs["extra_body"] = {"enable_thinking": False}
-        response = litellm.completion(**kwargs)  # type: ignore[call-overload]
-        raw = "".join(
-            (chunk.choices[0].delta.content or "")  # type: ignore[union-attr]
-            for chunk in response
-        )
+        # Disable streaming for local servers to ensure the full JSON is collected.
+        kwargs["stream"] = False
+        kwargs["timeout"] = 300  # Allow 5 mins for local generation
+
+        # Ollama-specific optimizations
+        extra_body = {"enable_thinking": False}
+        if "ollama" in model.lower():
+            extra_body.update({
+                "num_ctx": 16384,
+                "num_predict": 512,
+                "num_thread": 4,
+                "flash_attention": False,
+            })
+        kwargs["extra_body"] = extra_body
+
+        try:
+            response = litellm.completion(**kwargs)  # type: ignore[call-overload]
+            raw = response.choices[0].message.content or ""  # type: ignore[union-attr]
+        except Exception as e:
+            logger.error("llm_adapters: local completion failed: %s", e)
+            raise
     else:
+        # Cloud providers handle timeouts well.
         response = litellm.completion(**kwargs)  # type: ignore[call-overload]
         try:
             raw = response.choices[0].message.content  # type: ignore[union-attr]
         except Exception:
             raw = getattr(response.choices[0], "text", "") or ""  # type: ignore[union-attr]
 
+    logger.info("llm_adapters: synthesis complete (%d chars, %d chunks)",
+                len(raw) if raw else 0, chunk_count if _is_local(base_url) else 1)
     return _parse_notes(raw or "")

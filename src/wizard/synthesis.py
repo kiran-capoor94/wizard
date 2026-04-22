@@ -49,7 +49,7 @@ NOTE_TYPE_MAP: dict[str, NoteType] = {
 }
 
 # Maximum chars per synthesis chunk. Default to 15k for extremely fast local prefill.
-CHUNK_CHAR_LIMIT: int = settings.synthesis.context_chars if settings.synthesis.context_chars < 15000 else 15000
+CHUNK_CHAR_LIMIT: int = min(settings.synthesis.context_chars, 15000)  # 15k for fast local prefill
 
 
 def _format_transcript(entries: list[TranscriptEntry]) -> str:
@@ -66,8 +66,6 @@ def _format_transcript(entries: list[TranscriptEntry]) -> str:
         lines.append(f"[{role_tag}] {e.content}")
     return "\n".join(lines)
 
-
-# Maximum chars per synthesis chunk. Default to 15k for extremely fast local prefill.
 
 class Synthesiser:
     """Synthesise agent transcripts into structured Note objects."""
@@ -171,7 +169,7 @@ class Synthesiser:
         valid_task_ids: set[int],
         terminal: bool,
     ) -> SynthesisResult:
-        """Save notes, update session state, refresh task summaries, return result. Used by persist stage."""
+        """Save notes, update session state, refresh task summaries, return result."""
         with sentry_sdk.start_span(op="synthesis.persist"):
             saved = self._save_notes(db, notes_data, wizard_session, valid_task_ids)
             if terminal:
