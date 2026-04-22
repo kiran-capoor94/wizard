@@ -7,10 +7,10 @@ from pathlib import Path
 import typer
 
 from wizard.cli.doctor import (
-    _check_config_file,
-    _check_db_file,
-    _check_db_tables,
-    _check_skills_installed,
+    check_config_file,
+    check_db_file,
+    check_db_tables,
+    check_skills_installed,
 )
 
 
@@ -19,10 +19,10 @@ def verify() -> None:
     typer.echo("Checking Wizard installation...")
 
     for check_fn in (
-        _check_config_file,
-        _check_db_file,
-        _check_db_tables,
-        _check_skills_installed,
+        check_config_file,
+        check_db_file,
+        check_db_tables,
+        check_skills_installed,
     ):
         passed, message = check_fn()
         typer.echo(f"  {'✓' if passed else '✗'} {message}")

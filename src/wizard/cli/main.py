@@ -13,6 +13,7 @@ import click
 import typer
 from rich import print as rprint
 from rich.panel import Panel
+from rich.table import Table
 
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
@@ -138,7 +139,6 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
 
 def _register_agents(agent_ids: list[str]) -> None:
     """Register MCP, install hooks, and install skills for each agent. Shows a Rich table."""
-    from rich.table import Table
 
     source = _package_skills_dir()
     table = Table(show_header=False, box=None, padding=(0, 1))
@@ -314,8 +314,6 @@ def _confirm_uninstall(
 
 
 def _deregister_agents(registered: list[str]) -> None:
-    """Deregister MCP, remove hooks, and remove skills for all agents. Shows a Rich table."""
-    from rich.table import Table
 
     source = _package_skills_dir()
     table = Table(show_header=False, box=None, padding=(0, 1))

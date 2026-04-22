@@ -35,7 +35,7 @@ def db_is_healthy(db_path: Path) -> bool:
         return False
 
 
-def _check_db_file() -> tuple[bool, str]:
+def check_db_file() -> tuple[bool, str]:
     db_path_str = os.environ.get("WIZARD_DB", settings.db)
     db_path = Path(db_path_str)
     if db_path.exists():
@@ -43,7 +43,7 @@ def _check_db_file() -> tuple[bool, str]:
     return False, f"Database not found: {db_path} — run 'wizard setup' first"
 
 
-def _check_db_tables() -> tuple[bool, str]:
+def check_db_tables() -> tuple[bool, str]:
     db_path_str = os.environ.get("WIZARD_DB", settings.db)
     db_path = Path(db_path_str)
     if not db_path.exists():
@@ -68,7 +68,7 @@ def _check_db_tables() -> tuple[bool, str]:
         return False, f"Could not inspect tables: {exc}"
 
 
-def _check_config_file() -> tuple[bool, str]:
+def check_config_file() -> tuple[bool, str]:
     config_path = Path(
         os.environ.get(
             "WIZARD_CONFIG_FILE", str(Path.home() / ".wizard" / "config.json")
@@ -107,7 +107,7 @@ def _check_migration_current() -> tuple[bool, str]:
         return False, f"Migration check failed: {exc}"
 
 
-def _check_skills_installed() -> tuple[bool, str]:
+def check_skills_installed() -> tuple[bool, str]:
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
@@ -139,13 +139,13 @@ def _check_knowledge_store() -> tuple[bool, str]:
 def run_checks(stop_on_failure: bool = True) -> list[tuple[str, bool, str]]:
     """Run all checks and return list of (name, passed, message) tuples."""
     checks = [
-        ("DB file exists", _check_db_file),
-        ("Config file", _check_config_file),
-        ("DB tables", _check_db_tables),
+        ("DB file exists", check_db_file),
+        ("Config file", check_config_file),
+        ("DB tables", check_db_tables),
         ("Allowlist file", _check_allowlist_file),
         ("Agent registered", _check_agent_registrations),
         ("Migration current", _check_migration_current),
-        ("Skills installed", _check_skills_installed),
+        ("Skills installed", check_skills_installed),
         ("Knowledge store", _check_knowledge_store),
     ]
 

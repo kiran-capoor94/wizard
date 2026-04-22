@@ -38,10 +38,10 @@ def test_verify_exits_zero_on_healthy_installation():
     mock_proc.returncode = 0
 
     with (
-        patch("wizard.cli.verify._check_config_file", return_value=(True, "Config found")),
-        patch("wizard.cli.verify._check_db_file", return_value=(True, "DB found")),
-        patch("wizard.cli.verify._check_db_tables", return_value=(True, "Tables OK")),
-        patch("wizard.cli.verify._check_skills_installed", return_value=(True, "Skills OK")),
+        patch("wizard.cli.verify.check_config_file", return_value=(True, "Config found")),
+        patch("wizard.cli.verify.check_db_file", return_value=(True, "DB found")),
+        patch("wizard.cli.verify.check_db_tables", return_value=(True, "Tables OK")),
+        patch("wizard.cli.verify.check_skills_installed", return_value=(True, "Skills OK")),
         patch("wizard.cli.verify.subprocess.run", return_value=mock_proc),
     ):
         runner = CliRunner()
