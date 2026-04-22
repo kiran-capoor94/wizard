@@ -150,7 +150,7 @@ def complete(
     Cloud backends: LiteLLM routing by model prefix (gemini/*, openai/*, etc.).
     Local non-Ollama backends: LiteLLM with stream=False + thinking disabled.
     """
-    if "ollama" in model:
+    if "ollama" in model.lower():
         options = {
             "num_ctx": 16384,
             "num_predict": 512,
