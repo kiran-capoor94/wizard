@@ -1,3 +1,5 @@
+# DEPRECATED (Wizard v3 Phase 4): TOON encoding replaced by plain JSON in session_start.
+# This module is retained for reference only. Do not add new callers.
 """TOON (Token-Oriented Object Notation) encoder for wizard response payloads.
 
 Encodes uniform arrays of structured objects into the compact TOON tabular

@@ -14,7 +14,7 @@ from sqlmodel import Session, col, select
 from wizard.config import settings
 from wizard.llm_adapters import complete as llm_complete
 from wizard.llm_adapters import probe_backend_health
-from wizard.models import Note, NoteType, WizardSession
+from wizard.models import Note, NoteType, Task, WizardSession
 from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
 from wizard.schemas import SynthesisNote, SynthesisResult
 from wizard.security import SecurityService
@@ -108,6 +108,27 @@ class Synthesiser:
             "api_key": synthesis_settings.api_key or None,
         }
 
+    def _write_failure_marker(
+        self, db: Session, wizard_session: WizardSession, chunk_description: str
+    ) -> None:
+        """Write a recoverable investigation note when synthesis fails after retry."""
+        marker = Note(
+            note_type=NoteType.INVESTIGATION,
+            content=(
+                f"Synthesis failed for session {wizard_session.id}. "
+                f"{chunk_description} "
+                "Content available in wizardsession.transcript_raw. "
+                "Retry with: wizard capture --resynthesise --session-id "
+                f"{wizard_session.id}"
+            ),
+            session_id=wizard_session.id,
+            artifact_id=wizard_session.artifact_id,
+            artifact_type="session",
+            synthesis_confidence=0.0,
+            status="unclassified",
+        )
+        self._note_repo.save(db, marker)
+
     def synthesise_path(
         self,
         db: Session,
@@ -128,16 +149,36 @@ class Synthesiser:
             span.set_tag("agent", wizard_session.agent)
 
             task_table, valid_task_ids = self.prepare_task_table(db)
-            notes_data = self.generate_notes(
-                transcript_path, wizard_session.agent, task_table
-            )
+            had_failure = False
+            try:
+                notes_data = self.generate_notes(
+                    transcript_path, wizard_session.agent, task_table
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Synthesiser: generate_notes failed after retry for session %d: %s",
+                    wizard_session.id,
+                    exc,
+                )
+                self._write_failure_marker(
+                    db,
+                    wizard_session,
+                    f"Transcript: {transcript_path.name}.",
+                )
+                had_failure = True
+                notes_data = []
 
-            if not notes_data:
+            if not notes_data and not had_failure:
+                if terminal:
+                    wizard_session.synthesis_status = "complete"
+                    wizard_session.is_synthesised = True
+                    db.add(wizard_session)
+                    db.flush()
                 return SynthesisResult(
                     notes_created=0, task_ids_touched=[], synthesised_via="fallback"
                 )
             return self.persist(
-                db, notes_data, wizard_session, valid_task_ids, terminal
+                db, notes_data, wizard_session, valid_task_ids, terminal, had_failure
             )
 
     def prepare_task_table(self, db: Session) -> tuple[str, set[int]]:
@@ -176,12 +217,17 @@ class Synthesiser:
         wizard_session: WizardSession,
         valid_task_ids: set[int],
         terminal: bool,
+        had_failure: bool = False,
     ) -> SynthesisResult:
         """Save notes, update session state, refresh task summaries, return result."""
         with sentry_sdk.start_span(op="synthesis.persist"):
             saved = self._save_notes(db, notes_data, wizard_session, valid_task_ids)
             if terminal:
-                wizard_session.is_synthesised = True
+                if had_failure:
+                    wizard_session.synthesis_status = "partial_failure"
+                else:
+                    wizard_session.is_synthesised = True
+                    wizard_session.synthesis_status = "complete"
             if wizard_session.summary is None:
                 wizard_session.summary = f"Synthesised {saved} note(s) from transcript."
             db.add(wizard_session)
@@ -241,22 +287,35 @@ class Synthesiser:
     ) -> list[SynthesisNote]:
         """Call the adapter, falling back to chunked synthesis on context overflow.
 
-        Returns empty list on unrecoverable failure.
+        Raises on non-context-overflow failures so callers can write failure markers.
+        Retries once before raising (spec §9.3).
         """
-        try:
-            return llm_complete(
-                self._backend["model"],
-                messages,
-                self._backend.get("base_url"),
-                self._backend.get("api_key"),
-            )
-        except Exception as e:
-            logger.warning("Synthesiser: LLM call failed: %s", e)
-            if isinstance(
-                e, getattr(litellm, "ContextWindowExceededError", type(None))
-            ):
-                return self._synthesise_in_chunks(filtered, task_table)
-            return []
+        last_exc: Exception | None = None
+        for attempt in range(2):  # one retry per spec §9.3
+            try:
+                return llm_complete(
+                    self._backend["model"],
+                    messages,
+                    self._backend.get("base_url"),
+                    self._backend.get("api_key"),
+                )
+            except Exception as e:
+                if isinstance(
+                    e, getattr(litellm, "ContextWindowExceededError", type(None))
+                ):
+                    return self._synthesise_in_chunks(filtered, task_table)
+                last_exc = e
+                if attempt == 0:
+                    logger.warning(
+                        "Synthesiser: LLM call failed (attempt %d), retrying: %s",
+                        attempt,
+                        e,
+                    )
+        logger.error(
+            "Synthesiser: LLM call failed after retry, raising for failure marker: %s",
+            last_exc,
+        )
+        raise last_exc  # type: ignore[misc]
 
     def _synthesise_in_chunks(
         self, filtered: list[TranscriptEntry], task_table: str
@@ -391,12 +450,27 @@ class Synthesiser:
                 and (valid_task_ids is None or nd.task_id in valid_task_ids)
                 else None
             )
+            # Artifact identity (v3): single anchor per attribution decision tree.
+            # 1. task_id set -> use task.artifact_id
+            # 2. session only -> use session.artifact_id
+            artifact_id: str | None = None
+            artifact_type: str | None = None
+            if matched_task_id is not None:
+                task_row = db.get(Task, matched_task_id)
+                if task_row and task_row.artifact_id:
+                    artifact_id = task_row.artifact_id
+                    artifact_type = "task"
+            if artifact_id is None and wizard_session.artifact_id:
+                artifact_id = wizard_session.artifact_id
+                artifact_type = "session"
             note = Note(
                 note_type=NOTE_TYPE_MAP.get(nd.note_type, NoteType.INVESTIGATION),
                 content=clean_content,
                 mental_model=clean_model,
                 task_id=matched_task_id,
                 session_id=wizard_session.id,
+                artifact_id=artifact_id,
+                artifact_type=artifact_type,
             )
             self._note_repo.save(db, note)
             count += 1

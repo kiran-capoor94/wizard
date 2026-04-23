@@ -209,8 +209,8 @@ class PriorSessionSummary(BaseModel):
 class SessionStartResponse(BaseModel):
     session_id: int
     continued_from_id: int | None = None
-    open_tasks: str = ""  # TOON-encoded; see encode_task_contexts
-    blocked_tasks: str = ""  # TOON-encoded; see encode_task_contexts
+    open_tasks: str = ""  # JSON array of TaskContext objects
+    blocked_tasks: str = ""  # JSON array of TaskContext objects
     unsummarised_meetings: list[MeetingContext]
     wizard_context: dict | None = None
     skill_instructions: str | None = None
