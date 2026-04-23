@@ -337,22 +337,21 @@ class Synthesiser:
             chunks.append(cur)
         notes_data: list[SynthesisNote] = []
         for chunk in chunks:
-            try:
-                nd = llm_complete(
-                    self._backend["model"],
-                    [
-                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
-                        {
-                            "role": "user",
-                            "content": self._format_prompt(chunk, task_table),
-                        },
-                    ],
-                    self._backend.get("base_url"),
-                    self._backend.get("api_key"),
-                )
-                notes_data.extend(nd)
-            except Exception as ex:
-                logger.warning("Synthesiser: chunk LLM call failed: %s", ex)
+            # No retry here — each chunk is already a subdivision of a failed single call.
+            # Raise on failure so synthesise_path can write a failure marker.
+            nd = llm_complete(
+                self._backend["model"],
+                [
+                    {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": self._format_prompt(chunk, task_table),
+                    },
+                ],
+                self._backend.get("base_url"),
+                self._backend.get("api_key"),
+            )
+            notes_data.extend(nd)
         return notes_data
 
     def _filter_for_synthesis(

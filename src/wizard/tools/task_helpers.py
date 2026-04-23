@@ -1,5 +1,6 @@
 """Helper functions for task tools."""
 
+import json
 import logging
 
 from fastmcp.exceptions import ToolError
@@ -54,7 +55,6 @@ def task_contexts_to_json(tasks: list) -> str:
 
     Replaces TOON encoding in session_start responses (Wizard v3 Phase 4).
     """
-    import json
     return json.dumps([
         {
             "id": t.id,

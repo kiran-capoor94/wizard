@@ -1,17 +1,22 @@
 """Scenario tests for synthesis artifact_id write path and failure handling (spec §9.3)."""
 
+import json
+import os
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from wizard.models import Note, NoteType, Task, WizardSession
+from wizard.models import Task, WizardSession
 from wizard.repositories.note import NoteRepository
+from wizard.schemas import SynthesisNote
 from wizard.synthesis import Synthesiser
+from wizard.transcript import TranscriptReader
 
 
 @pytest.fixture
 def synthesiser(security, note_repo):
-    from wizard.transcript import TranscriptReader
     return Synthesiser(
         reader=TranscriptReader(),
         note_repo=note_repo,
@@ -20,63 +25,71 @@ def synthesiser(security, note_repo):
     )
 
 
-class TestSynthesisWritesArtifactId:
-    def test_synthesised_note_has_artifact_id(self, db_session):
-        """Notes written by synthesis carry artifact_id."""
+class TestSynthesisSaveNotesArtifactId:
+    """Test that _save_notes correctly populates artifact_id on written notes."""
+
+    def test_note_anchored_to_task_when_task_id_set(self, db_session, synthesiser):
         task = Task(name="synthesis target")
         db_session.add(task)
         db_session.flush()
-        ws = WizardSession(transcript_raw="[]")
+        ws = WizardSession(agent="claude-code")
         db_session.add(ws)
         db_session.flush()
-        note = Note(
-            note_type=NoteType.INVESTIGATION,
-            content="synthesised finding",
-            task_id=task.id,
-            session_id=ws.id,
-            artifact_id=task.artifact_id,
-            artifact_type="task",
-        )
-        db_session.add(note)
-        db_session.flush()
-        assert note.artifact_id == task.artifact_id
-        assert note.artifact_type == "task"
 
-    def test_session_note_uses_session_artifact_id(self, db_session):
-        ws = WizardSession(transcript_raw="[]")
+        notes_data = [SynthesisNote(task_id=task.id, note_type="investigation", content="finding")]
+        synthesiser._save_notes(db_session, notes_data, ws, valid_task_ids={task.id})
+
+        repo = NoteRepository()
+        saved = repo.get_notes_by_artifact_id(db_session, task.artifact_id)
+        assert len(saved) == 1
+        assert saved[0].artifact_id == task.artifact_id
+        assert saved[0].artifact_type == "task"
+        assert saved[0].task_id == task.id
+
+    def test_note_anchored_to_session_when_no_task(self, db_session, synthesiser):
+        ws = WizardSession(agent="claude-code")
         db_session.add(ws)
         db_session.flush()
-        note = Note(
-            note_type=NoteType.SESSION_SUMMARY,
-            content="session note",
-            session_id=ws.id,
-            artifact_id=ws.artifact_id,
-            artifact_type="session",
-        )
-        db_session.add(note)
+
+        notes_data = [SynthesisNote(task_id=None, note_type="learnings", content="session-only finding")]
+        synthesiser._save_notes(db_session, notes_data, ws, valid_task_ids=set())
+
+        repo = NoteRepository()
+        saved = repo.get_notes_by_artifact_id(db_session, ws.artifact_id)
+        assert len(saved) == 1
+        assert saved[0].artifact_id == ws.artifact_id
+        assert saved[0].artifact_type == "session"
+        assert saved[0].task_id is None
+
+    def test_note_anchored_to_session_when_task_id_not_in_valid_set(self, db_session, synthesiser):
+        """task_id rejected by valid_task_ids filter -> falls back to session anchor."""
+        task = Task(name="foreign task")
+        db_session.add(task)
         db_session.flush()
-        assert note.artifact_id == ws.artifact_id
-        assert note.artifact_type == "session"
+        ws = WizardSession(agent="claude-code")
+        db_session.add(ws)
+        db_session.flush()
+
+        notes_data = [SynthesisNote(task_id=task.id, note_type="decision", content="stray note")]
+        # task.id not in valid_task_ids — should be rejected
+        synthesiser._save_notes(db_session, notes_data, ws, valid_task_ids=set())
+
+        repo = NoteRepository()
+        saved = repo.get_notes_by_artifact_id(db_session, ws.artifact_id)
+        assert len(saved) == 1
+        assert saved[0].artifact_type == "session"
 
 
 class TestSynthesisFailureHandling:
     def test_partial_failure_leaves_marker_note(self, db_session, synthesiser):
         """LLM failure after retry writes a recoverable marker note."""
-        ws = WizardSession(
-            agent="claude-code",
-            transcript_raw='[{"type":"user","content":"hello world"}]',
-        )
-        # Write a fake transcript file for synthesise_path to read
-        import json
-        import os
-        import tempfile
-        from pathlib import Path
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
         ) as f:
             f.write(json.dumps({"type": "user", "content": "hello world"}) + "\n")
             tmp_path = f.name
-        ws.transcript_path = tmp_path
+
+        ws = WizardSession(agent="claude-code", transcript_path=tmp_path)
         db_session.add(ws)
         db_session.flush()
 
@@ -99,9 +112,6 @@ class TestSynthesisFailureHandling:
 
     def test_empty_transcript_sets_complete_status(self, db_session, synthesiser):
         """Empty transcript completes successfully."""
-        import os
-        import tempfile
-        from pathlib import Path
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
         ) as f:
