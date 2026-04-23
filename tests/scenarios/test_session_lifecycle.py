@@ -28,7 +28,7 @@ async def test_session_lifecycle(
     )
     assert start_resp.session_id is not None
     assert isinstance(start_resp.open_tasks, str)
-    assert "open_tasks[" in start_resp.open_tasks
+    assert start_resp.open_tasks.startswith("[")  # JSON array (Phase 4: TOON removed)
     assert start_resp.source == "startup"
     session_id = start_resp.session_id
 

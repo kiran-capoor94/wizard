@@ -50,8 +50,8 @@ from ..skills import (
     load_skill_post,
 )
 from ..synthesis import Synthesiser
-from ..toon import encode_task_contexts
 from ..transcript import TranscriptReader, find_transcript, read_new_lines
+from .task_helpers import task_contexts_to_json
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +178,7 @@ def _find_previous_session_id() -> int | None:
         return result
 
 
+
 async def session_start(
     ctx: Context,
     agent_session_id: str | None = None,
@@ -250,9 +251,9 @@ async def session_start(
             session_id=session.id,
             continued_from_id=continued_from_id,
             source=source,
-            open_tasks=encode_task_contexts("open_tasks", open_tasks_list),
+            open_tasks=task_contexts_to_json(open_tasks_list),
             open_tasks_total=open_tasks_total,
-            blocked_tasks=encode_task_contexts("blocked_tasks", blocked_list),
+            blocked_tasks=task_contexts_to_json(blocked_list),
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             wizard_context=_build_wizard_context(),
             skill_instructions=load_skill_post(SKILL_SESSION_START),
