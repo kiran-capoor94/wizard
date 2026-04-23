@@ -1,4 +1,5 @@
 import datetime
+import uuid as _uuid
 from enum import Enum
 
 from pydantic import ConfigDict, field_validator
@@ -95,6 +96,11 @@ class Task(TimestampMixin, table=True):
     )
     source_type: str | None = Field(default=None, index=True)
     source_url: str | None = Field(default=None)
+    artifact_id: str | None = Field(
+        default_factory=lambda: str(_uuid.uuid4()), unique=True, index=True
+    )
+    persistence: str = Field(default="persistent")
+    workspace: str | None = Field(default=None)
 
 
 class Meeting(TimestampMixin, table=True):
@@ -112,6 +118,11 @@ class Meeting(TimestampMixin, table=True):
     )
     source_type: str | None = Field(default=None, index=True)
     source_url: str | None = Field(default=None)
+    artifact_id: str | None = Field(
+        default_factory=lambda: str(_uuid.uuid4()), unique=True, index=True
+    )
+    persistence: str = Field(default="persistent")
+    workspace: str | None = Field(default=None)
 
 
 class WizardSession(TimestampMixin, table=True):
@@ -161,6 +172,17 @@ class WizardSession(TimestampMixin, table=True):
         default=False,
         description="True once Synthesiser has processed transcript_path into notes.",
     )
+    artifact_id: str | None = Field(
+        default_factory=lambda: str(_uuid.uuid4()), unique=True, index=True
+    )
+    persistence: str = Field(default="ephemeral")
+    workspace: str | None = Field(default=None)
+    synthesis_status: str = Field(
+        default="pending",
+        description=(
+            "Synthesis lifecycle: 'pending' | 'complete' | 'partial_failure' | 'failed'."
+        ),
+    )
     transcript_raw: str | None = Field(
         default=None,
         description=(
@@ -185,6 +207,22 @@ class Note(TimestampMixin, table=True):
     session_id: int | None = Field(default=None, foreign_key="wizardsession.id")
     task_id: int | None = Field(default=None, foreign_key="task.id")
     meeting_id: int | None = Field(default=None, foreign_key="meeting.id")
+    # Artifact identity layer (v3) — single anchor replacing polymorphic FKs above.
+    # Old FKs are kept as a safety net during migration.
+    artifact_id: str | None = Field(default=None, index=True)
+    artifact_type: str | None = Field(default=None)  # 'task'|'session'|'meeting' — debug only
+    # Synthesis provenance
+    synthesis_content_hash: str | None = Field(default=None, index=True)
+    synthesis_session_id: int | None = Field(default=None)
+    transcript_offset_start: int | None = Field(default=None)
+    transcript_offset_end: int | None = Field(default=None)
+    synthesis_confidence: float | None = Field(default=None)
+    source_note_ids: str | None = Field(default=None)  # JSON array of note IDs
+    # Conflict / lifecycle state
+    supersedes_note_id: int | None = Field(default=None, foreign_key="note.id")
+    # 'active' | 'superseded' | 'contradicted' | 'archived' | 'invalid' | 'unclassified'
+    status: str = Field(default="active")
+    reference_count: int = Field(default=0)
     session: WizardSession | None = Relationship(back_populates="notes")
 
 
