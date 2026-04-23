@@ -189,6 +189,8 @@ async def save_note(
                 mental_model=mental_model,
                 task_id=task.id,
                 session_id=session_id,
+                artifact_id=task.artifact_id,
+                artifact_type="task",
             )
             saved = n_repo.save(db, note)
             if saved.id is None:
