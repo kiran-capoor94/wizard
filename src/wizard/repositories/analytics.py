@@ -5,7 +5,7 @@ import logging
 
 from sqlmodel import Session, col, select
 
-from ..models import Note, NoteType, TaskState, ToolCall, WizardSession
+from ..models import Note, NoteType, Task, TaskState, ToolCall, WizardSession
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,11 @@ class AnalyticsRepository:
         total_notes = sum(task_note_counts.values())
         avg_notes = round(total_notes / worked, 1) if worked > 0 else 0.0
 
-        stale = db.exec(select(TaskState).where(TaskState.stale_days > 3)).all()
+        stale = db.exec(
+            select(TaskState)
+            .join(Task, TaskState.task_id == Task.id)
+            .where(TaskState.stale_days > 3, Task.status.in_(["todo", "in_progress"]))
+        ).all()
 
         return {
             "worked": worked,
