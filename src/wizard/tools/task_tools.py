@@ -226,6 +226,21 @@ async def update_task(
         with get_session() as db:
             task = t_repo.get_by_id(db, task_id)
 
+            if status == TaskStatus.DONE:
+                try:
+                    result = await ctx.elicit(
+                        f"Mark {task.name!r} as done? This closes the task.",
+                        response_type=bool,
+                    )
+                    if isinstance(result, AcceptedElicitation) and result.data is False:
+                        return UpdateTaskResponse(
+                            task_id=task_id,
+                            updated_fields={},
+                            task_state_updated=False,
+                        )
+                except Exception as e:
+                    logger.debug("ctx.elicit unavailable for done confirmation: %s", e)
+
             updated_fields = apply_task_fields(
                 task, sec,
                 status=status, priority=priority,
