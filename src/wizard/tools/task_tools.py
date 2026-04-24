@@ -251,13 +251,13 @@ async def update_task(
             )
 
             t_repo.save(db, task)
-            await ctx.debug(f"Task {task_id} updated: {updated_fields}.")
 
             task_id_int = task.id
             if task_id_int is None:
                 raise ToolError(
                     "Internal error: task was not assigned an id after flush"
                 )
+            await ctx.debug(f"Task {task_id} updated: {updated_fields}.")
 
             task_state_updated = False
             if "status" in updated_fields:
@@ -337,12 +337,12 @@ async def create_task(
         t_repo.save(db, task)
         if task.id is None:
             raise ToolError("Internal error: task was not assigned an id after flush")
-        await ctx.info(f"Task {task.id} created: {clean_name!r}.")
         t_state_repo.create_for_task(db, task)
 
         if meeting_id:
             m_repo.link_tasks(db, meeting_id, [task.id])
 
+        await ctx.info(f"Task {task.id} created: {clean_name!r}.")
         return CreateTaskResponse(
             task_id=task.id,
             already_existed=False,
