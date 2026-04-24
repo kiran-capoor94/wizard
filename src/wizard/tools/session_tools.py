@@ -45,9 +45,11 @@ from ..services import SessionCloser
 from ..skills import (
     SKILL_SESSION_END,
     SKILL_SESSION_RESUME,
+    SKILL_SESSION_START,
     load_skill_post,
 )
 from .formatting import task_contexts_to_json
+from .mode_tools import build_available_modes
 from .session_helpers import (
     build_prior_summaries,
     build_wizard_context,
@@ -58,6 +60,16 @@ from .session_helpers import (
 logger = logging.getLogger(__name__)
 
 SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
+
+
+def _apply_default_mode(session: WizardSession) -> None:
+    """Apply default mode to session if not already set and allowed."""
+    if (
+        session.active_mode is None
+        and settings.modes.default
+        and settings.modes.default in settings.modes.allowed
+    ):
+        session.active_mode = settings.modes.default
 
 
 async def session_start(
@@ -103,6 +115,10 @@ async def session_start(
                 "Internal error: session was not assigned an id after flush"
             )
 
+        # Apply default mode if none set and config specifies one
+        _apply_default_mode(session)
+        db.add(session)
+
         await ctx.set_state("current_session_id", session.id)
 
         # Write wizard integer ID to the agent-session keyed directory.
@@ -144,6 +160,9 @@ async def session_start(
             wizard_context=build_wizard_context(),
             closed_sessions=closed_sessions,
             prior_summaries=prior_summaries,
+            skill_instructions=load_skill_post(SKILL_SESSION_START),
+            active_mode=session.active_mode,
+            available_modes=build_available_modes(settings.modes),
         )
 
     await ctx.report_progress(4, 4)
@@ -378,6 +397,7 @@ async def resume_session(
             prior_notes=prior_notes,
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             skill_instructions=load_skill_post(SKILL_SESSION_RESUME),
+            active_mode=prior.active_mode,
         )
 
 
