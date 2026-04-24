@@ -168,6 +168,10 @@ class WizardSession(TimestampMixin, table=True):
         index=True,
         description="Wizard session ID this session continues from (unclean prior close).",
     )
+    active_mode: str | None = Field(
+        default=None,
+        description="Skill name of the active mode for this session, e.g. 'socratic-mentor'.",
+    )
     is_synthesised: bool = Field(
         default=False,
         description="True once Synthesiser has processed transcript_path into notes.",
