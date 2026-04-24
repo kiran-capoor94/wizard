@@ -138,7 +138,7 @@ async def test_get_modes_with_active_session(tmp_path):
     with patch("wizard.tools.mode_tools.settings") as mock_settings, \
          patch("wizard.tools.mode_tools.get_session") as mock_get_session:
         mock_settings.modes = modes_cfg
-        mock_get_session.return_value.__enter__ = lambda s: mock_db
+        mock_get_session.return_value.__enter__ = lambda _: mock_db
         mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
 
         result = await get_modes(session_id=42, _roots=[tmp_path])
@@ -174,7 +174,7 @@ async def test_set_mode_activates_mode(tmp_path):
     with patch("wizard.tools.mode_tools.settings") as mock_settings, \
          patch("wizard.tools.mode_tools.get_session") as mock_get_session:
         mock_settings.modes = modes_cfg
-        mock_get_session.return_value.__enter__ = lambda s: mock_db
+        mock_get_session.return_value.__enter__ = lambda _: mock_db
         mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
 
         result = await set_mode(session_id=42, mode_name="socratic-mentor", _roots=[tmp_path])
@@ -201,7 +201,7 @@ async def test_set_mode_clears_mode(tmp_path):
     with patch("wizard.tools.mode_tools.settings") as mock_settings, \
          patch("wizard.tools.mode_tools.get_session") as mock_get_session:
         mock_settings.modes = modes_cfg
-        mock_get_session.return_value.__enter__ = lambda s: mock_db
+        mock_get_session.return_value.__enter__ = lambda _: mock_db
         mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
 
         result = await set_mode(session_id=42, mode_name=None, _roots=[tmp_path])
@@ -235,7 +235,7 @@ async def test_set_mode_session_not_found():
     with patch("wizard.tools.mode_tools.settings") as mock_settings, \
          patch("wizard.tools.mode_tools.get_session") as mock_get_session:
         mock_settings.modes = modes_cfg
-        mock_get_session.return_value.__enter__ = lambda s: mock_db
+        mock_get_session.return_value.__enter__ = lambda _: mock_db
         mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
 
         with pytest.raises(ToolError, match="Session 99 not found"):
