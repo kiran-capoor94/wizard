@@ -3,12 +3,14 @@ import re
 from pathlib import Path
 
 import yaml
+from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 
 from ..config import ModesSettings, settings
 from ..database import get_session
+from ..deps import get_session_repo, get_skill_roots
 from ..mcp_instance import mcp
-from ..models import WizardSession
+from ..repositories import SessionRepository
 from ..schemas import GetModesResponse, ModeInfo, SetModeResponse
 
 logger = logging.getLogger(__name__)
@@ -64,15 +66,16 @@ def _load_mode_info(name: str, roots: list[Path]) -> ModeInfo | None:
 
 async def get_modes(
     session_id: int | None = None,
-    _roots: list[Path] | None = None,
+    skill_roots: list[Path] = Depends(get_skill_roots),
+    s_repo: SessionRepository = Depends(get_session_repo),
 ) -> GetModesResponse:
     """List available modes and the active mode for the given session (if any)."""
-    available = build_available_modes(settings.modes, roots=_roots)
+    available = build_available_modes(settings.modes, roots=skill_roots)
 
     active_mode: str | None = None
     if session_id is not None:
         with get_session() as db:
-            session = db.get(WizardSession, session_id)
+            session = s_repo.get(db, session_id)
             if session is not None:
                 active_mode = session.active_mode
 
@@ -85,7 +88,8 @@ mcp.tool()(get_modes)
 async def set_mode(
     session_id: int,
     mode_name: str | None,
-    _roots: list[Path] | None = None,
+    skill_roots: list[Path] = Depends(get_skill_roots),
+    s_repo: SessionRepository = Depends(get_session_repo),
 ) -> SetModeResponse:
     """Activate or clear the mode for the given session.
 
@@ -97,18 +101,16 @@ async def set_mode(
             f"'{mode_name}' is not in allowed modes: {settings.modes.allowed}"
         )
 
-    with get_session() as db:
-        session = db.get(WizardSession, session_id)
-        if session is None:
-            raise ToolError(f"Session {session_id} not found")
-
-        session.active_mode = mode_name
-        db.add(session)
+    try:
+        with get_session() as db:
+            s_repo.set_active_mode(db, session_id, mode_name)
+    except ValueError as e:
+        raise ToolError(str(e)) from e
 
     if mode_name is None:
         return SetModeResponse(active_mode=None, description=None, instruction=None)
 
-    info = _load_mode_info(mode_name, roots=_roots or [_INSTALLED_SKILLS, _PACKAGE_SKILLS])
+    info = _load_mode_info(mode_name, roots=skill_roots)
     description = info.description if info else None
     return SetModeResponse(
         active_mode=mode_name,

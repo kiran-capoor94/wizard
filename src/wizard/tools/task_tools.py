@@ -4,7 +4,6 @@ import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
-from fastmcp.server.elicitation import AcceptedElicitation
 
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
@@ -33,7 +32,12 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..skills import SKILL_TASK_START, load_skill_post
-from .task_fields import apply_task_fields
+from .task_fields import (
+    apply_task_fields,
+    check_duplicate_name,
+    elicit_done_confirmation,
+    elicit_mental_model,
+)
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 _VALID_STATUSES = {s.value for s in TaskStatus}
@@ -42,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 _KEY_NOTES_CAP = 5  # max notes returned by task_start
+
 
 
 def _select_key_notes(notes_desc: list) -> list:
@@ -151,48 +156,46 @@ async def save_note(
     """Scrub and persist a note. Types: investigation|decision|docs|learnings|session_summary."""
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
+        # Phase 1: fetch data needed for elicitation prompt, then close DB.
+        session_id: int | None = await ctx.get_state("current_session_id")
         with get_session() as db:
-            session_id: int | None = await ctx.get_state("current_session_id")
             task = t_repo.get_by_id(db, task_id)
-            if (
-                note_type in (NoteType.INVESTIGATION, NoteType.DECISION)
-                and mental_model is None
-            ):
-                try:
-                    result = await ctx.elicit(
-                        "Optional: summarise what you now understand in 1-2 sentences "
-                        "(mental model). Press Enter to skip.",
-                        response_type=str,
-                    )
-                    if isinstance(result, AcceptedElicitation) and result.data:
-                        mental_model = sec.scrub(result.data).clean
-                except Exception as e:
-                    logger.debug("ctx.elicit unavailable for mental_model: %s", e)
-            if len(content) > 100_000:
-                raise ToolError("Content exceeds 100k character limit")
-            clean = sec.scrub(content).clean
-            if mental_model is not None:
-                mental_model = sec.scrub(mental_model).clean
-            note = Note(
-                note_type=note_type,
-                content=clean,
-                mental_model=mental_model,
-                task_id=task.id,
-                session_id=session_id,
-                artifact_id=task.artifact_id,
-                artifact_type="task",
-            )
+            task_artifact_id = task.artifact_id
+            if task.id is None:
+                raise ToolError("Internal error: task has no id")
+            task_db_id: int = task.id
+
+        # Phase 2: elicit outside DB context so the connection is not held open.
+        if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
+            mental_model = await elicit_mental_model(ctx, sec)
+
+        # Phase 3: validate and write.
+        if len(content) > 100_000:
+            raise ToolError("Content exceeds 100k character limit")
+        clean = sec.scrub(content).clean
+        if mental_model is not None:
+            mental_model = sec.scrub(mental_model).clean
+        note = Note(
+            note_type=note_type,
+            content=clean,
+            mental_model=mental_model,
+            task_id=task_db_id,
+            session_id=session_id,
+            artifact_id=task_artifact_id,
+            artifact_type="task",
+        )
+        with get_session() as db:
             saved = n_repo.save(db, note)
             if saved.id is None:
                 raise ToolError("Internal error: note was not assigned an id after flush")
             await ctx.report_progress(1, 2)
-            t_state_repo.on_note_saved(db, task_id)
-            await ctx.report_progress(2, 2)
-            await ctx.info(f"Note {saved.id} saved ({note_type.value}).")
-            return SaveNoteResponse(
-                note_id=saved.id,
-                mental_model_saved=saved.mental_model is not None,
-            )
+            t_state_repo.on_note_saved(db, task_db_id)
+        await ctx.report_progress(2, 2)
+        await ctx.info(f"Note {saved.id} saved ({note_type.value}).")
+        return SaveNoteResponse(
+            note_id=saved.id,
+            mental_model_saved=saved.mental_model is not None,
+        )
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
@@ -222,24 +225,18 @@ async def update_task(
         raise ToolError("At least one field must be provided to update_task")
 
     try:
+        # Phase 1: fetch task name for elicitation prompt, then close DB.
         with get_session() as db:
             task = t_repo.get_by_id(db, task_id)
+            task_name = task.name
 
-            if status == TaskStatus.DONE:
-                try:
-                    result = await ctx.elicit(
-                        f"Mark {task.name!r} as done? This closes the task.",
-                        response_type=bool,
-                    )
-                    if isinstance(result, AcceptedElicitation) and result.data is False:
-                        return UpdateTaskResponse(
-                            task_id=task_id,
-                            updated_fields=[],
-                            task_state_updated=False,
-                        )
-                except Exception as e:
-                    logger.debug("ctx.elicit unavailable for done confirmation: %s", e)
+        # Phase 2: elicit done confirmation outside DB context.
+        if status == TaskStatus.DONE and not await elicit_done_confirmation(ctx, task_name):
+            return UpdateTaskResponse(task_id=task_id, updated_fields=[], task_state_updated=False)
 
+        # Phase 3: apply updates.
+        with get_session() as db:
+            task = t_repo.get_by_id(db, task_id)
             updated_fields = apply_task_fields(
                 task, sec,
                 status=status, priority=priority,
@@ -255,11 +252,11 @@ async def update_task(
                 t_state_repo.on_status_changed(db, task_id_int)
                 task_state_updated = True
 
-            return UpdateTaskResponse(
-                task_id=task_id_int,
-                updated_fields=updated_fields,
-                task_state_updated=task_state_updated,
-            )
+        return UpdateTaskResponse(
+            task_id=task_id_int,
+            updated_fields=updated_fields,
+            task_state_updated=task_state_updated,
+        )
     except ValueError as e:
         logger.warning("update_task failed: %s", e)
         raise ToolError(str(e)) from e
@@ -288,52 +285,47 @@ async def create_task(
 
     if status not in _VALID_STATUSES:
         raise ValueError(f"Invalid status {status!r}. Valid values: {sorted(_VALID_STATUSES)}")
-    with get_session() as db:
-        if source_id:
+
+    # Phase 1: source_id upsert — no elicitation needed; one DB context.
+    if source_id:
+        with get_session() as db:
             existing = t_repo.upsert_by_source_id(
                 db, source_id, sec.scrub(name).clean, priority, source_url
             )
             if existing and existing.id is not None:
                 return CreateTaskResponse(task_id=existing.id, already_existed=True)
-        else:
-            name_lower = name.lower()
+    else:
+        # Phase 1: fetch names, close DB.  Phase 2: elicit outside DB context.
+        with get_session() as db:
             existing_names = t_repo.get_active_task_names(db)
-            matching = next(
-                (n for n in existing_names if name_lower in n.lower() or n.lower() in name_lower),
-                None,
-            )
-            if matching:
-                try:
-                    result = await ctx.elicit(
-                        f"A task named {matching!r} already exists. Create anyway?",
-                        response_type=bool,
-                    )
-                    if isinstance(result, AcceptedElicitation) and result.data is False:
-                        existing = t_repo.get_by_name(db, matching)
-                        if existing and existing.id is not None:
-                            return CreateTaskResponse(task_id=existing.id, already_existed=True)
-                except Exception as e:
-                    logger.debug("ctx.elicit unavailable for duplicate check: %s", e)
+        blocked_by = await check_duplicate_name(ctx, name, existing_names)
+        if blocked_by is not None:
+            with get_session() as db:
+                existing = t_repo.get_by_name(db, blocked_by)
+                if existing and existing.id is not None:
+                    return CreateTaskResponse(task_id=existing.id, already_existed=True)
 
-        clean_name = sec.scrub(name).clean
-        task_status = TaskStatus(status)
-        task = Task(
-            name=clean_name,
-            priority=priority,
-            category=category,
-            status=task_status,
-            source_id=source_id,
-            source_type=source_type,
-            source_url=source_url,
-        )
+    # Phase 3: create the task.
+    clean_name = sec.scrub(name).clean
+    task_status = TaskStatus(status)
+    task = Task(
+        name=clean_name,
+        priority=priority,
+        category=category,
+        status=task_status,
+        source_id=source_id,
+        source_type=source_type,
+        source_url=source_url,
+    )
+    with get_session() as db:
         t_repo.save(db, task)
         if task.id is None:
             raise ToolError("Internal error: task was not assigned an id after flush")
         t_state_repo.create_for_task(db, task)
         if meeting_id:
             m_repo.link_tasks(db, meeting_id, [task.id])
-        await ctx.info(f"Task {task.id} created: {clean_name!r}.")
-        return CreateTaskResponse(task_id=task.id, already_existed=False)
+    await ctx.info(f"Task {task.id} created: {clean_name!r}.")
+    return CreateTaskResponse(task_id=task.id, already_existed=False)
 
 
 async def rewind_task(

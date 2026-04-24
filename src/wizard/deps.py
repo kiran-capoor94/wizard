@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 
 from sqlmodel import Session
 
@@ -61,3 +62,11 @@ def get_session_repo() -> SessionRepository:
 
 def get_session_closer() -> SessionCloser:
     return SessionCloser(security=get_security(), settings=settings)
+
+
+def get_skill_roots() -> list[Path]:
+    """Return the default skill search roots for mode tools."""
+    return [
+        Path.home() / ".wizard" / "skills",
+        Path(__file__).resolve().parent / "skills",
+    ]

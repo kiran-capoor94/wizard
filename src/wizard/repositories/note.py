@@ -140,6 +140,9 @@ def detect_drift(
 ) -> dict | None:
     """Compare legacy FK path vs artifact_id path note sets.
 
+    Temporary migration utility for Phase 2 shadow-read comparison (artifact identity v3).
+    Will be removed after Phase 3 cutover is complete.
+
     Returns None if both paths return identical note ID sets.
     Returns a dict with drift details if they differ — caller should log
     and halt Phase 3 cutover until resolved.

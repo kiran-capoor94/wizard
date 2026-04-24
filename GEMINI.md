@@ -60,7 +60,7 @@ src/wizard/
     analytics.py             # Session/note/task analytics
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
   skills.py                  # Skill loader (reads ~/.wizard/skills/ at startup)
-  tools/                     # MCP tools package (split by domain: session, task, triage, meeting, query)
+  tools/                     # MCP tools package (split by domain: session, task, mode, triage, meeting, query)
   repositories/              # Query layer (package: task, note, meeting, session, task_state)
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
@@ -69,14 +69,13 @@ src/wizard/
   synthesis.py               # Synthesiser (auto-capture — ordered backend failover)
   llm_adapters.py            # OllamaAdapter + LiteLLM completion wrapper, probe_backend_health, JSON parsing
   mid_session.py             # Background mid-session synthesis state
-  toon.py                    # TOON encoder — compact tabular format for bulk task delivery
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   services.py                # SessionCloser — auto-closes abandoned sessions
   security.py                # SecurityService — regex PII scrubbing with allowlist
-  config.py                  # Pydantic Settings + BackendConfig + JsonConfigSettingsSource
+  config.py                  # Pydantic Settings + BackendConfig + ModesSettings + JsonConfigSettingsSource
   database.py                # SQLite session factory (SQLModel engine) + run_migrations()
-  deps.py                    # FastMCP Depends() provider functions
+  deps.py                    # FastMCP Depends() provider functions (incl. get_skill_roots)
   exceptions.py              # ConfigurationError
   agent_registration.py      # Write MCP + hook config into agent files; refresh_hooks()
   alembic/                   # DB migrations — bundled in package for `wizard update`
@@ -126,6 +125,12 @@ Wizard tracks three layers: Agent session (UUID), Wizard session (Integer PK), a
 - **SessionStart hook** fires with 80% probability gate.
 - Refreshes `~/.claude/settings.json` with themed announcements, spinner verbs, and tips.
 - Always auto-injects `wizard:session_start` tool call.
+
+### Working Modes
+- `get_modes` lists available modes and the active mode for the current session.
+- `set_mode` activates a skill-backed persona (e.g. `architect`, `brainstorm`, `product-owner`) or clears it.
+- Active mode is stored per-session on `WizardSession.active_mode` and returned by `session_start`.
+- Allowed modes are configured in `~/.wizard/config.json` under `modes.allowed`.
 
 ### Work Triage
 - `what_should_i_work_on` scores tasks based on priority, recency, momentum, and simplicity.

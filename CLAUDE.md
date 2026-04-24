@@ -82,10 +82,11 @@ src/wizard/
   tools/                       # MCP tools package (split by domain)
     __init__.py                # Re-exports all tool functions
     session_tools.py           # session_start, session_end, resume_session
+    session_helpers.py         # build_prior_summaries, find_previous_session_id, mid-session synthesis loop
     task_tools.py              # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
-    task_fields.py             # apply_task_fields — task field mutation helper
+    task_fields.py             # apply_task_fields + elicitation helpers (mental model, done confirm, duplicate check)
     formatting.py              # task_contexts_to_json — session response serialisation
-    session_helpers.py         # shared session helpers (elicitation, progress utilities)
+    mode_tools.py              # get_modes, set_mode — working mode activation
     triage_tools.py            # what_should_i_work_on (mode-based scoring + LLM reasons)
     meeting_tools.py           # get_meeting, save_meeting_summary, ingest_meeting
     query_tools.py             # get_tasks, get_task, get_sessions, get_session (paginated, no session required)
@@ -107,9 +108,9 @@ src/wizard/
   schemas.py                 # Pydantic response types for all MCP tools
   services.py                # SessionCloser — auto-closes abandoned sessions
   security.py                # SecurityService — regex PII scrubbing with allowlist
-  config.py                  # Pydantic Settings + BackendConfig + JsonConfigSettingsSource
+  config.py                  # Pydantic Settings + BackendConfig + ModesSettings + JsonConfigSettingsSource
   database.py                # SQLite session factory (SQLModel engine)
-  deps.py                    # FastMCP Depends() provider functions
+  deps.py                    # FastMCP Depends() provider functions (incl. get_skill_roots)
   exceptions.py              # ConfigurationError
   agent_registration.py      # Write MCP + hook config into agent JSON/TOML files; refresh_hooks()
   alembic/                   # DB migrations — bundled in package for `wizard update`
@@ -164,6 +165,10 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
         "description": "Cloud fallback"
       }
     ]
+  },
+  "modes": {
+    "default": null,
+    "allowed": ["architect", "brainstorm", "product-owner"]
   }
 }
 ```
@@ -181,7 +186,7 @@ Six SQLite tables via SQLModel:
 | `task`          | Tasks synced from Jira/Notion + local creates. Has `artifact_id` UUID.                                                                                     |
 | `note`          | Notes (investigation/decision/docs/learnings/session_summary). Has `artifact_id`, `artifact_type`, `status`, `supersedes_note_id`, `synthesis_confidence`. |
 | `meeting`       | Meetings ingested from Krisp or Notion. Has `artifact_id` UUID.                                                                                            |
-| `wizardsession` | Session records with serialised SessionState. Has `artifact_id`, `synthesis_status` (`pending`\|`complete`\|`partial_failure`).                  |
+| `wizardsession` | Session records with serialised SessionState. Has `artifact_id`, `synthesis_status` (`pending`\|`complete`\|`partial_failure`).                            |
 | `toolcall`      | Append-only telemetry (tool name + timestamp per session)                                                                                                  |
 | `task_state`    | Derived signals (1:1 with task): note counts, stale_days, last_touched                                                                                     |
 
@@ -205,6 +210,8 @@ get_task_repo()            → TaskRepository
 get_meeting_repo()         → MeetingRepository
 get_note_repo()            → NoteRepository
 get_task_state_repo()      → TaskStateRepository
+get_session_repo()         → SessionRepository
+get_skill_roots()          → list[Path]   # skill search roots for mode tools
 ```
 
 Tools and resources declare deps as typed default params:
@@ -420,7 +427,7 @@ SQLite error or missing config file never blocks the session boot injection.
 
 | Tool                    | Key inputs                                                                                      | Key outputs                                                                                                                                |
 | ----------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `session_start`         | agent_session_id?                                                                               | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions |
+| `session_start`         | agent_session_id?                                                                               | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions, active_mode, available_modes |
 | `session_end`           | session_id, summary, intent, working_set, state_delta, open_loops, next_actions, closure_status | note_id, session_state_saved                                                                                                               |
 | `resume_session`        | session_id?                                                                                     | session_id, resumed_from, session_state, working_set_tasks, prior_notes                                                                    |
 | `task_start`            | task_id                                                                                         | task, notes_by_type, prior_notes, latest_mental_model, compounding                                                                         |
@@ -430,6 +437,8 @@ SQLite error or missing config file never blocks the session boot injection.
 | `save_note`             | task_id, note_type, content, mental_model?                                                      | note_id, mental_model_saved                                                                                                                |
 | `what_am_i_missing`     | task_id                                                                                         | list of Signal(type, severity, message)                                                                                                    |
 | `what_should_i_work_on` | session_id, mode, time_budget?                                                                  | recommended_task, alternatives, skipped_blocked                                                                                            |
+| `get_modes`             | session_id?                                                                                     | available_modes, active_mode                                                                                                               |
+| `set_mode`              | session_id, mode_name                                                                           | active_mode, description, instruction                                                                                                      |
 | `get_meeting`           | meeting_id                                                                                      | title, content, open_tasks, already_summarised                                                                                             |
 | `save_meeting_summary`  | meeting_id, summary, task_ids?                                                                  | note_id, tasks_linked                                                                                                                      |
 | `ingest_meeting`        | title, content, source_url?, category?                                                          | meeting_id, already_existed                                                                                                                |
@@ -490,4 +499,4 @@ Structural split triggers:
 
 Install: `ln -sf ../../scripts/pre-commit .git/hooks/pre-commit`
 
-**Near-cap files:** `tools/task_tools.py` (~481 lines) and `tools/session_tools.py` (~390 lines) are approaching the cap. The next significant addition to either may require splitting.
+**Near-cap files:** `tools/session_tools.py` (~390 lines) is approaching the cap. `tools/task_tools.py` was split — elicitation helpers moved to `task_fields.py` (now ~469 lines).

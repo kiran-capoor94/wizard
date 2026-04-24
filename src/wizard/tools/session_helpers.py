@@ -9,14 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from pydantic import ValidationError
-from sqlmodel import Session, col, select
+from sqlmodel import Session
 
 from ..config import settings
 from ..database import get_session
 from ..models import WizardSession
-from ..repositories import NoteRepository, TaskRepository
-from ..schemas import PriorSessionSummary, SessionState
+from ..repositories import NoteRepository, SessionRepository, TaskRepository
+from ..schemas import PriorSessionSummary
 from ..security import SecurityService
 from ..synthesis import Synthesiser
 from ..transcript import TranscriptReader, find_transcript, read_new_lines
@@ -43,7 +42,7 @@ def build_wizard_context() -> dict | None:
     return None
 
 
-def make_synthesiser() -> Synthesiser:
+def _make_synthesiser() -> Synthesiser:
     """Construct a fully-wired Synthesiser for background mid-session synthesis."""
     security = SecurityService(
         allowlist=settings.scrubbing.allowlist,
@@ -87,7 +86,7 @@ async def mid_session_synthesis_loop(
     since this runs outside any request context. On failure, logs and retries
     next poll; SessionEnd synthesis is the guaranteed full-synthesis path.
     """
-    synthesiser = make_synthesiser()
+    synthesiser = _make_synthesiser()
     processed = 0
     while True:
         await asyncio.sleep(interval_seconds)
@@ -113,44 +112,10 @@ def build_prior_summaries(
     db: Session, current_session_id: int
 ) -> list[PriorSessionSummary]:
     """Return the 3 most recent closed sessions with summaries for prior-context surfacing."""
-    prior_sessions = db.exec(
-        select(WizardSession)
-        .where(
-            WizardSession.summary != None,  # noqa: E711
-            WizardSession.id != current_session_id,
-        )
-        .order_by(col(WizardSession.created_at).desc())
-        .limit(3)
-    ).all()
-
-    result = []
-    for s in prior_sessions:
-        if s.id is None or s.summary is None:
-            continue
-        task_ids: list[int] = []
-        if s.session_state:
-            try:
-                state_obj = SessionState.model_validate_json(s.session_state)
-                task_ids = state_obj.working_set
-            except (ValueError, ValidationError) as e:
-                logger.warning("prior_summaries: bad session_state sid=%s: %s", s.id, e)
-        result.append(
-            PriorSessionSummary(
-                session_id=s.id,
-                summary=s.summary,
-                closed_at=s.updated_at,
-                task_ids=task_ids,
-            )
-        )
-    return result
+    return SessionRepository().get_prior_summaries(db, current_session_id)
 
 
 def find_previous_session_id() -> int | None:
     """Return the most recently created WizardSession id, or None if none exists."""
     with get_session() as db:
-        result = db.exec(
-            select(WizardSession.id)
-            .order_by(col(WizardSession.created_at).desc(), col(WizardSession.id).desc())
-            .limit(1)
-        ).first()
-        return result
+        return SessionRepository().get_most_recent_id(db)

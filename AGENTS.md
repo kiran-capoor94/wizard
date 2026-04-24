@@ -41,8 +41,11 @@ src/wizard/
   tools/                       # MCP tools package (split by domain)
     __init__.py                # Re-exports all tool functions
     session_tools.py           # session_start, session_end, resume_session
+    session_helpers.py         # build_prior_summaries, find_previous_session_id, mid-session synthesis loop
     task_tools.py              # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
-    task_helpers.py            # Shared helpers for task tools
+    task_fields.py             # apply_task_fields + elicitation helpers (mental model, done confirm, duplicate check)
+    formatting.py              # task_contexts_to_json — session response serialisation
+    mode_tools.py              # get_modes, set_mode — working mode activation
     triage_tools.py            # what_should_i_work_on (mode-based scoring + LLM reasons)
     meeting_tools.py           # get_meeting, save_meeting_summary, ingest_meeting
     query_tools.py             # get_tasks, get_task, get_sessions, get_session (paginated, no session required)
@@ -59,14 +62,13 @@ src/wizard/
   synthesis.py               # Synthesiser (auto-capture — ordered backend failover)
   llm_adapters.py            # OllamaAdapter + LiteLLM completion wrapper, probe_backend_health, JSON parsing
   mid_session.py             # Background mid-session synthesis state (MID_SESSION_TASKS dict)
-  toon.py                    # TOON encoder — compact tabular format for bulk task delivery
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
   services.py                # SessionCloser — auto-closes abandoned sessions
   security.py                # SecurityService — regex PII scrubbing with allowlist
-  config.py                  # Pydantic Settings + BackendConfig + JsonConfigSettingsSource
+  config.py                  # Pydantic Settings + BackendConfig + ModesSettings + JsonConfigSettingsSource
   database.py                # SQLite session factory (SQLModel engine)
-  deps.py                    # FastMCP Depends() provider functions
+  deps.py                    # FastMCP Depends() provider functions (incl. get_skill_roots)
   exceptions.py              # ConfigurationError
   agent_registration.py      # Write MCP + hook config into agent JSON/TOML files; refresh_hooks()
   alembic/                   # DB migrations — bundled in package for `wizard update`
@@ -365,7 +367,7 @@ SQLite error or missing config file never blocks the session boot injection.
 
 | Tool | Key inputs | Key outputs |
 |------|-----------|------------|
-| `session_start` | agent_session_id? | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions |
+| `session_start` | agent_session_id? | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions, active_mode, available_modes |
 | `session_end` | session_id, summary, intent, working_set, state_delta, open_loops, next_actions, closure_status | note_id, session_state_saved |
 | `resume_session` | session_id? | session_id, resumed_from, session_state, working_set_tasks, prior_notes |
 | `task_start` | task_id | task, notes_by_type, prior_notes, latest_mental_model, compounding |
@@ -375,6 +377,8 @@ SQLite error or missing config file never blocks the session boot injection.
 | `save_note` | task_id, note_type, content, mental_model? | note_id, mental_model_saved |
 | `what_am_i_missing` | task_id | list of Signal(type, severity, message) |
 | `what_should_i_work_on` | session_id, mode, time_budget? | recommended_task, alternatives, skipped_blocked |
+| `get_modes` | session_id? | available_modes, active_mode |
+| `set_mode` | session_id, mode_name | active_mode, description, instruction |
 | `get_meeting` | meeting_id | title, content, open_tasks, already_summarised |
 | `save_meeting_summary` | meeting_id, summary, task_ids? | note_id, tasks_linked |
 | `ingest_meeting` | title, content, source_url?, category? | meeting_id, already_existed |

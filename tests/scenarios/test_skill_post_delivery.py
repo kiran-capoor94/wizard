@@ -50,22 +50,18 @@ def test_install_skills_excludes_skill_post_md(tmp_path, monkeypatch):
     assert not (dest / "my-skill" / "SKILL-POST.md").exists(), "SKILL-POST.md must NOT be installed"
 
 
-async def test_session_start_skill_instructions_contains_post_call_content(mcp_client):
-    """session_start must inject SKILL-POST.md content, not full SKILL.md.
+async def test_session_start_does_not_inject_skill_instructions(mcp_client):
+    """session_start must not inject skill_instructions.
 
-    SKILL-POST.md starts with '# Session Start — Post-Call Guidance'.
-    The pre-call SKILL.md starts with '# Session Start' and contains the Role section.
-    After the split, skill_instructions must come from SKILL-POST.md.
+    The session-start SKILL.md is delivered by the SessionStart hook before the agent
+    calls session_start — not by the tool response itself. skill_instructions is
+    intentionally absent from SessionStartResponse.
     """
     r = await mcp_client.call_tool("session_start", {})
     assert not r.is_error, r
     d = r.structured_content
-    assert d["skill_instructions"] is not None
-    assert "Post-Call Guidance" in d["skill_instructions"], (
-        "skill_instructions must be from SKILL-POST.md, not the full SKILL.md"
-    )
-    assert "## Role" not in d["skill_instructions"], (
-        "Role section belongs in SKILL.md (pre-call), not in tool response"
+    assert d.get("skill_instructions") is None, (
+        "session_start must not inject skill_instructions — hook delivers the skill pre-call"
     )
 
 
