@@ -42,6 +42,13 @@ def _repair_json(s: str) -> str:
     return repaired
 
 
+def _coerce_note(n: dict) -> dict:
+    """Coerce LLM quirks before Pydantic validation. Mutates a copy."""
+    if isinstance(n.get("task_id"), list):
+        n["task_id"] = n["task_id"][0] if n["task_id"] else None
+    return n
+
+
 def _parse_notes(raw: str) -> list[SynthesisNote]:
     """Parse LLM output into SynthesisNotes with JSON repair fallback.
 
@@ -68,7 +75,7 @@ def _parse_notes(raw: str) -> list[SynthesisNote]:
                 parsed = json.loads(attempt)
                 if isinstance(parsed, dict):
                     parsed = [parsed]
-                return [SynthesisNote.model_validate(n) for n in parsed]
+                return [SynthesisNote.model_validate(_coerce_note(n)) for n in parsed]
             except Exception as e:
                 last_err = e
 
