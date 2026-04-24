@@ -171,8 +171,6 @@ async def what_should_i_work_on(
             ),
         )
 
-    await ctx.report_progress(1, 3)
-
     skipped_blocked = 0
     if mode != "unblock":
         skipped_blocked = sum(1 for t in all_workable if t.status.value == "blocked")
@@ -187,6 +185,7 @@ async def what_should_i_work_on(
         ),
     )
 
+    await ctx.report_progress(1, 3)
     shortlist = scored[:_MAX_SAMPLE_COUNT]
     await ctx.debug(f"Scored {len(tasks)} tasks; shortlisted {len(shortlist)} for sampling.")
     await ctx.report_progress(2, 3)

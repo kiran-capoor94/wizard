@@ -1,4 +1,4 @@
-"""Scenario: ctx elicitation across create_task, update_task, save_meeting_summary."""
+"""Scenario: ctx elicitation across create_task, update_task, save_meeting_summary, save_note."""
 
 from unittest.mock import patch
 
@@ -132,6 +132,80 @@ async def test_save_meeting_summary_no_elicit_without_task_ids(mcp_client):
         r = await mcp_client.call_tool("save_meeting_summary", {
             "meeting_id": meeting_id,
             "summary": "Nothing to note.",
+        })
+
+    assert not r.is_error, r
+    assert len(elicit_results) == 0
+
+
+async def test_save_note_elicits_mental_model_for_investigation(mcp_client, seed_task):
+    """save_note elicits a mental model prompt when note_type is investigation and none provided."""
+    task = await seed_task(name="Investigate caching issue")
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+
+    elicit_results = []
+
+    async def fake_elicit(self, message, **kwargs):
+        elicit_results.append(message)
+        return AcceptedElicitation(data="Redis TTL mismatch causes stale reads.")
+
+    with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
+        r = await mcp_client.call_tool("save_note", {
+            "task_id": task.id,
+            "note_type": "investigation",
+            "content": "Cache entries expire before the TTL we expect.",
+        })
+
+    assert not r.is_error, r
+    assert len(elicit_results) == 1
+    assert "mental model" in elicit_results[0].lower() or "summarise" in elicit_results[0].lower()
+
+
+async def test_save_note_no_elicit_when_mental_model_provided(mcp_client, seed_task):
+    """save_note does not elicit when mental_model is already supplied."""
+    task = await seed_task(name="Investigate DB latency")
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+
+    elicit_results = []
+
+    async def fake_elicit(self, message, **kwargs):
+        elicit_results.append(message)
+        return AcceptedElicitation(data="Some model.")
+
+    with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
+        r = await mcp_client.call_tool("save_note", {
+            "task_id": task.id,
+            "note_type": "investigation",
+            "content": "Slow queries in production.",
+            "mental_model": "Unindexed FK column causes full table scans.",
+        })
+
+    assert not r.is_error, r
+    assert len(elicit_results) == 0
+
+
+async def test_save_note_no_elicit_for_docs_type(mcp_client, seed_task):
+    """save_note does not elicit for note types other than investigation/decision."""
+    task = await seed_task(name="Document API endpoints")
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+
+    elicit_results = []
+
+    async def fake_elicit(self, message, **kwargs):
+        elicit_results.append(message)
+        return AcceptedElicitation(data="Some model.")
+
+    with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
+        r = await mcp_client.call_tool("save_note", {
+            "task_id": task.id,
+            "note_type": "docs",
+            "content": "API uses REST with JSON payloads.",
         })
 
     assert not r.is_error, r

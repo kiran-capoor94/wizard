@@ -113,11 +113,11 @@ async def session_start(
             (keyed_dir / "wizard_id").write_text(str(session.id))
 
         await ctx.info(f"Session {session.id} started (source={source}).")
-        await ctx.report_progress(1, 4)
 
         closed_sessions = await session_closer.close_recent_abandoned(
             db, ctx, session.id
         )
+        await ctx.report_progress(1, 4)
 
         try:
             ts_repo.refresh_stale_days(db)

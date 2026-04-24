@@ -5,7 +5,6 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
-from mcp.shared.exceptions import McpError
 
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
@@ -167,7 +166,7 @@ async def save_note(
                     )
                     if isinstance(result, AcceptedElicitation) and result.data:
                         mental_model = sec.scrub(result.data).clean
-                except (NotImplementedError, AttributeError, McpError) as e:
+                except Exception as e:
                     logger.debug("ctx.elicit unavailable for mental_model: %s", e)
             if len(content) > 100_000:
                 raise ToolError("Content exceeds 100k character limit")
@@ -294,8 +293,7 @@ async def create_task(
             existing = t_repo.upsert_by_source_id(
                 db, source_id, sec.scrub(name).clean, priority, source_url
             )
-            if existing:
-                assert existing.id is not None  # upsert_by_source_id returns a persisted row
+            if existing and existing.id is not None:
                 return CreateTaskResponse(task_id=existing.id, already_existed=True)
         else:
             name_lower = name.lower()
