@@ -45,7 +45,9 @@ def _repair_json(s: str) -> str:
 def _coerce_note(n: dict) -> dict:
     """Coerce LLM quirks before Pydantic validation. Mutates a copy."""
     if isinstance(n.get("task_id"), list):
-        n["task_id"] = n["task_id"][0] if n["task_id"] else None
+        # LLM returned multiple task IDs for one note — ambiguous, so drop the
+        # association entirely and let the note anchor to the session instead.
+        n["task_id"] = None
     return n
 
 

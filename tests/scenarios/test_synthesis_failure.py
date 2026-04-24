@@ -159,14 +159,14 @@ class TestSynthesisFailureHandling:
         assert ws.is_synthesised is True
 
 
-def test_parse_notes_coerces_task_id_list_to_first_element():
-    """LLM sometimes returns task_id as a list — _parse_notes must coerce to int."""
+def test_parse_notes_coerces_task_id_list_to_none():
+    """LLM returns task_id as a list (ambiguous multi-task note) — must drop to None."""
     raw = json.dumps([
         {"note_type": "decision", "content": "Updated tasks.", "task_id": [177, 178, 131]}
     ])
     notes = _parse_notes(raw)
     assert len(notes) == 1
-    assert notes[0].task_id == 177
+    assert notes[0].task_id is None
 
 
 def test_parse_notes_coerces_empty_task_id_list_to_none():
