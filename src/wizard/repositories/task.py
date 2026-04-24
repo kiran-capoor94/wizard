@@ -62,11 +62,34 @@ class TaskRepository:
     def get_by_source_id(self, db: Session, source_id: str) -> Task | None:
         return db.exec(select(Task).where(Task.source_id == source_id)).first()
 
+    def upsert_by_source_id(
+        self,
+        db: Session,
+        source_id: str,
+        name: str,
+        priority: TaskPriority,
+        source_url: str | None,
+    ) -> Task | None:
+        """Update existing task by source_id if found; return it, or None if not found.
+
+        Does not update done/archived tasks' name or priority.
+        """
+        existing = self.get_by_source_id(db, source_id)
+        if not existing:
+            return None
+        if existing.status not in (TaskStatus.DONE, TaskStatus.ARCHIVED):
+            existing.name = name
+            existing.priority = priority
+            if source_url and not existing.source_url:
+                existing.source_url = source_url
+            self.save(db, existing)
+        return existing
+
     def get_active_task_names(self, db: Session) -> list[str]:
         """Return names of all non-done, non-archived tasks."""
         rows = db.exec(
             select(Task.name).where(
-                Task.status.not_in([TaskStatus.DONE, TaskStatus.ARCHIVED])
+                col(Task.status).not_in([TaskStatus.DONE, TaskStatus.ARCHIVED])
             )
         ).all()
         return [r for r in rows if r is not None]

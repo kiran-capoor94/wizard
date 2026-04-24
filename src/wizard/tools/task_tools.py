@@ -254,52 +254,6 @@ async def update_task(
         raise
 
 
-def _dedup_by_source_id(
-    db, source_id: str, name: str, priority, source_url, sec, t_repo: TaskRepository
-) -> CreateTaskResponse | None:
-    """Return an existing-task response if source_id already exists, else None."""
-    existing = t_repo.get_by_source_id(db, source_id)
-    if not existing:
-        return None
-    existing_id = existing.id
-    if existing_id is None:
-        raise ToolError("Internal error: existing task has no id")
-    if existing.status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
-        return CreateTaskResponse(task_id=existing_id, already_existed=True)
-    existing.name = sec.scrub(name).clean
-    existing.priority = priority
-    if source_url and not existing.source_url:
-        existing.source_url = source_url
-    t_repo.save(db, existing)
-    return CreateTaskResponse(task_id=existing_id, already_existed=True)
-
-
-async def _elicit_name_duplicate(
-    ctx: Context, name: str, t_repo: TaskRepository, db
-) -> CreateTaskResponse | None:
-    """Elicit when an active task name is a substring match; returns response or None."""
-    name_lower = name.lower()
-    existing_names = t_repo.get_active_task_names(db)
-    matching = next(
-        (n for n in existing_names if name_lower in n.lower() or n.lower() in name_lower),
-        None,
-    )
-    if not matching:
-        return None
-    try:
-        result = await ctx.elicit(
-            f"A task named {matching!r} already exists. Create anyway?",
-            response_type=bool,
-        )
-        if isinstance(result, AcceptedElicitation) and result.data is False:
-            existing = t_repo.get_by_name(db, matching)
-            if existing and existing.id is not None:
-                return CreateTaskResponse(task_id=existing.id, already_existed=True)
-    except Exception as e:
-        logger.debug("ctx.elicit unavailable for duplicate check: %s", e)
-    return None
-
-
 async def create_task(
     ctx: Context,
     name: str,
@@ -322,13 +276,31 @@ async def create_task(
         raise ValueError(f"Invalid status {status!r}. Valid values: {sorted(_VALID_STATUSES)}")
     with get_session() as db:
         if source_id:
-            maybe = _dedup_by_source_id(db, source_id, name, priority, source_url, sec, t_repo)
-            if maybe is not None:
-                return maybe
+            existing = t_repo.upsert_by_source_id(
+                db, source_id, sec.scrub(name).clean, priority, source_url
+            )
+            if existing:
+                assert existing.id is not None  # upsert_by_source_id returns a persisted row
+                return CreateTaskResponse(task_id=existing.id, already_existed=True)
         else:
-            maybe = await _elicit_name_duplicate(ctx, name, t_repo, db)
-            if maybe is not None:
-                return maybe
+            name_lower = name.lower()
+            existing_names = t_repo.get_active_task_names(db)
+            matching = next(
+                (n for n in existing_names if name_lower in n.lower() or n.lower() in name_lower),
+                None,
+            )
+            if matching:
+                try:
+                    result = await ctx.elicit(
+                        f"A task named {matching!r} already exists. Create anyway?",
+                        response_type=bool,
+                    )
+                    if isinstance(result, AcceptedElicitation) and result.data is False:
+                        existing = t_repo.get_by_name(db, matching)
+                        if existing and existing.id is not None:
+                            return CreateTaskResponse(task_id=existing.id, already_existed=True)
+                except Exception as e:
+                    logger.debug("ctx.elicit unavailable for duplicate check: %s", e)
 
         clean_name = sec.scrub(name).clean
         task_status = TaskStatus(status)
