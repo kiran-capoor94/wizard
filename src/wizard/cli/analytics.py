@@ -73,11 +73,12 @@ def _format_health_messages(sessions: dict, notes: dict, tasks: dict) -> list[st
     if sessions.get("abandoned_rate", 0.0) > 0.5:
         messages.append("  Most sessions are abandoned — call session_end before closing")
     if sessions.get("synthesis_failures", 0) > 0:
-        n = sessions["synthesis_failures"]
-        messages.append(
-            f"  {n} session(s) had synthesis failures"
-            " — retry with wizard capture --close --session-id <id>"
-        )
+        ids = sessions.get("synthesis_failure_ids", [])
+        for sid in ids:
+            messages.append(
+                f"  Session {sid} had synthesis failure"
+                f" — retry with: wizard capture --close --session-id {sid}"
+            )
     # Default 2.0 is above the 1.5 threshold so missing data suppresses nudge.
     if tasks.get("worked", 0) > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5:
         messages.append("  Low note density — investigation and decision notes build compounding")
