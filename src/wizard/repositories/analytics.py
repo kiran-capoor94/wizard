@@ -48,9 +48,9 @@ class AnalyticsRepository:
         ).all()
         total_tool_calls = len(tool_calls)
 
-        synthesis_failures = sum(
-            1 for s in sessions if s.synthesis_status == "partial_failure"
-        )
+        synthesis_failure_ids = [
+            s.id for s in sessions if s.synthesis_status == "partial_failure" and s.id is not None
+        ]
         pending_synthesis = sum(
             1 for s in sessions if s.synthesis_status == "pending" and s.closed_by is not None
         )
@@ -61,7 +61,8 @@ class AnalyticsRepository:
             "total_tool_calls": total_tool_calls,
             "abandoned_count": abandoned_count,
             "abandoned_rate": abandoned_rate,
-            "synthesis_failures": synthesis_failures,
+            "synthesis_failures": len(synthesis_failure_ids),
+            "synthesis_failure_ids": synthesis_failure_ids,
             "pending_synthesis": pending_synthesis,
         }
 
