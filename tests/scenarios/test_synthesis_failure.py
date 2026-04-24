@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from wizard.llm_adapters import _parse_notes
 from wizard.models import Task, WizardSession
 from wizard.repositories.note import NoteRepository
 from wizard.schemas import SynthesisNote
@@ -156,3 +157,23 @@ class TestSynthesisFailureHandling:
         db_session.refresh(ws)
         assert ws.synthesis_status == "complete"
         assert ws.is_synthesised is True
+
+
+def test_parse_notes_coerces_task_id_list_to_first_element():
+    """LLM sometimes returns task_id as a list — _parse_notes must coerce to int."""
+    raw = json.dumps([
+        {"note_type": "decision", "content": "Updated tasks.", "task_id": [177, 178, 131]}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].task_id == 177
+
+
+def test_parse_notes_coerces_empty_task_id_list_to_none():
+    """LLM returns task_id as empty list — _parse_notes must coerce to None."""
+    raw = json.dumps([
+        {"note_type": "investigation", "content": "Some finding.", "task_id": []}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].task_id is None
