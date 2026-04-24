@@ -23,6 +23,10 @@ You are **resuming or beginning an investigation**. Your job: ground yourself in
 
 ## Steps
 
-### Step 1 — Call `task_start`
+### Step 1 — Fetch Wizard Tool Schemas (if not already loaded)
+
+If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__task_start,mcp__wizard__what_am_i_missing,mcp__wizard__save_note,mcp__wizard__rewind_task,mcp__wizard__update_task"` before proceeding. Skip this step if you already have the schemas from session-start.
+
+### Step 2 — Call `task_start`
 
 Call `task_start` with the `task_id` from the triage table.
