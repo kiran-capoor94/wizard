@@ -171,6 +171,8 @@ async def what_should_i_work_on(
             ),
         )
 
+    await ctx.report_progress(1, 3)
+
     skipped_blocked = 0
     if mode != "unblock":
         skipped_blocked = sum(1 for t in all_workable if t.status.value == "blocked")
@@ -186,6 +188,8 @@ async def what_should_i_work_on(
     )
 
     shortlist = scored[:_MAX_SAMPLE_COUNT]
+    await ctx.debug(f"Scored {len(tasks)} tasks; shortlisted {len(shortlist)} for sampling.")
+    await ctx.report_progress(2, 3)
 
     # Build recommendations with LLM-sampled reasons
     recs: list[TaskRecommendation] = []
@@ -204,6 +208,7 @@ async def what_should_i_work_on(
             )
         )
 
+    await ctx.report_progress(3, 3)
     skill_content = load_skill(SKILL_TRIAGE)
     if skill_content:
         await ctx.info(f"[wizard skill]\n{skill_content}")
