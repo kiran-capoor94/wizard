@@ -153,9 +153,9 @@ async def ingest_meeting(
     """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
     logger.info("ingest_meeting source_id=%s", source_id)
     with get_session() as db:
-        await ctx.report_progress(1, 2)
         clean_title = sec.scrub(title).clean
         clean_content = sec.scrub(content).clean
+        await ctx.report_progress(1, 2)
 
         meeting: Meeting | None = None
         already_existed = False
