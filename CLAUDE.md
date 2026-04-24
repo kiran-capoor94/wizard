@@ -2,7 +2,7 @@
 
 ## Coding Principles
 
-Ten rules that keep the codebase maintainable for a solo engineer:
+Eleven rules that keep the codebase maintainable for a solo engineer:
 
 1. **SLAP (Single Layer of Abstraction)** — each function operates at one
    level. Tool functions orchestrate; they don't build SQL or format API
@@ -85,6 +85,7 @@ src/wizard/
     task_tools.py              # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
     task_fields.py             # apply_task_fields — task field mutation helper
     formatting.py              # task_contexts_to_json — session response serialisation
+    session_helpers.py         # shared session helpers (elicitation, progress utilities)
     triage_tools.py            # what_should_i_work_on (mode-based scoring + LLM reasons)
     meeting_tools.py           # get_meeting, save_meeting_summary, ingest_meeting
     query_tools.py             # get_tasks, get_task, get_sessions, get_session (paginated, no session required)
@@ -94,6 +95,7 @@ src/wizard/
     meeting.py               # MeetingRepository
     session.py               # SessionRepository
     task_state.py            # TaskStateRepository
+    analytics.py             # AnalyticsRepository — session/note/task usage stats
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
@@ -117,7 +119,10 @@ hooks/                       # Hook scripts source (also bundled as src/wizard/h
   session-end.sh             # Claude Code SessionEnd hook — calls `wizard capture --close` to synthesise transcript
   session-start.sh           # Claude Code SessionStart hook — personalization refresh (80%) + session boot injection
 alembic/                     # DB migration scripts (dev use; bundled copy lives in src/wizard/alembic/)
-tests/                       # pytest suite
+tests/
+  scenarios/                 # ALL tests live here — scenario/behaviour tests only (no unit tests)
+  conftest.py                # shared fixtures
+  fakes.py                   # in-memory fakes for repositories
 ```
 
 ## Configuration Schema
@@ -485,4 +490,4 @@ Structural split triggers:
 
 Install: `ln -sf ../../scripts/pre-commit .git/hooks/pre-commit`
 
-**Near-cap files:** `cli/configure.py` (~307 lines) and `cli/analytics.py` (~348 lines) are approaching the cap. The next significant addition to either may require splitting.
+**Near-cap files:** `tools/task_tools.py` (~481 lines) and `tools/session_tools.py` (~390 lines) are approaching the cap. The next significant addition to either may require splitting.

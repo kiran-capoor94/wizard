@@ -84,7 +84,7 @@ class Synthesiser:
             "api_key": synthesis_settings.api_key or None,
         }
 
-    def _write_failure_marker(
+    def write_failure_marker(
         self, db: Session, wizard_session: WizardSession, chunk_description: str
     ) -> None:
         """Write a recoverable investigation note when synthesis fails after retry."""
@@ -137,7 +137,7 @@ class Synthesiser:
                     wizard_session.id,
                     exc,
                 )
-                self._write_failure_marker(
+                self.write_failure_marker(
                     db,
                     wizard_session,
                     f"Transcript: {transcript_path.name}.",
@@ -397,8 +397,8 @@ class Synthesiser:
     ) -> list[int]:
         """Rebuild TaskState for every task that received notes in this session.
 
-        Batch-loads all notes for the affected tasks in a single query to avoid
-        N+1 round-trips (one query per task in the naive implementation).
+        Fetches the affected task IDs in one query, then calls on_note_saved per
+        task (2 queries each: Task lookup + notes for that task). 2N queries total.
         """
         if wizard_session.id is None:
             return []

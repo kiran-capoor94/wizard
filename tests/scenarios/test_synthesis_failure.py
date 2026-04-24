@@ -27,8 +27,18 @@ def synthesiser(security, note_repo):
     )
 
 
+def _write_jsonl(lines: list[dict]) -> str:
+    """Write a temporary JSONL transcript file and return its path."""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+    ) as f:
+        for line in lines:
+            f.write(json.dumps(line) + "\n")
+        return f.name
+
+
 class TestSynthesisSaveNotesArtifactId:
-    """Test that _save_notes correctly populates artifact_id on written notes."""
+    """Test that synthesise_path correctly populates artifact_id on written notes."""
 
     def test_note_anchored_to_task_when_task_id_set(self, db_session, synthesiser):
         task = Task(name="synthesis target")
@@ -38,10 +48,16 @@ class TestSynthesisSaveNotesArtifactId:
         db_session.add(ws)
         db_session.flush()
 
-        notes_data = [SynthesisNote(task_id=task.id, note_type="investigation", content="finding")]
-        synthesiser._save_notes(db_session, notes_data, ws, valid_task_ids={task.id})
+        tmp = _write_jsonl([{"type": "user", "content": "hello"}])
+        try:
+            llm_response = [SynthesisNote(task_id=task.id, note_type="investigation", content="finding")]
+            with patch("wizard.synthesis.llm_complete", return_value=llm_response):
+                synthesiser.synthesise_path(db_session, ws, Path(tmp), terminal=True)
+        finally:
+            os.unlink(tmp)
 
         repo = NoteRepository()
+        assert task.artifact_id is not None
         saved = repo.get_notes_by_artifact_id(db_session, task.artifact_id)
         assert len(saved) == 1
         assert saved[0].artifact_id == task.artifact_id
@@ -53,10 +69,16 @@ class TestSynthesisSaveNotesArtifactId:
         db_session.add(ws)
         db_session.flush()
 
-        notes_data = [SynthesisNote(task_id=None, note_type="learnings", content="session-only finding")]
-        synthesiser._save_notes(db_session, notes_data, ws, valid_task_ids=set())
+        tmp = _write_jsonl([{"type": "user", "content": "hello"}])
+        try:
+            llm_response = [SynthesisNote(task_id=None, note_type="learnings", content="session-only finding")]
+            with patch("wizard.synthesis.llm_complete", return_value=llm_response):
+                synthesiser.synthesise_path(db_session, ws, Path(tmp), terminal=True)
+        finally:
+            os.unlink(tmp)
 
         repo = NoteRepository()
+        assert ws.artifact_id is not None
         saved = repo.get_notes_by_artifact_id(db_session, ws.artifact_id)
         assert len(saved) == 1
         assert saved[0].artifact_id == ws.artifact_id
@@ -64,19 +86,22 @@ class TestSynthesisSaveNotesArtifactId:
         assert saved[0].task_id is None
 
     def test_note_anchored_to_session_when_task_id_not_in_valid_set(self, db_session, synthesiser):
-        """task_id rejected by valid_task_ids filter -> falls back to session anchor."""
-        task = Task(name="foreign task")
-        db_session.add(task)
-        db_session.flush()
+        """task_id not in open tasks -> falls back to session anchor."""
         ws = WizardSession(agent="claude-code")
         db_session.add(ws)
         db_session.flush()
 
-        notes_data = [SynthesisNote(task_id=task.id, note_type="decision", content="stray note")]
-        # task.id not in valid_task_ids — should be rejected
-        synthesiser._save_notes(db_session, notes_data, ws, valid_task_ids=set())
+        tmp = _write_jsonl([{"type": "user", "content": "hello"}])
+        try:
+            # LLM returns a task_id that isn't in the open-tasks table (hallucination)
+            llm_response = [SynthesisNote(task_id=9999, note_type="decision", content="stray note")]
+            with patch("wizard.synthesis.llm_complete", return_value=llm_response):
+                synthesiser.synthesise_path(db_session, ws, Path(tmp), terminal=True)
+        finally:
+            os.unlink(tmp)
 
         repo = NoteRepository()
+        assert ws.artifact_id is not None
         saved = repo.get_notes_by_artifact_id(db_session, ws.artifact_id)
         assert len(saved) == 1
         assert saved[0].artifact_type == "session"

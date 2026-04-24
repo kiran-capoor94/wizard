@@ -172,7 +172,7 @@ def _persist_results(
         with get_db_session() as db:
             session = db.get(WizardSession, session_db_id)
             if session:
-                synthesiser._write_failure_marker(
+                synthesiser.write_failure_marker(
                     db, session, "LLM synthesis failed during wizard capture."
                 )
                 session.synthesis_status = "partial_failure"

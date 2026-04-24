@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import sentry_sdk
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger import json as jsonlogger
 from sentry_sdk.integrations.litellm import LiteLLMIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.mcp import MCPIntegration

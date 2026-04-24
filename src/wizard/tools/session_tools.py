@@ -45,7 +45,6 @@ from ..services import SessionCloser
 from ..skills import (
     SKILL_SESSION_END,
     SKILL_SESSION_RESUME,
-    SKILL_SESSION_START,
     load_skill_post,
 )
 from .formatting import task_contexts_to_json
@@ -143,7 +142,6 @@ async def session_start(
             blocked_tasks=task_contexts_to_json(blocked_list),
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             wizard_context=build_wizard_context(),
-            skill_instructions=load_skill_post(SKILL_SESSION_START),
             closed_sessions=closed_sessions,
             prior_summaries=prior_summaries,
         )
