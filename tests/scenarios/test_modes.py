@@ -266,3 +266,83 @@ def test_resume_session_response_has_active_mode():
         active_mode="socratic-mentor",
     )
     assert r.active_mode == "socratic-mentor"
+
+
+# New mode skill loading tests
+
+
+def test_build_available_modes_loads_architect(tmp_path):
+    """build_available_modes returns correct ModeInfo for architect skill."""
+    skill_dir = tmp_path / "architect"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: architect\ndescription: Principal-level systems thinker. Challenges scope before solutions, holds the whole system in mind, and ensures decisions are recorded not just made.\n---\n# Content"
+    )
+
+    modes = ModesSettings(allowed=["architect"])
+    result = build_available_modes(modes, roots=[tmp_path])
+    assert len(result) == 1
+    assert result[0].name == "architect"
+    assert result[0].description == "Principal-level systems thinker. Challenges scope before solutions, holds the whole system in mind, and ensures decisions are recorded not just made."
+
+
+def test_build_available_modes_loads_brainstorm(tmp_path):
+    """build_available_modes returns correct ModeInfo for brainstorm skill."""
+    skill_dir = tmp_path / "brainstorm"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: brainstorm\ndescription: Creative thinking partner. Diverges hard before converging, challenges assumptions, ends with one concrete next action.\n---\n# Content"
+    )
+
+    modes = ModesSettings(allowed=["brainstorm"])
+    result = build_available_modes(modes, roots=[tmp_path])
+    assert len(result) == 1
+    assert result[0].name == "brainstorm"
+    assert result[0].description == "Creative thinking partner. Diverges hard before converging, challenges assumptions, ends with one concrete next action."
+
+
+def test_build_available_modes_loads_product_owner(tmp_path):
+    """build_available_modes returns correct ModeInfo for product-owner skill."""
+    skill_dir = tmp_path / "product-owner"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: product-owner\ndescription: Ruthless advocate for user value. Cuts technical vanity, always asks who benefits and how we know.\n---\n# Content"
+    )
+
+    modes = ModesSettings(allowed=["product-owner"])
+    result = build_available_modes(modes, roots=[tmp_path])
+    assert len(result) == 1
+    assert result[0].name == "product-owner"
+    assert result[0].description == "Ruthless advocate for user value. Cuts technical vanity, always asks who benefits and how we know."
+
+
+def test_build_available_modes_loads_all_three_new_modes(tmp_path):
+    """All three new modes are returned together when all are in allowed list."""
+    for name, description in [
+        (
+            "architect",
+            "Principal-level systems thinker. Challenges scope before solutions, holds the whole system in mind, and ensures decisions are recorded not just made.",
+        ),
+        (
+            "brainstorm",
+            "Creative thinking partner. Diverges hard before converging, challenges assumptions, ends with one concrete next action.",
+        ),
+        (
+            "product-owner",
+            "Ruthless advocate for user value. Cuts technical vanity, always asks who benefits and how we know.",
+        ),
+    ]:
+        skill_dir = tmp_path / name
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {description}\n---\n# Content"
+        )
+
+    modes = ModesSettings(allowed=["architect", "brainstorm", "product-owner"])
+    result = build_available_modes(modes, roots=[tmp_path])
+
+    assert len(result) == 3
+    names = [r.name for r in result]
+    assert "architect" in names
+    assert "brainstorm" in names
+    assert "product-owner" in names
