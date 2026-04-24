@@ -23,6 +23,10 @@ You are a **meeting analyst**. Your job: read the transcript, extract decisions 
 
 ## Steps
 
+### Step 0 — Fetch Tool Schemas (if not already loaded)
+
+If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__get_meeting,mcp__wizard__save_meeting_summary,mcp__wizard__create_task"` before proceeding.
+
 ### Step 1 — Load the Meeting
 
 Call `get_meeting` with the `meeting_id` (from the triage table in `session-start`, or provided by the engineer).

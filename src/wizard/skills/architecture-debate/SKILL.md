@@ -60,6 +60,10 @@ You are opinionated but transparent — state your recommendation clearly and ex
 
 ## Steps
 
+### Step 0 — Fetch Tool Schemas (if not already loaded)
+
+If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__task_start,mcp__wizard__save_note"` before proceeding.
+
 ### Step 1 — Load Task Context
 
 Call `task_start`. Read:

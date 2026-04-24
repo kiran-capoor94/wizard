@@ -49,12 +49,12 @@ For each open task, call `wizard:create_task`:
 
 `wizard:create_task` deduplicates by `source_id` — safe to call every session.
 
-### Step 1 — Build Tool Registry
+### Step 1 — Build Tool Registry and Fetch Wizard Schemas
 
 Before calling any tool:
 
-- **List wizard tools first**: session lifecycle (`session_start`, `session_end`, `resume_session`), tasks (`task_start`, `create_task`, `update_task`, `rewind_task`, `what_am_i_missing`), notes (`save_note`), meetings (`get_meeting`, `save_meeting_summary`, `ingest_meeting`)
-- **Then list all other MCP servers** grouped by provider, noting what each does and when to prefer it over internal knowledge
+- **Fetch all wizard tool schemas** by calling `ToolSearch` with `"select:mcp__wizard__session_start,mcp__wizard__session_end,mcp__wizard__task_start,mcp__wizard__save_note,mcp__wizard__create_task,mcp__wizard__update_task,mcp__wizard__get_tasks,mcp__wizard__get_task,mcp__wizard__resume_session,mcp__wizard__rewind_task,mcp__wizard__what_am_i_missing,mcp__wizard__get_meeting,mcp__wizard__save_meeting_summary,mcp__wizard__ingest_meeting,mcp__wizard__get_sessions,mcp__wizard__get_session,mcp__wizard__what_should_i_work_on,mcp__wizard__get_modes,mcp__wizard__set_mode"`. This pre-fetches all schemas so tools are callable throughout the session without additional ToolSearch calls.
+- **List all other MCP servers** grouped by provider, noting what each does and when to prefer it over internal knowledge
 - **Hold this registry in context** — reference it every time you would otherwise answer from memory
 
 > **Hard rule:** Before answering any question about a library, API, or this codebase — stop and use a tool. Internal knowledge is the last resort, not the first.

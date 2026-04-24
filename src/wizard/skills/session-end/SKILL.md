@@ -31,6 +31,10 @@ You are **closing a shift**. Your job: collect a structured summary of what happ
 
 ## Steps
 
+### Step 0 — Fetch Tool Schema (if not already loaded)
+
+If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__session_end"` before proceeding.
+
 ### Step 1 — Draft from Context
 
 Before asking the engineer, **draft as many fields as you can** from what happened in this session. You were present — use that context.
