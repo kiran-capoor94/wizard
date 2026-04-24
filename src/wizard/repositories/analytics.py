@@ -3,7 +3,7 @@
 import datetime
 import logging
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from ..models import Note, NoteType, TaskState, ToolCall, WizardSession
 
@@ -177,16 +177,19 @@ class AnalyticsRepository:
         # Index sessions by id for O(1) lookup.
         session_map = {s.id: s for s in sessions_in_window}
 
+        # Single query: earliest note ever written. If any note predates a session's
+        # start, prior context existed for that task_start — same answer for every
+        # session after the first note, so there is no need to query per iteration.
+        earliest_note_at = db.exec(
+            select(Note.created_at).order_by(col(Note.created_at).asc()).limit(1)
+        ).first()
+
         compounding_count = 0
         for tc in task_start_calls:
             session = session_map.get(tc.session_id)
             if session is None:
                 continue
-            # Prior context exists if any note predates this session's start.
-            prior = db.exec(
-                select(Note).where(Note.created_at < session.created_at)
-            ).first()
-            if prior is not None:
+            if earliest_note_at is not None and earliest_note_at < session.created_at:
                 compounding_count += 1
 
         return round(compounding_count / len(task_start_calls), 2)

@@ -1,5 +1,11 @@
 """Scenario: task matching assigns task_id to synthesised notes."""
 
+import json
+import os
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
 from sqlmodel import select
 
 from wizard.config import settings
@@ -20,6 +26,15 @@ def _make_synthesiser(note_repo, security, task_repo=None):
     )
 
 
+def _write_jsonl(lines: list[dict]) -> str:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+    ) as f:
+        for line in lines:
+            f.write(json.dumps(line) + "\n")
+        return f.name
+
+
 def test_synthesise_assigns_task_id_to_matching_note(db_session, task_repo, note_repo, security):
     task = Task(name="Fix auth bug")
     db_session.add(task)
@@ -33,8 +48,14 @@ def test_synthesise_assigns_task_id_to_matching_note(db_session, task_repo, note
 
     assert task.id is not None
     synthesiser = _make_synthesiser(note_repo, security, task_repo)
-    notes = [SynthesisNote(task_id=task.id, note_type="investigation", content="Fixed auth bug")]
-    synthesiser._save_notes(db_session, notes, wizard_session, valid_task_ids={task.id})
+    llm_response = [SynthesisNote(task_id=task.id, note_type="investigation", content="Fixed auth bug")]
+
+    tmp = _write_jsonl([{"type": "user", "content": "Fixed auth bug"}])
+    try:
+        with patch("wizard.synthesis.llm_complete", return_value=llm_response):
+            synthesiser.synthesise_path(db_session, wizard_session, Path(tmp), terminal=True)
+    finally:
+        os.unlink(tmp)
 
     saved = list(
         db_session.execute(
@@ -46,7 +67,7 @@ def test_synthesise_assigns_task_id_to_matching_note(db_session, task_repo, note
 
 
 def test_synthesise_rejects_hallucinated_task_id(db_session, task_repo, note_repo, security):
-    # A real task in the DB, so valid_task_ids is non-empty
+    # A real task in the DB so the open-tasks table is non-empty
     real_task = Task(name="Real task")
     db_session.add(real_task)
     db_session.flush()
@@ -57,12 +78,16 @@ def test_synthesise_rejects_hallucinated_task_id(db_session, task_repo, note_rep
     db_session.flush()
     db_session.refresh(wizard_session)
 
-    assert real_task.id is not None
-    real_task_id: int = real_task.id
     synthesiser = _make_synthesiser(note_repo, security, task_repo)
-    notes = [SynthesisNote(task_id=9999, note_type="investigation", content="Work done")]
-    # valid_task_ids does not include 9999 — simulates an LLM hallucination
-    synthesiser._save_notes(db_session, notes, wizard_session, valid_task_ids={real_task_id})
+    # LLM returns task_id=9999 which is not in open tasks — hallucination
+    llm_response = [SynthesisNote(task_id=9999, note_type="investigation", content="Work done")]
+
+    tmp = _write_jsonl([{"type": "user", "content": "Work done"}])
+    try:
+        with patch("wizard.synthesis.llm_complete", return_value=llm_response):
+            synthesiser.synthesise_path(db_session, wizard_session, Path(tmp), terminal=True)
+    finally:
+        os.unlink(tmp)
 
     saved = list(
         db_session.execute(
