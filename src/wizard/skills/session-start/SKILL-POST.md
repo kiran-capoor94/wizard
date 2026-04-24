@@ -4,9 +4,9 @@
 
 **`SessionStartResponse`** key fields:
 - `session_id: int` — hold for all subsequent tool calls this session
-- `open_tasks: str` — TOON-encoded array of up to 20 open/in-progress tasks by priority + recency. Format: `open_tasks[N]{id,name,status,priority,category,due_date,stale_days,note_count,decision_count,last_note_type,last_note_preview (truncated to 80 chars),source_url}:` followed by one CSV row per task. Empty marker `open_tasks[0]` when none.
+- `open_tasks: str` — JSON array of up to 20 open/in-progress tasks by priority + recency. Each object: `{id, name, status, priority, category, due_date, stale_days, note_count, decision_count, last_note_type, last_note_preview, source_url}`. Empty array `[]` when none.
 - `open_tasks_total: int` — total open task count (may exceed 20)
-- `blocked_tasks: str` — TOON-encoded array of blocked tasks, same column schema as `open_tasks`.
+- `blocked_tasks: str` — JSON array of blocked tasks, same object schema as `open_tasks`.
 - `unsummarised_meetings: list[MeetingContext]`
 - `wizard_context: dict | None` — knowledge store addresses (`tasks_db_id`, `meetings_db_id`, `daily_parent_id` for Notion; `vault_path`, `daily_notes_folder`, `tasks_folder` for Obsidian)
 - `closed_sessions: list[ClosedSessionSummary]` — sessions auto-closed this run (≤3, recent only)

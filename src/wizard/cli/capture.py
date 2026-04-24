@@ -105,7 +105,105 @@ def _collect_transcripts(session: WizardSession) -> list[Path]:
     return [main_path]
 
 
-def capture(  # noqa: C901
+def _resolve_transcripts(
+    session: WizardSession,
+) -> tuple[list[Path], Path | None]:
+    """Return (transcript_paths, tmp_raw_path).
+
+    Falls back to a temp file written from session.transcript_raw if the
+    original file(s) are gone. tmp_raw_path is non-None only when a temp file
+    was created — caller must delete it after synthesis.
+    """
+    transcripts = _collect_transcripts(session)
+    tmp_raw_path: Path | None = None
+    if not transcripts and session.transcript_raw:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(session.transcript_raw)
+            tmp_raw_path = Path(tmp.name)
+        transcripts = [tmp_raw_path]
+        logger.info("capture: using stored transcript_raw for session %s", session.id)
+    return transcripts, tmp_raw_path
+
+
+def _run_synthesis(
+    synthesiser: Synthesiser,
+    transcripts: list[Path],
+    agent_name: str,
+    task_table: str,
+    tmp_raw_path: Path | None,
+) -> list[SynthesisNote] | None:
+    """Run LLM synthesis over all transcript paths. Cleans up tmp_raw_path on exit.
+
+    Returns None on failure so the caller can write a failure marker and set
+    synthesis_status = 'partial_failure', matching the MCP synthesise_path behaviour.
+    """
+    total: list[SynthesisNote] = []
+    try:
+        for path in transcripts:
+            try:
+                notes = synthesiser.generate_notes(path, agent_name, task_table)
+                if notes:
+                    total.extend(notes)
+            except Exception as e:
+                typer.echo(f"Synthesis failed for {path}: {e}", err=True)
+                return None
+        logger.info("capture: LLM phase complete")
+    finally:
+        if tmp_raw_path is not None:
+            tmp_raw_path.unlink(missing_ok=True)
+    return total
+
+
+def _persist_results(
+    synthesiser: Synthesiser,
+    session_db_id: int,
+    total_notes_data: list[SynthesisNote] | None,
+    valid_task_ids: set[int],
+) -> None:
+    """Write synthesised notes (or mark complete/failed) in a final transaction.
+
+    When total_notes_data is None (LLM failure), writes a failure marker note and
+    sets synthesis_status = 'partial_failure' — consistent with Synthesiser.synthesise_path.
+    """
+    if total_notes_data is None:
+        logger.info("capture: writing failure marker for session %d", session_db_id)
+        with get_db_session() as db:
+            session = db.get(WizardSession, session_db_id)
+            if session:
+                synthesiser._write_failure_marker(
+                    db, session, "LLM synthesis failed during wizard capture."
+                )
+                session.synthesis_status = "partial_failure"
+                db.add(session)
+        raise typer.Exit(1)
+
+    if not total_notes_data:
+        typer.echo(f"Session {session_db_id}: no notes generated, marking as synthesised.")
+        with get_db_session() as db:
+            session = db.get(WizardSession, session_db_id)
+            if session:
+                session.is_synthesised = True
+                session.synthesis_status = "complete"
+                db.add(session)
+        return
+
+    logger.info("capture: opening transaction 2 (persistence)")
+    with get_db_session() as db:
+        session = db.get(WizardSession, session_db_id)
+        if not session:
+            typer.echo(f"Error: Session {session_db_id} disappeared during synthesis.", err=True)
+            raise typer.Exit(1)
+        result = synthesiser.persist(
+            db, total_notes_data, session, valid_task_ids, terminal=True
+        )
+        typer.echo(
+            f"Session {session.id}: {result.notes_created} note(s) via {result.synthesised_via}."
+        )
+
+
+def capture(
     close: bool = typer.Option(False, "--close", help="Mark session as closed by hook"),
     transcript: str = typer.Option("", "--transcript", help="Path to transcript file"),
     agent: str = typer.Option("", "--agent", help="Agent name"),
@@ -128,6 +226,7 @@ def capture(  # noqa: C901
         reader=TranscriptReader(),
         note_repo=NoteRepository(),
         security=security,
+        settings=settings,
         t_repo=TaskRepository(),
     )
 
@@ -145,24 +244,16 @@ def capture(  # noqa: C901
 
         if not settings.synthesis.enabled:
             typer.echo(f"Session {session.id} marked (synthesis disabled).")
+            session.synthesis_status = "complete"
+            db.add(session)
             return
 
-        transcripts = _collect_transcripts(session)
-        tmp_raw_path: Path | None = None
-
+        transcripts, tmp_raw_path = _resolve_transcripts(session)
         if not transcripts:
-            # File(s) gone — fall back to DB-persisted raw content if available.
-            if session.transcript_raw:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
-                ) as tmp:
-                    tmp.write(session.transcript_raw)
-                    tmp_raw_path = Path(tmp.name)
-                transcripts = [tmp_raw_path]
-                logger.info("capture: using stored transcript_raw for session %s", session.id)
-            else:
-                typer.echo(f"Session {session.id}: no transcript path, skipping synthesis.")
-                return
+            typer.echo(f"Session {session.id}: no transcript path, skipping synthesis.")
+            session.synthesis_status = "complete"
+            db.add(session)
+            return
 
         # Persist raw transcript content before synthesis so re-synthesis is
         # possible after the agent deletes the transcript files.
@@ -172,7 +263,6 @@ def capture(  # noqa: C901
                 session.transcript_raw = raw
                 db.add(session)
 
-        # Prepare data for synthesis outside the session
         agent_name = session.agent
         session_db_id = session.id
         task_table, valid_task_ids = synthesiser.prepare_task_table(db)
@@ -180,41 +270,9 @@ def capture(  # noqa: C901
 
     # 2. Perform slow LLM synthesis (DB is unlocked).
     logger.info("capture: starting LLM phase (DB unlocked)")
-    total_notes_data: list[SynthesisNote] = []
-    try:
-        for path in transcripts:
-            try:
-                notes = synthesiser.generate_notes(path, agent_name, task_table)
-                if notes:
-                    total_notes_data.extend(notes)
-            except Exception as e:
-                typer.echo(f"Synthesis failed for {path}: {e}", err=True)
-                raise typer.Exit(1) from None
-        logger.info("capture: LLM phase complete")
-    finally:
-        if tmp_raw_path is not None:
-            tmp_raw_path.unlink(missing_ok=True)
+    total_notes_data = _run_synthesis(
+        synthesiser, transcripts, agent_name, task_table, tmp_raw_path
+    )
 
     # 3. Persist all results in a final transaction.
-    if not total_notes_data:
-        typer.echo(f"Session {session_db_id}: no notes generated, marking as synthesised.")
-        with get_db_session() as db:
-            session = db.get(WizardSession, session_db_id)
-            if session:
-                session.is_synthesised = True
-                db.add(session)
-        return
-
-    logger.info("capture: opening transaction 2 (persistence)")
-    with get_db_session() as db:
-        session = db.get(WizardSession, session_db_id)
-        if not session:
-            typer.echo(f"Error: Session {session_db_id} disappeared during synthesis.", err=True)
-            raise typer.Exit(1)
-
-        result = synthesiser.persist(
-            db, total_notes_data, session, valid_task_ids, terminal=True
-        )
-        typer.echo(
-            f"Session {session.id}: {result.notes_created} note(s) via {result.synthesised_via}."
-        )
+    _persist_results(synthesiser, session_db_id, total_notes_data, valid_task_ids)

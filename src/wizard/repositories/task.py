@@ -36,6 +36,13 @@ class TaskRepository:
             raise ValueError(f"Task {task_id} not found")
         return task
 
+    def save(self, db: Session, task: Task) -> Task:
+        """Persist a Task to the database."""
+        db.add(task)
+        db.flush()
+        db.refresh(task)
+        return task
+
     def list_paginated(
         self,
         db: Session,

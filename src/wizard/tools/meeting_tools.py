@@ -92,13 +92,15 @@ async def save_meeting_summary(
 
             clean_summary = sec.scrub(summary).clean
             meeting.summary = clean_summary
-            db.add(meeting)
+            m_repo.save(db, meeting)
 
             note = Note(
                 note_type=NoteType.DOCS,
                 content=clean_summary,
                 meeting_id=meeting.id,
                 session_id=session_id,
+                artifact_id=meeting.artifact_id,
+                artifact_type="meeting",
             )
             saved = n_repo.save(db, note)
             if saved.id is None:
@@ -107,20 +109,8 @@ async def save_meeting_summary(
                 )
 
             if task_ids:
-                existing_links = {
-                    mt.task_id
-                    for mt in db.exec(
-                        select(MeetingTasks).where(
-                            MeetingTasks.meeting_id == meeting.id,
-                            col(MeetingTasks.task_id).in_(task_ids),
-                        )
-                    ).all()
-                }
-                for tid in task_ids:
-                    if tid not in existing_links:
-                        db.add(MeetingTasks(meeting_id=meeting.id, task_id=tid))
+                m_repo.link_tasks(db, meeting_id, task_ids)
 
-            db.flush()
             linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
             return SaveMeetingSummaryResponse(
@@ -161,7 +151,7 @@ async def ingest_meeting(
             already_existed = True
             meeting.title = clean_title
             meeting.content = clean_content
-            db.add(meeting)
+            m_repo.save(db, meeting)
         else:
             meeting = Meeting(
                 title=clean_title,
@@ -171,10 +161,8 @@ async def ingest_meeting(
                 source_url=source_url,
                 category=category,
             )
-            db.add(meeting)
+            m_repo.save(db, meeting)
 
-        db.flush()
-        db.refresh(meeting)
         if meeting.id is None:
             raise ToolError(
                 "Internal error: meeting was not assigned an id after flush"

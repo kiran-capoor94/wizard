@@ -5,9 +5,10 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
+from mcp.shared.exceptions import McpError
 
 from ..database import get_session
-from ..deps import get_note_repo, get_security, get_task_repo, get_task_state_repo
+from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
 from ..models import (
     MeetingTasks,
@@ -19,7 +20,7 @@ from ..models import (
     TaskState,
     TaskStatus,
 )
-from ..repositories import NoteRepository, TaskRepository, TaskStateRepository
+from ..repositories import MeetingRepository, NoteRepository, TaskRepository, TaskStateRepository
 from ..schemas import (
     CreateTaskResponse,
     MissingResponse,
@@ -35,7 +36,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..skills import SKILL_TASK_START, load_skill_post
-from .task_helpers import apply_task_fields
+from .task_fields import apply_task_fields
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 _VALID_STATUSES = {s.value for s in TaskStatus}
@@ -85,6 +86,7 @@ async def task_start(
     task_id: int,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
 ) -> TaskStartResponse:
     """Returns task context + rolling_summary + key notes (decisions, mental models, recent).
 
@@ -117,7 +119,7 @@ async def task_start(
                 None,
             )
 
-            task_state = db.get(TaskState, task.id)
+            task_state = t_state_repo.get_by_task_id(db, task.id)
             rolling_summary = task_state.rolling_summary if task_state else None
             total_notes = len(all_notes)
 
@@ -176,7 +178,7 @@ async def save_note(
                     )
                     if isinstance(result, AcceptedElicitation) and result.data:
                         mental_model = sec.scrub(result.data).clean
-                except (NotImplementedError, AttributeError) as e:
+                except (NotImplementedError, AttributeError, McpError) as e:
                     logger.debug("ctx.elicit unavailable for mental_model: %s", e)
             if len(content) > 100_000:
                 raise ToolError("Content exceeds 100k character limit")
@@ -245,8 +247,7 @@ async def update_task(
                 source_url=source_url,
             )
 
-            db.add(task)
-            db.flush()
+            t_repo.save(db, task)
 
             task_id_int = task.id
             if task_id_int is None:
@@ -285,6 +286,7 @@ async def create_task(
     t_repo: TaskRepository = Depends(get_task_repo),
     sec: SecurityService = Depends(get_security),
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
+    m_repo: MeetingRepository = Depends(get_meeting_repo),
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
@@ -313,8 +315,7 @@ async def create_task(
                 existing.priority = priority
                 if source_url and not existing.source_url:
                     existing.source_url = source_url
-                db.add(existing)
-                db.flush()
+                t_repo.save(db, existing)
                 return CreateTaskResponse(task_id=existing_id, already_existed=True)
 
         clean_name = sec.scrub(name).clean
@@ -328,16 +329,14 @@ async def create_task(
             source_type=source_type,
             source_url=source_url,
         )
-        db.add(task)
-        db.flush()
-        db.refresh(task)
+        t_repo.save(db, task)
         if task.id is None:
             raise ToolError("Internal error: task was not assigned an id after flush")
 
         t_state_repo.create_for_task(db, task)
 
         if meeting_id:
-            db.add(MeetingTasks(meeting_id=meeting_id, task_id=task.id))
+            m_repo.link_tasks(db, meeting_id, [task.id])
 
         return CreateTaskResponse(
             task_id=task.id,
@@ -347,16 +346,19 @@ async def create_task(
 
 async def rewind_task(
     task_id: int,
+    t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
 ) -> RewindResponse:
     """Reconstruct the full note timeline for a task, oldest first."""
     logger.info("rewind_task task_id=%d", task_id)
     with get_session() as db:
-        task = db.get(Task, task_id)
-        if task is None:
-            raise ToolError(f"Task {task_id} not found")
+        try:
+            task = t_repo.get_by_id(db, task_id)
+        except ValueError as e:
+            raise ToolError(str(e)) from e
 
-        task_state = db.get(TaskState, task_id)
+        task_state = t_state_repo.get_by_task_id(db, task_id)
         if task_state is None:
             raise ToolError(f"TaskState missing for task {task_id}")
 
@@ -397,6 +399,7 @@ async def what_am_i_missing(
     task_id: int,
     t_repo: TaskRepository = Depends(get_task_repo),
     n_repo: NoteRepository = Depends(get_note_repo),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
 ) -> MissingResponse:
     """Surface cognitive gaps for a task using seven diagnostic rules."""
     logger.info("what_am_i_missing task_id=%d", task_id)
@@ -405,7 +408,7 @@ async def what_am_i_missing(
             t_repo.get_by_id(db, task_id)
         except ValueError as e:
             raise ToolError(str(e)) from e
-        task_state = db.get(TaskState, task_id)
+        task_state = t_state_repo.get_by_task_id(db, task_id)
         if task_state is None:
             raise ToolError(f"TaskState missing for task {task_id}")
 

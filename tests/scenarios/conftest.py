@@ -5,12 +5,11 @@ from types import SimpleNamespace
 import pytest
 
 from wizard.models import TaskCategory, TaskPriority
-from wizard.tools.task_tools import create_task
 
 
 @pytest.fixture
-def seed_task(task_repo, security, task_state_repo):
-    """Factory fixture: creates a task via the create_task tool."""
+def seed_task(mcp_client):
+    """Factory fixture: creates a task via the MCP pipeline."""
 
     async def _create(
         name: str = "Test task",
@@ -20,17 +19,13 @@ def seed_task(task_repo, security, task_state_repo):
         source_id: str | None = None,
         source_url: str | None = None,
     ) -> SimpleNamespace:
-        resp = await create_task(
-            name=name,
-            priority=priority,
-            category=category,
-            status=status,
-            source_id=source_id,
-            source_url=source_url,
-            t_repo=task_repo,
-            sec=security,
-            t_state_repo=task_state_repo,
-        )
-        return SimpleNamespace(id=resp.task_id)
+        args: dict = {"name": name, "priority": priority.value, "category": category.value}
+        if source_id is not None:
+            args["source_id"] = source_id
+        if source_url is not None:
+            args["source_url"] = source_url
+        result = await mcp_client.call_tool("create_task", args)
+        assert not result.is_error, f"seed_task failed: {result}"
+        return SimpleNamespace(id=result.structured_content["task_id"])
 
     return _create

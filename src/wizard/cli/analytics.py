@@ -3,168 +3,85 @@ import logging
 
 from rich.console import Console
 from rich.table import Table
-from sqlmodel import col, func, select
+from rich.text import Text
 
-from wizard.models import Note, NoteType, TaskState, ToolCall, WizardSession
+from wizard.repositories.analytics import AnalyticsRepository
 
 logger = logging.getLogger(__name__)
 
+# Repository instance for thin controller orchestration
+_repo = AnalyticsRepository()
+
 
 def query_sessions(db, start: datetime.date, end: datetime.date) -> dict:
-    start_dt = datetime.datetime.combine(start, datetime.time.min)
-    end_dt = datetime.datetime.combine(end, datetime.time.max)
-
-    calls = db.exec(
-        select(ToolCall).where(
-            ToolCall.called_at >= start_dt,
-            ToolCall.called_at <= end_dt,
-        )
-    ).all()
-    total_tool_calls = len(calls)
-
-    sessions = db.exec(
-        select(WizardSession).where(
-            WizardSession.created_at >= start_dt,
-            WizardSession.created_at <= end_dt,
-        )
-    ).all()
-    session_count = len(sessions)
-
-    durations = []
-    for s in sessions:
-        if s.closed_by in ("user", "hook"):
-            delta = (s.updated_at - s.created_at).total_seconds() / 60
-            durations.append(delta)
-        elif s.closed_by == "auto" and s.last_active_at is not None:
-            delta = (s.last_active_at - s.created_at).total_seconds() / 60
-            durations.append(delta)
-        # open sessions: excluded from average
-
-    avg_duration = sum(durations) / len(durations) if durations else 0.0
-    abandoned = [s for s in sessions if s.closed_by == "auto"]
-    abandoned_count = len(abandoned)
-
-    return {
-        "session_count": session_count,
-        "avg_duration_minutes": round(avg_duration, 1),
-        "total_tool_calls": total_tool_calls,
-        "abandoned_count": abandoned_count,
-        "abandoned_rate": round(abandoned_count / session_count, 2) if session_count else 0.0,
-    }
+    return _repo.get_session_stats(db, start, end)
 
 
 def query_notes(db, start: datetime.date, end: datetime.date) -> dict:
-    start_dt = datetime.datetime.combine(start, datetime.time.min)
-    end_dt = datetime.datetime.combine(end, datetime.time.max)
+    return _repo.get_note_stats(db, start, end)
 
-    notes = db.exec(
-        select(Note).where(
-            Note.created_at >= start_dt,
-            Note.created_at <= end_dt,
-        )
-    ).all()
-
-    total = len(notes)
-    by_type: dict[str, int] = {}
-    mental_models = 0
-    session_summaries = 0
-    for note in notes:
-        type_name = (
-            note.note_type.value if hasattr(note.note_type, "value") else str(note.note_type)
-        )
-        by_type[type_name] = by_type.get(type_name, 0) + 1
-        if note.note_type == NoteType.SESSION_SUMMARY:
-            session_summaries += 1
-        elif note.mental_model:
-            mental_models += 1
-
-    manual_notes = total - session_summaries
-    coverage = mental_models / manual_notes if manual_notes > 0 else 0.0
-
-    return {
-        "total": total,
-        "by_type": by_type,
-        "mental_models_captured": mental_models,
-        "mental_model_coverage": round(coverage, 2),
-        "session_summaries": session_summaries,
-        "manual_notes": manual_notes,
-    }
 
 def query_tasks(db, start: datetime.date, end: datetime.date) -> dict:
-    start_dt = datetime.datetime.combine(start, datetime.time.min)
-    end_dt = datetime.datetime.combine(end, datetime.time.max)
-
-    notes = db.exec(
-        select(Note).where(
-            Note.created_at >= start_dt,
-            Note.created_at <= end_dt,
-        )
-    ).all()
-
-    task_note_counts: dict[int, int] = {}
-    for note in notes:
-        if note.task_id is not None:
-            task_note_counts[note.task_id] = task_note_counts.get(note.task_id, 0) + 1
-
-    worked = len(task_note_counts)
-    total_notes = sum(task_note_counts.values())
-    avg_notes = total_notes / worked if worked > 0 else 0.0
-
-    stale = db.exec(
-        select(TaskState).where(TaskState.stale_days > 3)
-    ).all()
-    stale_count = len(stale)
-
-    return {
-        "worked": worked,
-        "avg_notes_per_task": round(avg_notes, 1),
-        "stale_count": stale_count,
-    }
+    return _repo.get_task_stats(db, start, end)
 
 
 def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
-    start_dt = datetime.datetime.combine(start, datetime.time.min)
-    end_dt = datetime.datetime.combine(end, datetime.time.max)
+    return _repo.get_compounding_score(db, start, end)
 
-    task_starts = db.exec(
-        select(ToolCall).where(
-            ToolCall.tool_name == "task_start",
-            ToolCall.called_at >= start_dt,
-            ToolCall.called_at <= end_dt,
+
+def _format_sessions_section(sessions: dict) -> list[str]:
+    lines = [
+        "Sessions",
+        f"  Sessions:             {sessions.get('session_count', 0)}",
+        f"  Avg duration (min):   {sessions.get('avg_duration_minutes', 0.0)}",
+        f"  Total tool calls:     {sessions.get('total_tool_calls', 0)}",
+    ]
+    abandoned_count = sessions.get("abandoned_count", 0)
+    if abandoned_count > 0:
+        rate = sessions.get("abandoned_rate", 0.0)
+        lines.append(f"  Abandoned:            {abandoned_count} ({rate:.0%})")
+    if sessions.get("synthesis_failures", 0) > 0:
+        lines.append(f"  Synthesis failures:   {sessions['synthesis_failures']}")
+    if sessions.get("pending_synthesis", 0) > 0:
+        lines.append(f"  Pending synthesis:    {sessions['pending_synthesis']}")
+    return lines
+
+
+def _format_notes_section(notes: dict) -> list[str]:
+    lines = [
+        "Notes",
+        f"  Manual notes:         {notes.get('manual_notes', 0)}",
+    ]
+    manual_types = {k: v for k, v in notes.get("by_type", {}).items() if k != "session_summary"}
+    for note_type, count in sorted(manual_types.items()):
+        lines.append(f"    {note_type}: {count}")
+    lines += [
+        f"  Mental model coverage:{notes.get('mental_model_coverage', 0.0):.0%}",
+        f"  Session summaries:    {notes.get('session_summaries', 0)}",
+    ]
+    if notes.get("unclassified", 0) > 0:
+        lines.append(f"  Unclassified (failed):{notes['unclassified']}")
+    if notes.get("superseded", 0) > 0:
+        lines.append(f"  Superseded:           {notes['superseded']}")
+    return lines
+
+
+def _format_health_messages(sessions: dict, notes: dict, tasks: dict) -> list[str]:
+    messages = []
+    if notes.get("manual_notes", 0) > 0 and notes.get("mental_model_coverage", 1.0) < 0.25:
+        messages.append("  Mental model coverage is low — add mental_model to save_note calls")
+    if sessions.get("abandoned_rate", 0.0) > 0.5:
+        messages.append("  Most sessions are abandoned — call session_end before closing")
+    if sessions.get("synthesis_failures", 0) > 0:
+        n = sessions["synthesis_failures"]
+        messages.append(
+            f"  {n} session(s) had synthesis failures"
+            " — retry with wizard capture --close --session-id <id>"
         )
-    ).all()
-
-    if not task_starts:
-        return 0.0
-
-    task_start_session_ids = {tc.session_id for tc in task_starts if tc.session_id}
-    if not task_start_session_ids:
-        return 0.0
-
-    sessions_map = {
-        s.id: s
-        for s in db.exec(
-            select(WizardSession).where(
-                col(WizardSession.id).in_(list(task_start_session_ids))
-            )
-        ).all()
-        if s.id is not None
-    }
-
-    # Proxy: "at least one note existed anywhere in the DB before this session started."
-    # This is intentional per spec — not task-specific. On a DB with any historical
-    # notes, sessions that started after those notes will count. The metric answers
-    # "did you have accumulated context when you started?" not "were those notes
-    # about the specific task you worked on?"
-    earliest_note_dt = db.exec(select(func.min(Note.created_at))).one_or_none()
-
-    sessions_with_any_prior_notes = {
-        sid
-        for sid, session in sessions_map.items()
-        if earliest_note_dt is not None and earliest_note_dt < session.created_at
-    }
-
-    return round(len(sessions_with_any_prior_notes) / len(task_start_session_ids), 2)
+    # Default 2.0 is above the 1.5 threshold so missing data suppresses nudge.
+    if tasks.get("worked", 0) > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5:
+        messages.append("  Low note density — investigation and decision notes build compounding")
+    return messages
 
 
 def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
@@ -173,35 +90,10 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
     tasks = data.get("tasks", {})
     compounding = data.get("compounding", 0.0)
 
-    lines = [
-        f"Wizard Analytics  {start} \u2192 {end}",
-        "=" * 50,
-        "",
-        "Sessions",
-        f"  Sessions:             {sessions.get('session_count', 0)}",
-        f"  Avg duration (min):   {sessions.get('avg_duration_minutes', 0.0)}",
-        f"  Total tool calls:     {sessions.get('total_tool_calls', 0)}",
-    ]
-    abandoned_count = sessions.get('abandoned_count', 0)
-    if abandoned_count > 0:
-        rate = sessions.get('abandoned_rate', 0.0)
-        lines.append(f"  Abandoned:            {abandoned_count} ({rate:.0%})")
-    manual_notes_count = notes.get("manual_notes", 0)
-    session_summaries_count = notes.get("session_summaries", 0)
-    lines += [
-        "",
-        "Notes",
-        f"  Manual notes:         {manual_notes_count}",
-    ]
-    by_type = notes.get("by_type", {})
-    manual_types = {k: v for k, v in by_type.items() if k != "session_summary"}
-    for note_type, count in sorted(manual_types.items()):
-        lines.append(f"    {note_type}: {count}")
-    lines += [
-        f"  Mental model coverage:{notes.get('mental_model_coverage', 0.0):.0%}",
-        f"  Session summaries:    {session_summaries_count}",
-    ]
-
+    lines = [f"Wizard Analytics  {start} \u2192 {end}", "=" * 50, ""]
+    lines += _format_sessions_section(sessions)
+    lines += [""]
+    lines += _format_notes_section(notes)
     lines += [
         "",
         "Tasks",
@@ -212,75 +104,73 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
         "Compounding",
         f"  Sessions with context:{compounding:.0%}",
     ]
-
-    health_messages = []
-    if notes.get("manual_notes", 0) > 0 and notes.get("mental_model_coverage", 1.0) < 0.25:
-        health_messages.append(
-            "  Mental model coverage is low — add mental_model to save_note calls"
-        )
-    if sessions.get("abandoned_rate", 0.0) > 0.5:
-        health_messages.append(
-            "  Most sessions are abandoned — call session_end before closing"
-        )
-    # Default 2.0 is above the 1.5 threshold so missing data suppresses nudge.
-    low_note_density = tasks.get("worked", 0) > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5
-    if low_note_density:
-        health_messages.append(
-            "  Low note density — investigation and decision notes build compounding"
-        )
-
+    health_messages = _format_health_messages(sessions, notes, tasks)
     if health_messages:
         lines += ["", "Health"]
         lines += health_messages
-
     lines.append("")
     return "\n".join(lines)
 
 
+def _build_sessions_col(sessions: dict, session_summaries: int) -> Text:
+    session_count = sessions.get("session_count", 0)
+    abandoned = sessions.get("abandoned_count", 0)
+    synthesis_failures = sessions.get("synthesis_failures", 0)
+    col = Text()
+    col.append(f"{session_count}", style="bold")
+    col.append(" sessions\n")
+    col.append(f"{session_summaries}", style="bold")
+    col.append(" summarised")
+    if abandoned:
+        col.append(f"\n{abandoned}", style="bold yellow")
+        col.append(" abandoned", style="yellow")
+    if synthesis_failures:
+        col.append(f"\n{synthesis_failures}", style="bold red")
+        col.append(" synthesis failed", style="red")
+    return col
+
+
+def _build_notes_col(notes: dict) -> Text:
+    by_type = {k: v for k, v in notes.get("by_type", {}).items() if k != "session_summary"}
+    unclassified = notes.get("unclassified", 0)
+    col = Text()
+    for note_type, count in sorted(by_type.items(), key=lambda x: -x[1]):
+        col.append(f"{count:3d}", style="bold")
+        col.append(f"  {note_type}\n")
+    if not by_type:
+        col.append("(none)", style="dim")
+    if unclassified:
+        col.append(f"\n{unclassified}", style="bold red")
+        col.append(" unclassified", style="red")
+    return col
+
+
+def _build_tasks_col(tasks: dict, compounding: float) -> Text:
+    worked = tasks.get("worked", 0)
+    stale = tasks.get("stale_count", 0)
+    col = Text()
+    col.append(f"{worked}", style="bold")
+    col.append(" worked\n")
+    if stale:
+        col.append(f"{stale}", style="bold yellow")
+        col.append(" stale (>3 days)\n", style="yellow")
+    if compounding > 0:
+        col.append(f"\n{compounding:.0%}", style="bold")
+        col.append(" compounding")
+    return col
+
+
 def print_analytics(data: dict, start: datetime.date, end: datetime.date) -> None:
     """Render analytics to the terminal using a compact 3-column Rich layout."""
-    from rich.text import Text
-
     sessions = data.get("sessions", {})
     notes = data.get("notes", {})
     tasks = data.get("tasks", {})
     compounding = data.get("compounding", 0.0)
 
-    session_count = sessions.get("session_count", 0)
-    synthesised = notes.get("session_summaries", 0)
-    abandoned = sessions.get("abandoned_count", 0)
-    by_type = {k: v for k, v in notes.get("by_type", {}).items() if k != "session_summary"}
-    worked = tasks.get("worked", 0)
-    stale = tasks.get("stale_count", 0)
-
-    # ── Sessions column ──────────────────────────────────────────
-    sess_col = Text()
-    sess_col.append(f"{session_count}", style="bold")
-    sess_col.append(" sessions\n")
-    sess_col.append(f"{synthesised}", style="bold")
-    sess_col.append(" synthesised")
-    if abandoned:
-        sess_col.append(f"\n{abandoned}", style="bold yellow")
-        sess_col.append(" abandoned", style="yellow")
-
-    # ── Notes column ─────────────────────────────────────────────
-    notes_col = Text()
-    for note_type, count in sorted(by_type.items(), key=lambda x: -x[1]):
-        notes_col.append(f"{count:3d}", style="bold")
-        notes_col.append(f"  {note_type}\n")
-    if not by_type:
-        notes_col.append("(none)", style="dim")
-
-    # ── Tasks column ─────────────────────────────────────────────
-    tasks_col = Text()
-    tasks_col.append(f"{worked}", style="bold")
-    tasks_col.append(" worked\n")
-    if stale:
-        tasks_col.append(f"{stale}", style="bold yellow")
-        tasks_col.append(" stale (>3 days)\n", style="yellow")
-    if compounding > 0:
-        tasks_col.append(f"\n{compounding:.0%}", style="bold")
-        tasks_col.append(" compounding")
+    session_summaries = notes.get("session_summaries", 0)
+    sess_col = _build_sessions_col(sessions, session_summaries)
+    notes_col = _build_notes_col(notes)
+    tasks_col = _build_tasks_col(tasks, compounding)
 
     grid = Table(box=None, show_header=True, header_style="bold", padding=(0, 3))
     grid.add_column("Sessions", min_width=18)
@@ -294,12 +184,8 @@ def print_analytics(data: dict, start: datetime.date, end: datetime.date) -> Non
     console.print()
     console.print(grid)
 
-    health: list[str] = []
-    if sessions.get("abandoned_rate", 0.0) > 0.5:
-        health.append(f"{abandoned} sessions abandoned — call session_end before closing")
-    if worked > 0 and tasks.get("avg_notes_per_task", 2.0) < 1.5:
-        health.append("Notes aren't linking to tasks — set task_id in save_note calls")
+    health = _format_health_messages(sessions, notes, tasks)
     if health:
         console.print()
         for msg in health:
-            console.print(f"  [yellow]⚠[/yellow]  {msg}")
+            console.print(f"  [yellow]⚠[/yellow]  {msg.strip()}")

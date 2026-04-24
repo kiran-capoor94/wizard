@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from wizard.llm_adapters import OllamaAdapter
-from wizard.synthesis import _format_transcript
+from wizard.synthesis_prompt import format_transcript as _format_transcript
 from wizard.transcript import TranscriptEntry
 
 

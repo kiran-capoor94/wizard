@@ -3,7 +3,7 @@ import uuid as _uuid
 from enum import Enum
 
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, ForeignKey, Integer
+from sqlalchemy import Column, ForeignKey, Integer, Text
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -180,11 +180,14 @@ class WizardSession(TimestampMixin, table=True):
     synthesis_status: str = Field(
         default="pending",
         description=(
-            "Synthesis lifecycle: 'pending' | 'complete' | 'partial_failure' | 'failed'."
+            "Synthesis lifecycle: 'pending' | 'complete' | 'partial_failure'. "
+            "partial_failure covers both partial success (some notes saved, some chunks failed) "
+            "and total failure (no notes saved). Retry with wizard capture --close --session-id."
         ),
     )
     transcript_raw: str | None = Field(
         default=None,
+        sa_type=Text(),
         description=(
             "Raw JSONL content of all synthesised transcript files, persisted at capture "
             "time so re-synthesis remains possible after the agent deletes the file."
@@ -219,7 +222,7 @@ class Note(TimestampMixin, table=True):
     synthesis_confidence: float | None = Field(default=None)
     source_note_ids: str | None = Field(default=None)  # JSON array of note IDs
     # Conflict / lifecycle state
-    supersedes_note_id: int | None = Field(default=None, foreign_key="note.id")
+    supersedes_note_id: int | None = Field(default=None)
     # 'active' | 'superseded' | 'contradicted' | 'archived' | 'invalid' | 'unclassified'
     status: str = Field(default="active")
     reference_count: int = Field(default=0)
@@ -267,6 +270,7 @@ class TaskState(TimestampMixin, table=True):
     stale_days: int = Field(default=0, nullable=False)
     rolling_summary: str | None = Field(
         default=None,
+        sa_type=Text(),
         description=(
             "Synthesised overview of all prior notes, built from mental_models. "
             "Updated on every note save. Used by task_start for tiered context delivery."

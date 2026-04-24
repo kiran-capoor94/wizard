@@ -5,20 +5,24 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import litellm
 import sentry_sdk
 from pydantic import ValidationError
 from sqlmodel import Session, col, select
 
-from wizard.config import settings
 from wizard.llm_adapters import complete as llm_complete
 from wizard.llm_adapters import probe_backend_health
 from wizard.models import Note, NoteType, Task, WizardSession
 from wizard.repositories import NoteRepository, TaskRepository, TaskStateRepository
 from wizard.schemas import SynthesisNote, SynthesisResult
 from wizard.security import SecurityService
+from wizard.synthesis_prompt import filter_for_synthesis, format_prompt
 from wizard.transcript import TranscriptEntry, TranscriptReader
+
+if TYPE_CHECKING:
+    from wizard.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,44 +33,12 @@ SYNTHESIS_SYSTEM_PROMPT = (
     "Respond directly with a JSON array — no thinking blocks, no preamble."
 )
 
-# Drop tool_result for read/nav tools — the tool_call input is sufficient signal.
-# We only keep results for tools that mutate or provide high-level agency.
-KEEP_RESULT_TOOLS = frozenset({"Edit", "Write", "Agent", "Bash"})
-
-# Per-role character budgets applied after filtering.
-ROLE_CHAR_LIMITS: dict[str, int] = {
-    "user": 400,
-    "assistant": 400,
-    "tool_call": 150,
-    "tool_result": 200,
-}
-
 NOTE_TYPE_MAP: dict[str, NoteType] = {
     "investigation": NoteType.INVESTIGATION,
     "decision": NoteType.DECISION,
     "docs": NoteType.DOCS,
     "learnings": NoteType.LEARNINGS,
 }
-
-# Maximum chars per synthesis chunk. Default to 15k for extremely fast local prefill.
-CHUNK_CHAR_LIMIT: int = min(
-    settings.synthesis.context_chars, 15000
-)  # 15k for fast local prefill
-
-
-def _format_transcript(entries: list[TranscriptEntry]) -> str:
-    """Encode transcript entries as plain text for the LLM prompt.
-
-    Each entry becomes a single line: [role] content or [role:tool] content.
-    Simpler than TOON CSV — avoids quoting overhead for local models.
-    """
-    if not entries:
-        return ""
-    lines = []
-    for e in entries:
-        role_tag = f"{e.role}:{e.tool_name}" if e.tool_name else e.role
-        lines.append(f"[{role_tag}] {e.content}")
-    return "\n".join(lines)
 
 
 class Synthesiser:
@@ -77,6 +49,7 @@ class Synthesiser:
         reader: TranscriptReader,
         note_repo: NoteRepository,
         security: SecurityService,
+        settings: Settings,
         task_state_repo: TaskStateRepository | None = None,
         t_repo: TaskRepository | None = None,
         backend: dict | None = None,
@@ -84,11 +57,14 @@ class Synthesiser:
         self._reader = reader
         self._note_repo = note_repo
         self._security = security
+        self._settings = settings
         self._task_state_repo = task_state_repo or TaskStateRepository()
         self._t_repo = t_repo or TaskRepository()
         self._backend = (
             backend if backend is not None else self._select_backend(settings.synthesis)
         )
+        # Maximum chars per synthesis chunk. Default to 15k for extremely fast local prefill.
+        self._chunk_char_limit: int = min(settings.synthesis.context_chars, 15000)
 
     @staticmethod
     def _select_backend(synthesis_settings) -> dict:
@@ -118,7 +94,7 @@ class Synthesiser:
                 f"Synthesis failed for session {wizard_session.id}. "
                 f"{chunk_description} "
                 "Content available in wizardsession.transcript_raw. "
-                "Retry with: wizard capture --resynthesise --session-id "
+                "Retry with: wizard capture --close --session-id "
                 f"{wizard_session.id}"
             ),
             session_id=wizard_session.id,
@@ -155,6 +131,7 @@ class Synthesiser:
                     transcript_path, wizard_session.agent, task_table
                 )
             except Exception as exc:
+                sentry_sdk.capture_exception(exc)
                 logger.warning(
                     "Synthesiser: generate_notes failed after retry for session %d: %s",
                     wizard_session.id,
@@ -202,10 +179,10 @@ class Synthesiser:
                 return []
 
         with sentry_sdk.start_span(op="synthesis.filter"):
-            filtered = self._filter_for_synthesis(entries)
+            filtered = filter_for_synthesis(entries)
             messages = [
                 {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
-                {"role": "user", "content": self._format_prompt(filtered, task_table)},
+                {"role": "user", "content": format_prompt(filtered, task_table)},
             ]
 
         return self._call_adapter(messages, filtered, task_table)
@@ -311,6 +288,7 @@ class Synthesiser:
                         attempt,
                         e,
                     )
+        sentry_sdk.capture_exception(last_exc)
         logger.error(
             "Synthesiser: LLM call failed after retry, raising for failure marker: %s",
             last_exc,
@@ -326,7 +304,7 @@ class Synthesiser:
         cur_len = 0
         for ent in filtered:
             entry_len = len(ent.content)
-            if cur and (cur_len + entry_len) > CHUNK_CHAR_LIMIT:
+            if cur and (cur_len + entry_len) > self._chunk_char_limit:
                 chunks.append(cur)
                 cur = [ent]
                 cur_len = entry_len
@@ -345,7 +323,7 @@ class Synthesiser:
                     {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": self._format_prompt(chunk, task_table),
+                        "content": format_prompt(chunk, task_table),
                     },
                 ],
                 self._backend.get("base_url"),
@@ -354,82 +332,6 @@ class Synthesiser:
             notes_data.extend(nd)
         return notes_data
 
-    def _filter_for_synthesis(
-        self, entries: list[TranscriptEntry]
-    ) -> list[TranscriptEntry]:
-        """Drop low-signal entries and truncate content per role."""
-        kept: list[TranscriptEntry] = []
-        call_by_id: dict[str, str | None] = {}
-        for entry in entries:
-            if entry.role == "tool_call":
-                if entry.tool_use_id:
-                    call_by_id[entry.tool_use_id] = entry.tool_name
-                kept.append(
-                    entry.model_copy(
-                        update={
-                            "content": entry.content[: ROLE_CHAR_LIMITS["tool_call"]]
-                        }
-                    )
-                )
-            elif entry.role == "tool_result":
-                call_name = (
-                    call_by_id.pop(entry.tool_use_id, None)
-                    if entry.tool_use_id
-                    else None
-                )
-                if call_name not in KEEP_RESULT_TOOLS:
-                    continue
-                kept.append(
-                    entry.model_copy(
-                        update={
-                            "content": entry.content[: ROLE_CHAR_LIMITS["tool_result"]]
-                        }
-                    )
-                )
-            else:
-                kept.append(
-                    entry.model_copy(
-                        update={
-                            "content": entry.content[
-                                : ROLE_CHAR_LIMITS.get(entry.role, 2000)
-                            ]
-                        }
-                    )
-                )
-        return kept
-
-    def _format_prompt(
-        self, filtered: list[TranscriptEntry], task_table: str = ""
-    ) -> str:
-        """Format pre-filtered transcript entries into the LLM prompt string.
-
-        Safety trim: if still over 15k chars (≈4k tokens), drop oldest entries.
-        """
-        entries = list(filtered)  # copy — safety trim must not mutate the caller's list
-        total_chars = sum(len(e.content) for e in entries)
-        if total_chars > 15_000:
-            logger.warning(
-                "_format_prompt: %d chars; trimming oldest entries", total_chars
-            )
-            while entries and total_chars > 15_000:
-                total_chars -= len(entries.pop(0).content)
-
-        lines = [_format_transcript(entries)]
-
-        if task_table:
-            lines.append(f"\nAvailable tasks (id<TAB>name):\n{task_table}\n\n")
-        else:
-            lines.append("\ntask_id must always be null — no task list available.")
-
-        lines.append(
-            "\nCRITICAL: Respond ONLY with a valid JSON array of objects. "
-            "DO NOT include any text outside the JSON array. "
-            "Format: "
-            '[{"note_type": "investigation"|"decision"|"docs"|"learnings", '
-            '"content": "string", "task_id": integer|null, "mental_model": "string"}]'
-        )
-        return "\n".join(lines)
-
     def _save_notes(
         self,
         db: Session,
@@ -437,6 +339,22 @@ class Synthesiser:
         wizard_session: WizardSession,
         valid_task_ids: set[int] | None = None,
     ) -> int:
+        # Pre-load artifact_ids for all referenced tasks in one query (no N+1).
+        referenced_task_ids = {
+            nd.task_id
+            for nd in notes_data
+            if nd.task_id is not None
+            and (valid_task_ids is None or nd.task_id in valid_task_ids)
+        }
+        task_artifact_ids: dict[int, str] = {}
+        if referenced_task_ids:
+            rows = db.exec(
+                select(Task.id, Task.artifact_id).where(
+                    col(Task.id).in_(referenced_task_ids)
+                )
+            ).all()
+            task_artifact_ids = {tid: aid for tid, aid in rows if aid is not None}
+
         count = 0
         for nd in notes_data:
             clean_content = self._security.scrub(nd.content).clean
@@ -450,18 +368,17 @@ class Synthesiser:
                 else None
             )
             # Artifact identity (v3): single anchor per attribution decision tree.
-            # 1. task_id set -> use task.artifact_id
+            # 1. task_id set -> use task.artifact_id (pre-loaded above)
             # 2. session only -> use session.artifact_id
-            artifact_id: str | None = None
-            artifact_type: str | None = None
-            if matched_task_id is not None:
-                task_row = db.get(Task, matched_task_id)
-                if task_row and task_row.artifact_id:
-                    artifact_id = task_row.artifact_id
-                    artifact_type = "task"
-            if artifact_id is None and wizard_session.artifact_id:
+            if matched_task_id is not None and matched_task_id in task_artifact_ids:
+                artifact_id: str | None = task_artifact_ids[matched_task_id]
+                artifact_type: str | None = "task"
+            elif wizard_session.artifact_id:
                 artifact_id = wizard_session.artifact_id
                 artifact_type = "session"
+            else:
+                artifact_id = None
+                artifact_type = None
             note = Note(
                 note_type=NOTE_TYPE_MAP.get(nd.note_type, NoteType.INVESTIGATION),
                 content=clean_content,
@@ -478,7 +395,11 @@ class Synthesiser:
     def _refresh_rolling_summaries(
         self, db: Session, wizard_session: WizardSession
     ) -> list[int]:
-        """Rebuild TaskState for every task that received notes in this session."""
+        """Rebuild TaskState for every task that received notes in this session.
+
+        Batch-loads all notes for the affected tasks in a single query to avoid
+        N+1 round-trips (one query per task in the naive implementation).
+        """
         if wizard_session.id is None:
             return []
         task_ids: list[int] = list(
@@ -492,6 +413,8 @@ class Synthesiser:
                 if n is not None
             }
         )
+        if not task_ids:
+            return []
         for task_id in task_ids:
             self._task_state_repo.on_note_saved(db, task_id)
         return task_ids

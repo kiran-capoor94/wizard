@@ -8,8 +8,7 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from sqlmodel import Session
 
-from ..database import get_session
-from ..deps import get_task_repo
+from ..deps import get_db_session as get_session, get_task_repo
 from ..mcp_instance import mcp
 from ..repositories import TaskRepository
 from ..schemas import TaskContext, TaskRecommendation, WorkRecommendationResponse

@@ -1,9 +1,11 @@
+import logging
 import os
 import stat
 import sys
 from pathlib import Path
 
 import sentry_sdk
+from pythonjsonlogger import jsonlogger
 from sentry_sdk.integrations.litellm import LiteLLMIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.mcp import MCPIntegration
@@ -34,6 +36,15 @@ if hasattr(os, "chflags"):
 
 
 if __name__ == "__main__":
+    # Configure structured JSON logging
+    log_handler = logging.StreamHandler()
+    formatter = jsonlogger.JsonFormatter(
+        "%(asctime)s %(name)s %(levelname)s %(message)s"
+    )
+    log_handler.setFormatter(formatter)
+    # Using force=True to override any default handlers already configured by dependencies
+    logging.basicConfig(level=logging.INFO, handlers=[log_handler], force=True)
+
     # Initialize Sentry if DSN is provided
     if settings.sentry.dsn and settings.sentry.enabled:
         sentry_sdk.init(
