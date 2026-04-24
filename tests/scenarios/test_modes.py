@@ -51,3 +51,37 @@ def test_set_mode_response_clear():
     r = SetModeResponse(active_mode=None, description=None, instruction=None)
     assert r.active_mode is None
     assert r.instruction is None
+
+
+# Task 4: build_available_modes tests
+
+from wizard.tools.mode_tools import build_available_modes
+
+
+def test_build_available_modes_filters_to_allowed(tmp_path):
+    """Only skills in allowed list are returned."""
+    skill_dir = tmp_path / "socratic-mentor"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: socratic-mentor\ndescription: Mentor mode.\n---\n# Content"
+    )
+
+    modes = ModesSettings(default="socratic-mentor", allowed=["socratic-mentor"])
+    result = build_available_modes(modes, roots=[tmp_path])
+    assert len(result) == 1
+    assert result[0].name == "socratic-mentor"
+    assert result[0].description == "Mentor mode."
+
+
+def test_build_available_modes_empty_allowed(tmp_path):
+    """Empty allowed list returns empty modes."""
+    modes = ModesSettings(allowed=[])
+    result = build_available_modes(modes, roots=[tmp_path])
+    assert result == []
+
+
+def test_build_available_modes_missing_skill(tmp_path):
+    """Skill in allowed list but not found in roots is skipped silently."""
+    modes = ModesSettings(allowed=["nonexistent-skill"])
+    result = build_available_modes(modes, roots=[tmp_path])
+    assert result == []
