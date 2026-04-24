@@ -117,6 +117,7 @@ async def task_start(
                 None,
             )
 
+            assert task.id is not None
             task_state = t_state_repo.get_by_task_id(db, task.id)
             rolling_summary = task_state.rolling_summary if task_state else None
             total_notes = len(all_notes)
