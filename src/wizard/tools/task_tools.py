@@ -89,10 +89,7 @@ async def task_start(
     """Returns task context + rolling_summary + key notes (decisions, mental models, recent).
 
     Returns at most 5 notes, prioritising decisions and notes with mental models.
-    For full note history use rewind_task.
-
-    task_id: integer task ID from the open_tasks or blocked_tasks list
-    returned by session_start. Call session_start first to get available IDs.
+    For full note history use rewind_task. task_id must come from session_start.
     """
     logger.info("task_start task_id=%d", task_id)
     try:
@@ -108,19 +105,13 @@ async def task_start(
                 notes_by_type[key] = notes_by_type.get(key, 0) + 1
 
             key_notes = _select_key_notes(all_notes)
-            prior_notes = [
-                NoteDetail.from_model(n) for n in key_notes if n.id is not None
-            ]
-
+            prior_notes = [NoteDetail.from_model(n) for n in key_notes if n.id is not None]
             latest_mental_model = next(
-                (n.mental_model for n in all_notes if n.mental_model is not None),
-                None,
+                (n.mental_model for n in all_notes if n.mental_model is not None), None
             )
-
             task_state = t_state_repo.get_by_task_id(db, task_id)
             rolling_summary = task_state.rolling_summary if task_state else None
             total_notes = len(all_notes)
-
             # Dedup skill_instructions within the session: send only on first task_start call
             skill_delivered = await ctx.get_state("task_start_skill_delivered")
             skill = None if skill_delivered else load_skill_post(SKILL_TASK_START)
@@ -143,7 +134,6 @@ async def task_start(
         logger.warning("task_start failed: %s", e)
         raise ToolError(str(e)) from e
     except Exception as e:
-        # Capture unexpected exceptions in Sentry
         sentry_sdk.capture_exception(e)
         raise
 
@@ -195,9 +185,7 @@ async def save_note(
             )
             saved = n_repo.save(db, note)
             if saved.id is None:
-                raise ToolError(
-                    "Internal error: note was not assigned an id after flush"
-                )
+                raise ToolError("Internal error: note was not assigned an id after flush")
             await ctx.report_progress(1, 2)
             t_state_repo.on_note_saved(db, task_id)
             await ctx.report_progress(2, 2)
@@ -210,7 +198,6 @@ async def save_note(
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
     except Exception as e:
-        # Capture unexpected exceptions in Sentry
         sentry_sdk.capture_exception(e)
         raise
 
@@ -232,7 +219,6 @@ async def update_task(
     Raises ToolError if no fields are provided or task not found.
     """
     logger.info("update_task task_id=%d", task_id)
-
     if all(v is None for v in [status, priority, due_date, name, source_url]):
         raise ToolError("At least one field must be provided to update_task")
 
@@ -241,24 +227,15 @@ async def update_task(
             task = t_repo.get_by_id(db, task_id)
 
             updated_fields = apply_task_fields(
-                task,
-                sec,
-                status=status,
-                priority=priority,
-                due_date=due_date,
-                name=name,
-                source_url=source_url,
+                task, sec,
+                status=status, priority=priority,
+                due_date=due_date, name=name, source_url=source_url,
             )
-
             t_repo.save(db, task)
-
             task_id_int = task.id
             if task_id_int is None:
-                raise ToolError(
-                    "Internal error: task was not assigned an id after flush"
-                )
+                raise ToolError("Internal error: task was not assigned an id after flush")
             await ctx.debug(f"Task {task_id} updated: {updated_fields}.")
-
             task_state_updated = False
             if "status" in updated_fields:
                 t_state_repo.on_status_changed(db, task_id_int)
@@ -273,9 +250,54 @@ async def update_task(
         logger.warning("update_task failed: %s", e)
         raise ToolError(str(e)) from e
     except Exception as e:
-        # Capture unexpected exceptions in Sentry
         sentry_sdk.capture_exception(e)
         raise
+
+
+def _dedup_by_source_id(
+    db, source_id: str, name: str, priority, source_url, sec, t_repo: TaskRepository
+) -> CreateTaskResponse | None:
+    """Return an existing-task response if source_id already exists, else None."""
+    existing = t_repo.get_by_source_id(db, source_id)
+    if not existing:
+        return None
+    existing_id = existing.id
+    if existing_id is None:
+        raise ToolError("Internal error: existing task has no id")
+    if existing.status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
+        return CreateTaskResponse(task_id=existing_id, already_existed=True)
+    existing.name = sec.scrub(name).clean
+    existing.priority = priority
+    if source_url and not existing.source_url:
+        existing.source_url = source_url
+    t_repo.save(db, existing)
+    return CreateTaskResponse(task_id=existing_id, already_existed=True)
+
+
+async def _elicit_name_duplicate(
+    ctx: Context, name: str, t_repo: TaskRepository, db
+) -> CreateTaskResponse | None:
+    """Elicit when an active task name is a substring match; returns response or None."""
+    name_lower = name.lower()
+    existing_names = t_repo.get_active_task_names(db)
+    matching = next(
+        (n for n in existing_names if name_lower in n.lower() or n.lower() in name_lower),
+        None,
+    )
+    if not matching:
+        return None
+    try:
+        result = await ctx.elicit(
+            f"A task named {matching!r} already exists. Create anyway?",
+            response_type=bool,
+        )
+        if isinstance(result, AcceptedElicitation) and result.data is False:
+            existing = t_repo.get_by_name(db, matching)
+            if existing and existing.id is not None:
+                return CreateTaskResponse(task_id=existing.id, already_existed=True)
+    except Exception as e:
+        logger.debug("ctx.elicit unavailable for duplicate check: %s", e)
+    return None
 
 
 async def create_task(
@@ -296,32 +318,17 @@ async def create_task(
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
 
-    # Validate status
     if status not in _VALID_STATUSES:
-        raise ValueError(
-            f"Invalid status {status!r}. Valid values: {sorted(_VALID_STATUSES)}"
-        )
-
+        raise ValueError(f"Invalid status {status!r}. Valid values: {sorted(_VALID_STATUSES)}")
     with get_session() as db:
-        # Dedup by source_id
         if source_id:
-            existing = t_repo.get_by_source_id(db, source_id)
-            if existing:
-                existing_id = existing.id
-                if existing_id is None:
-                    raise ToolError(
-                        "Internal error: existing task has no id"
-                    )
-                # Don't update completed or archived tasks
-                if existing.status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
-                    return CreateTaskResponse(task_id=existing_id, already_existed=True)
-                scrubbed_name = sec.scrub(name).clean
-                existing.name = scrubbed_name
-                existing.priority = priority
-                if source_url and not existing.source_url:
-                    existing.source_url = source_url
-                t_repo.save(db, existing)
-                return CreateTaskResponse(task_id=existing_id, already_existed=True)
+            maybe = _dedup_by_source_id(db, source_id, name, priority, source_url, sec, t_repo)
+            if maybe is not None:
+                return maybe
+        else:
+            maybe = await _elicit_name_duplicate(ctx, name, t_repo, db)
+            if maybe is not None:
+                return maybe
 
         clean_name = sec.scrub(name).clean
         task_status = TaskStatus(status)
@@ -338,15 +345,10 @@ async def create_task(
         if task.id is None:
             raise ToolError("Internal error: task was not assigned an id after flush")
         t_state_repo.create_for_task(db, task)
-
         if meeting_id:
             m_repo.link_tasks(db, meeting_id, [task.id])
-
         await ctx.info(f"Task {task.id} created: {clean_name!r}.")
-        return CreateTaskResponse(
-            task_id=task.id,
-            already_existed=False,
-        )
+        return CreateTaskResponse(task_id=task.id, already_existed=False)
 
 
 async def rewind_task(
@@ -366,9 +368,7 @@ async def rewind_task(
         task_state = t_state_repo.get_by_task_id(db, task_id)
         if task_state is None:
             raise ToolError(f"TaskState missing for task {task_id}")
-
         notes_desc = n_repo.get_for_task(db, task_id=task.id)
-        # Filter persisted notes only (id is None for unpersisted models; DB rows always have id)
         notes_asc = [n for n in reversed(notes_desc) if n.id is not None]
 
         timeline = [
@@ -390,14 +390,11 @@ async def rewind_task(
         last_activity = notes_asc[-1].created_at if notes_asc else task.created_at
 
         summary = RewindSummary(
-            total_notes=total_notes,
-            duration_days=duration_days,
-            last_activity=last_activity,
+            total_notes=total_notes, duration_days=duration_days, last_activity=last_activity
         )
-
-        task_ctx = TaskContext.from_model(task, task_state)
-
-        return RewindResponse(task=task_ctx, timeline=timeline, summary=summary)
+        return RewindResponse(
+            task=TaskContext.from_model(task, task_state), timeline=timeline, summary=summary
+        )
 
 
 async def what_am_i_missing(

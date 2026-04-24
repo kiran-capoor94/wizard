@@ -62,6 +62,20 @@ class TaskRepository:
     def get_by_source_id(self, db: Session, source_id: str) -> Task | None:
         return db.exec(select(Task).where(Task.source_id == source_id)).first()
 
+    def get_active_task_names(self, db: Session) -> list[str]:
+        """Return names of all non-done, non-archived tasks."""
+        rows = db.exec(
+            select(Task.name).where(
+                Task.status.not_in([TaskStatus.DONE, TaskStatus.ARCHIVED])
+            )
+        ).all()
+        return [r for r in rows if r is not None]
+
+    def get_by_name(self, db: Session, name: str) -> Task | None:
+        """Return the first task with an exact name match."""
+        rows = db.exec(select(Task).where(Task.name == name)).all()
+        return rows[0] if rows else None
+
     def get_open_task_contexts(
         self, db: Session, limit: int | None = None
     ) -> list[TaskContext]:
