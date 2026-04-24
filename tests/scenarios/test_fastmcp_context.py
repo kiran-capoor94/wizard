@@ -77,3 +77,62 @@ async def test_update_task_no_elicit_on_other_status(mcp_client, seed_task):
 
     assert not r.is_error, r
     assert len(elicit_results) == 0
+
+
+async def test_save_meeting_summary_elicits_on_task_links(mcp_client, seed_task):
+    """save_meeting_summary elicits when task_ids are provided."""
+    task = await seed_task(name="Follow up on meeting")
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+
+    r = await mcp_client.call_tool("ingest_meeting", {
+        "title": "Sprint planning",
+        "content": "We discussed priorities.",
+    })
+    assert not r.is_error, r
+    meeting_id = r.structured_content["meeting_id"]
+
+    elicit_results = []
+
+    async def fake_elicit(self, message, **kwargs):
+        elicit_results.append(message)
+        return AcceptedElicitation(data=True)
+
+    with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
+        r = await mcp_client.call_tool("save_meeting_summary", {
+            "meeting_id": meeting_id,
+            "summary": "We decided to focus on auth.",
+            "task_ids": [task.id],
+        })
+
+    assert not r.is_error, r
+    assert len(elicit_results) == 1
+
+
+async def test_save_meeting_summary_no_elicit_without_task_ids(mcp_client):
+    """save_meeting_summary does not elicit when no task_ids provided."""
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+
+    r = await mcp_client.call_tool("ingest_meeting", {
+        "title": "Standup",
+        "content": "Quick sync.",
+    })
+    assert not r.is_error, r
+    meeting_id = r.structured_content["meeting_id"]
+
+    elicit_results = []
+
+    async def fake_elicit(self, message, **kwargs):
+        elicit_results.append(message)
+        return AcceptedElicitation(data=True)
+
+    with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
+        r = await mcp_client.call_tool("save_meeting_summary", {
+            "meeting_id": meeting_id,
+            "summary": "Nothing to note.",
+        })
+
+    assert not r.is_error, r
+    assert len(elicit_results) == 0

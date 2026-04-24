@@ -4,6 +4,7 @@ import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
+from fastmcp.server.elicitation import AcceptedElicitation
 
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo
@@ -88,6 +89,19 @@ async def save_meeting_summary(
                     "Internal error: meeting was not assigned an id after flush"
                 )
 
+            if task_ids:
+                task_names = [t.name for t in meeting.tasks if t.id in set(task_ids)]
+                names_str = ", ".join(repr(n) for n in task_names) if task_names else str(task_ids)
+                try:
+                    result = await ctx.elicit(
+                        f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
+                        response_type=bool,
+                    )
+                    if isinstance(result, AcceptedElicitation) and result.data is False:
+                        task_ids = None
+                except Exception as e:
+                    logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
+
             clean_summary = sec.scrub(summary).clean
             meeting.summary = clean_summary
             meetings_repo.save(db, meeting)
@@ -111,6 +125,7 @@ async def save_meeting_summary(
 
             linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
+            await ctx.info(f"Meeting {meeting.id} summary saved.")
             return SaveMeetingSummaryResponse(
                 note_id=saved.id,
                 tasks_linked=len(linked_ids),
@@ -138,6 +153,7 @@ async def ingest_meeting(
     """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
     logger.info("ingest_meeting source_id=%s", source_id)
     with get_session() as db:
+        await ctx.report_progress(1, 2)
         clean_title = sec.scrub(title).clean
         clean_content = sec.scrub(content).clean
 
@@ -166,6 +182,8 @@ async def ingest_meeting(
                 "Internal error: meeting was not assigned an id after flush"
             )
 
+        await ctx.report_progress(2, 2)
+        await ctx.info(f"Meeting {meeting.id} ingested (existed={already_existed}).")
         return IngestMeetingResponse(
             meeting_id=meeting.id,
             already_existed=already_existed,
