@@ -52,6 +52,7 @@ The more you use it, the less ramp-up each session costs.
 **Yesterday:** You debugged a failing API and decided to switch to Redis caching.
 
 **Today:** You start a session. Wizard surfaces:
+
 - your Redis caching decision
 - the investigation notes from the debug session
 - the related open tasks still pending
@@ -141,6 +142,10 @@ Synthesis runs outside the MCP server at hook time — no round-trip cost, no de
 
 `what_should_i_work_on` scores open tasks by priority, recency, and momentum in three modes: `focus` (high-priority active work), `quick-wins` (simplicity-weighted), and `unblock` (surfaces stuck tasks). Just say "what should I work on?" or "I have 30 minutes."
 
+**Working modes**
+
+Switch the agent's behaviour mid-session with `set_mode`. Modes are skill-backed personas stored per-session. Available out of the box: `architect` (systems design), `brainstorm` (divergent exploration), `product-owner` (user-value focus). Configure allowed modes in `~/.wizard/config.json` under `modes.allowed`. The active mode surfaces in `session_start` and `get_modes` responses.
+
 **PII scrubbing**
 
 All ingested content is scrubbed before it touches disk. Regex-based with an allowlist for org-specific identifiers. Configure in `~/.wizard/config.json`:
@@ -160,11 +165,11 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 
 ## MCP Tools
 
-17 tools exposed via the [Model Context Protocol](https://modelcontextprotocol.io/). You don't call these manually — your agent uses them automatically.
+19 tools exposed via the [Model Context Protocol](https://modelcontextprotocol.io/). You don't call these manually — your agent uses them automatically.
 
 | Tool                    | Description                                                                      |
 | ----------------------- | -------------------------------------------------------------------------------- |
-| `session_start`         | Create session, return open/blocked tasks, unsummarised meetings, wizard context |
+| `session_start`         | Create session, return open/blocked tasks, unsummarised meetings, active mode    |
 | `session_end`           | Persist session summary and state                                                |
 | `resume_session`        | Restore prior session state into a new session                                   |
 | `task_start`            | Get tiered task context (rolling summary + key notes)                            |
@@ -174,6 +179,8 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 | `save_note`             | Scrub PII and persist investigation/decision/learning notes                      |
 | `what_am_i_missing`     | 7-point diagnostic — surfaces stale context, missing decisions, etc.             |
 | `what_should_i_work_on` | Scored recommendation with mode (focus / quick-wins / unblock) and time budget   |
+| `get_modes`             | List available modes and the active mode for the current session                 |
+| `set_mode`              | Activate or clear a working mode (e.g. architect, brainstorm, product-owner)     |
 | `get_meeting`           | Retrieve transcript and linked open tasks                                        |
 | `save_meeting_summary`  | Store meeting summary and create linked note                                     |
 | `ingest_meeting`        | Accept raw meeting data (e.g. from Krisp), scrub and store                       |
@@ -196,7 +203,7 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 
 ## Skills
 
-10 FastMCP skills installed to `~/.wizard/skills/` during setup. Skills guide agent behaviour for common workflows.
+13 FastMCP skills installed to `~/.wizard/skills/` during setup. Skills guide agent behaviour for common workflows.
 
 | Skill                   | When it fires                                               |
 | ----------------------- | ----------------------------------------------------------- |
@@ -210,6 +217,9 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 | `meeting-to-tasks`      | Turning meeting action items into tracked tasks             |
 | `code-review`           | Reviewing code changes with prior wizard context            |
 | `architecture-debate`   | Choosing between design approaches before implementing      |
+| `architect`             | Activated via `set_mode` — principal-level systems thinking |
+| `brainstorm`            | Activated via `set_mode` — divergent creative exploration   |
+| `product-owner`         | Activated via `set_mode` — ruthless user-value focus        |
 
 ---
 
@@ -317,9 +327,11 @@ src/wizard/
   skills.py                  # skill loader (reads ~/.wizard/skills/)
   tools/                     # MCP tools (split by domain)
     session_tools.py         # session_start, session_end, resume_session
+    session_helpers.py       # build_prior_summaries, find_previous_session_id, mid-session synthesis loop
     task_tools.py            # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
-    task_fields.py           # apply_task_fields — task field mutation helper
+    task_fields.py           # apply_task_fields + elicitation helpers (mental model, done confirm, duplicate check)
     formatting.py            # task_contexts_to_json — session response serialisation
+    mode_tools.py            # get_modes, set_mode — working mode activation
     triage_tools.py          # what_should_i_work_on
     meeting_tools.py         # get_meeting, save_meeting_summary, ingest_meeting
     query_tools.py           # get_tasks, get_task, get_sessions, get_session

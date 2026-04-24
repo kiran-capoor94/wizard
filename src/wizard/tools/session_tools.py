@@ -116,7 +116,7 @@ async def session_start(
 
         # Apply default mode if none set and config specifies one
         _apply_default_mode(session)
-        db.add(session)
+        db.flush()
 
         await ctx.set_state("current_session_id", session.id)
 
