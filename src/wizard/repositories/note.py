@@ -124,15 +124,18 @@ def build_rolling_summary(notes: list[Note]) -> str | None:
     """
     entries = []
     for n in sorted(notes, key=lambda x: x.created_at, reverse=True):
+        if n.status not in ("active", None):
+            continue
         if n.mental_model:
             dt = n.created_at.strftime("%Y-%m-%d")
             entries.append(f"[{dt} {n.note_type.value}] {n.mental_model}")
     return "\n".join(entries) if entries else None
 
+
 def detect_drift(
     old_ids: set[int],
     new_ids: set[int],
-    task_id: int,
+    entity_id: int,
     artifact_id: str,
 ) -> dict | None:
     """Compare legacy FK path vs artifact_id path note sets.
@@ -146,7 +149,7 @@ def detect_drift(
     if not missing_from_new and not missing_from_old:
         return None
     return {
-        "task_id": task_id,
+        "entity_id": entity_id,
         "artifact_id": artifact_id,
         "missing_from_new": missing_from_new,
         "missing_from_old": missing_from_old,

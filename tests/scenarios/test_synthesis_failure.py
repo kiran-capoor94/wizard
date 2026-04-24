@@ -17,10 +17,12 @@ from wizard.transcript import TranscriptReader
 
 @pytest.fixture
 def synthesiser(security, note_repo):
+    from wizard.config import settings
     return Synthesiser(
         reader=TranscriptReader(),
         note_repo=note_repo,
         security=security,
+        settings=settings,
         backend={"model": "test", "base_url": None, "api_key": None},
     )
 

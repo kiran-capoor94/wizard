@@ -130,3 +130,6 @@ class TaskStateRepository:
             task.id,
         )
         return self.create_for_task(db, task)
+
+    def get_by_task_id(self, db: Session, task_id: int) -> TaskState | None:
+        return db.get(TaskState, task_id)

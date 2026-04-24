@@ -5,11 +5,12 @@ Revises: f0fb7ac74c46
 Create Date: 2026-04-24 00:49:02.896707
 
 """
+import uuid
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '95ee99a3db06'
@@ -20,7 +21,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Backfill artifact_id UUIDs for all existing rows."""
-    import uuid
     conn = op.get_bind()
     for table in ("task", "wizardsession", "meeting"):
         rows = conn.execute(
@@ -50,6 +50,10 @@ def upgrade() -> None:
             artifact_type = 'meeting'
         WHERE meeting_id IS NOT NULL AND artifact_id IS NULL AND task_id IS NULL AND session_id IS NULL
     """))
+    # Backfill synthesis_status for sessions already synthesised before the column existed
+    conn.execute(sa.text(
+        "UPDATE wizardsession SET synthesis_status = 'complete' WHERE is_synthesised = 1"
+    ))
 
 
 def downgrade() -> None:

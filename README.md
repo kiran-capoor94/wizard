@@ -6,107 +6,168 @@
 [![Built with FastMCP](https://img.shields.io/badge/built%20with-FastMCP-purple)](https://github.com/jlowin/fastmcp)
 [![SQLite](https://img.shields.io/badge/database-SQLite-lightblue)](https://www.sqlite.org/)
 
-_A local memory layer for AI agents — persistent context across sessions,
-compounding knowledge over time, and on-demand work triage._
+_Persistent memory for AI coding agents — context that accumulates across sessions so you never start from zero._
 
-AI coding agents forget everything between sessions. Wizard gives them
-persistent memory — tasks, notes, meetings, and decisions that accumulate
-and compound over time. It also tells them what to work on next, scoring
-open tasks by priority, momentum, and recency across three modes: focus,
-quick-wins, and unblock.
+AI coding agents forget everything when a conversation ends. Wizard fixes that. Install it once, and your agent carries forward tasks, decisions, investigations, and meeting context — automatically, every session.
 
-## Quick Start
+---
 
-**Prerequisites:** Python 3.13+, [uv](https://docs.astral.sh/uv/), a local or cloud LLM endpoint for synthesis (e.g. [Ollama](https://ollama.com/) with `qwen3.5:4b`, or a cloud provider like Gemini). Synthesis is optional — set `"enabled": false` to skip it entirely.
+## Install
+
+**Prerequisites:** Python 3.13+, [uv](https://docs.astral.sh/uv/)
 
 ```bash
 uv tool install git+https://github.com/kiran-capoor94/wizard.git
 wizard setup --agent claude-code
 ```
 
-`wizard setup` creates `~/.wizard/`, scaffolds `config.json`, installs
-skills, registers the MCP server with your chosen agent, and installs
-the auto-capture hook. For optional write-back to Notion or Obsidian,
-run `wizard configure knowledge-store` after setup.
+That's it. No server to run. No manual invocations. **You never need to interact with Wizard directly unless you want to.**
 
-## Your first session
+Supported agents: `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `copilot`, `all`
 
-After `wizard setup`, Wizard runs automatically — no manual invocation needed.
+---
 
-**Confirm it's working**
+## What actually happens
+
+```
+1. You start a coding session
+   → Wizard loads your open tasks, blocked work, and prior context automatically
+
+2. You work normally — no new commands to learn
+   → Your agent already knows what you were working on and what decisions were made
+
+3. When you finish, Wizard saves what happened
+   → Your transcript is synthesised into structured notes (decisions, findings, learnings)
+
+4. Next session, your context is better
+   → No re-explaining, no lost decisions, no "what was I doing?"
+```
+
+The more you use it, the less ramp-up each session costs.
+
+---
+
+## Example
+
+**Yesterday:** You debugged a failing API and decided to switch to Redis caching.
+
+**Today:** You start a session. Wizard surfaces:
+- your Redis caching decision
+- the investigation notes from the debug session
+- the related open tasks still pending
+
+You continue instantly — no rebuilding context, no searching git history.
+
+---
+
+## Confirm the connection (optional)
+
+If you're curious whether it's wired up, run:
 
 ```bash
 wizard verify
 ```
 
-**Claude Code**
+The `wizard:` tools appear in your agent's MCP tool list. The session hook fires automatically — you don't need to do anything.
 
-The `wizard:` tools appear in your MCP tool list. The `SessionStart` hook
-calls `wizard:session_start` at the start of every conversation. The
-`SessionEnd` hook synthesises your transcript into structured notes at
-session end.
+---
 
-You don't need to invoke any MCP tool manually — just start working.
+## Transcript synthesis (optional)
 
-**Gemini CLI / Copilot CLI / Codex**
+By default, Wizard stores session context — tasks, notes, and decisions — across sessions. If you enable synthesis, it also extracts structured notes from your conversation transcript using an LLM at session end.
 
-Same hooks apply after `wizard setup --agent <agent>`. Run `wizard verify`
-to confirm the connection.
+To enable it, point Wizard at a local or cloud LLM in `~/.wizard/config.json`:
 
-**What gets captured automatically**
+```json
+"synthesis": {
+  "enabled": true,
+  "backends": [
+    { "model": "ollama/qwen3.5:4b", "base_url": "http://localhost:11434" },
+    { "model": "gemini/gemini-2.5-flash-lite", "api_key": "YOUR_KEY" }
+  ]
+}
+```
 
-- Session start and end recorded in SQLite
-- Transcript synthesised into structured notes at session end (requires a
-  running Ollama instance or a cloud API key — see [Configuration](#configuration))
-- Run `wizard analytics` to review your session history
+Wizard tries backends in order — first healthy wins. Set `"enabled": false` to skip it entirely.
 
-## How It Works
+See [Advanced: transcript synthesis](#advanced-transcript-synthesis) for setup details, model recommendations, and backend management.
 
-Wizard is built around a **session lifecycle** that keeps your agent
-grounded across work sessions.
+---
 
-1. **Session continuity** — `session_start` creates a session and returns
-   your open and blocked tasks, unsummarised meetings, and optional
-   knowledge store context. Abandoned sessions from prior runs are
-   auto-closed and their transcripts synthesised.
-2. **Compounding context** — Notes, decisions, and investigations accumulate
-   per task across sessions. Every time you revisit a task, prior context
-   surfaces automatically. The more you use Wizard, the less ramp-up each
-   session costs.
-3. **TOON (Token-Oriented Object Notation)** — Wizard delivers large task lists
-   using a custom, compact tabular format that reduces token consumption
-   by ~40% vs JSON. This allows the agent to ingest more context without
-   hitting window limits.
-4. **Transcript synthesis** — At session end, Wizard synthesises the conversation
-   transcript into structured notes using a local or cloud LLM. Ollama backends
-   (e.g. `qwen3.5:4b`) are called via the native `/api/chat` API for low overhead;
-   cloud backends (Gemini, OpenAI) go through LiteLLM. The raw transcript content is
-   persisted to the DB at capture time, so re-synthesis remains possible even after
-   the agent deletes the transcript file. Synthesis is triggered by the `SessionEnd`
-   hook calling `wizard capture --close`.
-5. **Session personalization** — A `SessionStart` hook refreshes
-   `~/.claude/settings.json` in 80% of sessions with Wizard-aware content:
-   task-signal announcements, rotating spinner verbs, sampled tips, and a
-   live status line. It also auto-injects the `wizard:session_start` MCP tool call
-   so sessions boot without manual invocation.
-6. **Work triage** — `what_should_i_work_on` scores your open tasks by
-   priority, recency, and momentum in three modes: `focus` (weighted toward
-   high-priority active work), `quick-wins` (simplicity-weighted), and
-   `unblock` (surfaces stuck tasks). The skill handles the full interaction —
-   just say "what should I work on?" or "I have 30 minutes".
+## Optional: Write-back to Notion or Obsidian
+
+Wizard works without a knowledge store. If you want session summaries and tasks synced back to Notion or Obsidian:
+
+```bash
+wizard configure knowledge-store
+```
+
+---
+
+## CLI reference
+
+```bash
+wizard setup [--agent AGENT]             # initialize, register MCP + hooks
+wizard configure knowledge-store         # optional Notion/Obsidian write-back
+wizard configure synthesis               # manage LLM backends
+wizard doctor [--all]                    # health check
+wizard analytics [--day|--week]          # session/task/note usage stats
+wizard update                            # upgrade install, migrate DB, re-register
+wizard uninstall [--yes]                 # clean removal
+wizard capture --close                   # (called by hooks) synthesise transcript
+```
+
+---
+
+## How it works
+
+Wizard is a local MCP server backed by SQLite. It runs as a stdio transport, registered with your agent at setup.
+
+**Session lifecycle**
+
+1. `SessionStart` hook fires → `session_start` creates a session, returns open and blocked tasks, prior notes, unsummarised meetings
+2. You work — notes, decisions, and task state accumulate automatically via synthesis
+3. `SessionEnd` hook fires → `wizard capture --close` synthesises the transcript into structured notes and closes the session
+
+**Compounding context**
+
+Notes accumulate per task across sessions. Every time you revisit a task, prior investigations, decisions, and learnings surface automatically. The agent doesn't need to be told what it decided last week — it's already there.
+
+**Transcript synthesis**
+
+Synthesis runs outside the MCP server at hook time — no round-trip cost, no dependency on the agent being active. Raw transcript content is persisted to the DB at capture time, so re-synthesis remains possible even after the agent deletes the file.
+
+**Work triage**
+
+`what_should_i_work_on` scores open tasks by priority, recency, and momentum in three modes: `focus` (high-priority active work), `quick-wins` (simplicity-weighted), and `unblock` (surfaces stuck tasks). Just say "what should I work on?" or "I have 30 minutes."
+
+**PII scrubbing**
+
+All ingested content is scrubbed before it touches disk. Regex-based with an allowlist for org-specific identifiers. Configure in `~/.wizard/config.json`:
+
+```json
+"scrubbing": {
+  "enabled": true,
+  "allowlist": ["ENG-\\d+"]
+}
+```
+
+**Session personalization**
+
+A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions with task-signal announcements, rotating spinner verbs, and a status line — keeping Claude Code contextually aware without manual prompting.
+
+---
 
 ## MCP Tools
 
-Wizard exposes 17 tools via the
-[Model Context Protocol](https://modelcontextprotocol.io/).
-The MCP server self-describes its tools — this is just for orientation.
+17 tools exposed via the [Model Context Protocol](https://modelcontextprotocol.io/). You don't call these manually — your agent uses them automatically.
 
 | Tool                    | Description                                                                      |
 | ----------------------- | -------------------------------------------------------------------------------- |
 | `session_start`         | Create session, return open/blocked tasks, unsummarised meetings, wizard context |
 | `session_end`           | Persist session summary and state                                                |
 | `resume_session`        | Restore prior session state into a new session                                   |
-| `task_start`            | Get tiered task context (rolling_summary + key notes)                            |
+| `task_start`            | Get tiered task context (rolling summary + key notes)                            |
 | `create_task`           | Create a new task, optionally linked to a meeting                                |
 | `update_task`           | Update any task field                                                            |
 | `rewind_task`           | Full note timeline for a task, oldest to newest                                  |
@@ -123,7 +184,7 @@ The MCP server self-describes its tools — this is just for orientation.
 
 ## MCP Resources
 
-Wizard also exposes 5 read-only resources:
+5 read-only resources:
 
 | URI                                | Description                                  |
 | ---------------------------------- | -------------------------------------------- |
@@ -135,9 +196,7 @@ Wizard also exposes 5 read-only resources:
 
 ## Skills
 
-Wizard ships 10 FastMCP skills, installed to `~/.wizard/skills/` during
-`wizard setup`. Skills guide agent behaviour for common workflows — when
-a trigger phrase is detected, the agent loads and follows the skill.
+10 FastMCP skills installed to `~/.wizard/skills/` during setup. Skills guide agent behaviour for common workflows.
 
 | Skill                   | When it fires                                               |
 | ----------------------- | ----------------------------------------------------------- |
@@ -152,6 +211,8 @@ a trigger phrase is detected, the agent loads and follows the skill.
 | `code-review`           | Reviewing code changes with prior wizard context            |
 | `architecture-debate`   | Choosing between design approaches before implementing      |
 
+---
+
 ## Architecture
 
 ```mermaid
@@ -163,7 +224,6 @@ graph TD
     C --> F[SessionCloser]
     C --> G[Security / PII Scrubbing]
     C --> H[Repositories]
-    C --> T[TOON Encoder]
     H --> I[(SQLite)]
     C --> P[Synthesiser]
     N[SessionEnd hook] --> O[wizard capture --close]
@@ -173,67 +233,32 @@ graph TD
     C -.->|optional write-back| L[Knowledge Store\nNotion / Obsidian]
 ```
 
-**MCP Layer** — FastMCP server exposing tools, skills, and resources.
-Tools are the write path, resources are the read path, skills guide agent
-behaviour. A `ToolLoggingMiddleware` logs every tool invocation into an
-append-only telemetry table.
+**Layers:**
 
-**Triage** — `what_should_i_work_on` scores open tasks using priority,
-recency, momentum, and simplicity signals with mode-based weight vectors
-(`focus`, `quick-wins`, `unblock`). Reasons are generated via LLM sampling
-for the top candidates.
+- **MCP Layer** — FastMCP server with tools (write path), resources (read path), and skills (agent guidance). A `ToolLoggingMiddleware` logs every invocation to an append-only telemetry table.
+- **Repositories** — Query layer over SQLModel/SQLite. `TaskRepository`, `NoteRepository`, `MeetingRepository`, `SessionRepository`, `TaskStateRepository`.
+- **Synthesis** — Runs at hook time, outside the MCP server. `OllamaAdapter` for local Ollama backends; LiteLLM for cloud. Backends tried in priority order; first healthy wins.
+- **Artifact identity** — Every task, meeting, and session carries a UUID `artifact_id`. Notes anchor to a single entity. Enables synthesis deduplication and note lifecycle tracking (`active` / `superseded` / `unclassified`).
+- **Security** — PII scrubbed before storage, not on read. Regex patterns with allowlist.
+- **Knowledge Store** — Optional write-back to Notion or Obsidian. Not required for core functionality.
 
-**Session Management** — `SessionCloser` auto-closes abandoned sessions at
-`session_start`. Transcript synthesis runs inside `wizard capture --close`
-(hook-based final capture). Ollama backends use `OllamaAdapter` (native
-`/api/chat`, no grammar constraint, `think:false` for chain-of-thought models);
-cloud backends route through LiteLLM. Backends are tried in priority order —
-first healthy local server wins, cloud providers always pass the health check.
-Raw transcript JSONL is persisted to `wizardsession.transcript_raw` at capture
-time, enabling re-synthesis after the agent deletes the file.
+**Why SQLite?** Local-first, zero infrastructure, ships with Python. Wizard is a personal tool.
 
-**TOON (Token-Oriented Object Notation)** — Custom compact tabular format
-used for bulk task delivery in `session_start`, reducing the context window
-footprint by ~40% compared to standard JSON.
+---
 
-**Security** — PII scrubbing on all ingested content before it touches
-disk. Regex-based with an allowlist for org-specific identifiers you want
-to preserve. Scrub before storage, not on read — data at rest should never
-contain PII.
+## Advanced: transcript synthesis
 
-**Repositories** — Query layer over SQLModel/SQLite. Prior notes are
-automatically retrieved when you revisit a task, producing compounding
-context across sessions.
+Synthesis routes through [LiteLLM](https://docs.litellm.ai/) to any compatible provider. The `model` field uses LiteLLM model string format: `"<provider>/<model>"`.
 
-**Knowledge Store** — Optional write-back to Notion or Obsidian. Not
-required for core Wizard functionality. Configure with
-`wizard configure knowledge-store`.
+**Recommended local model:** `qwen3.5:4b` (3.4 GB at Q4, fast on Apple Silicon). Pull with:
 
-**Why SQLite?** Local-first, zero infrastructure, ships with Python.
-Wizard is a personal tool — it doesn't need Postgres.
-
-## Configuration
-
-After running `wizard setup`, edit `~/.wizard/config.json`:
-
-```json
-{
-  "db": "~/.wizard/wizard.db",
-  "scrubbing": {
-    "enabled": true,
-    "allowlist": ["ENG-\\d+"]
-  }
-}
+```bash
+ollama pull qwen3.5:4b
 ```
 
-That's the minimal config. Wizard works without a knowledge store.
+Avoid large-context variants (e.g. `-64k`, `-128k`) — their defaults require large KV cache allocations.
 
-### Transcript Synthesis
-
-Transcript synthesis routes through [LiteLLM](https://docs.litellm.ai/) to any compatible
-provider (Ollama, Unsloth, llama.cpp, OpenAI, Gemini, etc.). Wizard tries backends in
-priority order — first healthy local server wins, cloud providers always pass the health
-check. Configure in `config.json`:
+**Full config example:**
 
 ```json
 "synthesis": {
@@ -254,124 +279,32 @@ check. Configure in `config.json`:
 }
 ```
 
-The `model` field uses [LiteLLM model string format](https://docs.litellm.ai/docs/providers):
-`"<provider>/<model>"`. Examples: `"ollama/qwen3.5:4b"`, `"openai/gpt-4o-mini"`,
-`"gemini/gemini-2.5-flash-lite"`. `api_key` is required for cloud providers; leave empty for
-local endpoints. `base_url` is required for local servers; omit for cloud providers.
+`api_key` is required for cloud providers; leave empty for local endpoints. `base_url` is required for local servers; omit for cloud.
 
-**Recommended local model:** `qwen3.5:4b` (3.4 GB at Q4, fast on Apple Silicon, excellent
-instruction following). Avoid large-context model variants (e.g. `-64k`, `-128k`) as
-their modelfile defaults require large KV cache allocations. `ollama/qwen3.5:4b` or
-`ollama/qwen3.5:4b-32k` are good defaults.
-
-Manage backends interactively with `wizard configure synthesis` — list, add, remove, reorder,
-and test backends without editing JSON directly.
-
-Set `"enabled": false` to disable synthesis entirely (e.g. on machines without any LLM
-server). The `wizard capture --close` command will mark the session and exit cleanly.
-
-### Sentry Monitoring (Optional)
-
-Wizard can send error and performance data to [Sentry](https://sentry.io/) for enhanced observability.
-Configure in `config.json`:
-
-```json
-"sentry": {
-  "dsn": "your-sentry-dsn-here",
-  "enabled": false,
-  "traces_sample_rate": 0.1,
-  "profiles_sample_rate": 0.1
-}
-```
-
-- `dsn`: Your Sentry Data Source Name (found in Project Settings > Client Keys (DSN))
-- `enabled`: Set to `true` to activate Sentry monitoring
-- `traces_sample_rate`: Percentage of transactions to send to Sentry (0.0 to 1.0)
-- `profiles_sample_rate`: Percentage of transactions to profile (0.0 to 1.0)
-
-When enabled, Wizard will:
-
-- Automatically initialize Sentry on server startup
-- Create spans for all MCP tool executions with session context
-- Capture exceptions with full stack traces and contextual data
-- Respect existing PII scrubbing before sending data to Sentry
-
-### Knowledge Store (optional)
-
-A knowledge store enables optional write-back — session summaries and
-task updates can be pushed to Notion or Obsidian. Configure interactively:
+Manage backends interactively — no JSON editing required:
 
 ```bash
-uv run wizard configure knowledge-store
+wizard configure synthesis              # list backends
+wizard configure synthesis add         # add a backend (interactive)
+wizard configure synthesis remove N    # remove by position
+wizard configure synthesis move M N    # reorder (position 1 = highest priority)
+wizard configure synthesis test [N]    # probe reachability
 ```
 
-This prompts for the backend type (`notion` / `obsidian` / blank for none)
-and the relevant credentials, then writes a `knowledge_store` block to
-`config.json`:
-
-**Notion:**
-
-```json
-"knowledge_store": {
-  "type": "notion",
-  "notion": {
-    "daily_parent_id": "notion-page-id",
-    "tasks_db_id": "notion-tasks-database-id",
-    "meetings_db_id": "notion-meetings-database-id"
-  }
-}
-```
-
-You'll need a [Notion integration token](https://www.notion.so/profile/integrations)
-with access to your task and meeting databases. The IDs here are database
-page IDs (visible in the Notion URL).
-
-**Obsidian:**
-
-```json
-"knowledge_store": {
-  "type": "obsidian",
-  "obsidian": {
-    "vault_path": "/path/to/vault",
-    "daily_notes_folder": "Daily",
-    "tasks_folder": "Tasks"
-  }
-}
-```
-
-Override the config path with the `WIZARD_CONFIG_FILE` environment variable.
-
-## CLI
-
-```bash
-wizard setup [--agent AGENT]             # Initialize ~/.wizard/, config, skills, MCP + hook registration
-wizard configure knowledge-store         # Configure optional Notion/Obsidian write-back
-wizard configure synthesis               # List configured LLM backends (tried in priority order)
-wizard configure synthesis add           # Add a backend (prompts interactively)
-wizard configure synthesis remove N      # Remove backend by position
-wizard configure synthesis move M N      # Reorder backends (position 1 = highest priority)
-wizard configure synthesis test [N]      # Probe backend reachability
-wizard doctor [--all]                    # Health check — config, database, skills, migrations
-wizard analytics [--day|--week|--from/--to]  # Session/task/note usage stats
-wizard update                            # Upgrade install, migrate DB, re-register agents + hooks
-wizard uninstall [--yes]                 # Clean removal of all state, MCP, and hook registration
-wizard capture --close                   # (Called by hooks) Synthesise transcript into notes
-```
-
-**Supported agents for `--agent`:** `claude-code`, `claude-desktop`, `gemini`, `opencode`, `codex`, `copilot`, `all`
+---
 
 ## Development
 
 ```bash
-uv run pytest                  # Run tests (always use uv run — not plain python)
-uv run server.py               # Run MCP server locally (dev only)
-uv run alembic upgrade head    # Run migrations (dev only — `wizard update` does this for installs)
+uv run pytest                  # run tests (always use uv run)
+uv run server.py               # run MCP server locally
+uv run alembic upgrade head    # run pending migrations (dev only)
 ```
 
-### Project Structure
+### Project structure
 
 ```text
-server.py                    # FastMCP server entry point for dev use (stdio)
+server.py                    # FastMCP server entry point (dev, stdio transport)
 src/wizard/
   cli/
     main.py                  # Typer CLI (setup, configure, doctor, analytics, update, uninstall)
@@ -379,46 +312,47 @@ src/wizard/
     capture.py               # wizard capture — transcript synthesis trigger (called by hooks)
     configure.py             # configure knowledge-store + synthesis backends subcommands
     doctor.py                # 8-point health checks
-    analytics.py             # Session/note/task analytics (3-column Rich layout)
+    analytics.py             # session/note/task analytics
   mcp_instance.py            # FastMCP app factory + ToolLoggingMiddleware
-  skills.py                  # Skill loader (reads ~/.wizard/skills/)
+  skills.py                  # skill loader (reads ~/.wizard/skills/)
   tools/                     # MCP tools (split by domain)
     session_tools.py         # session_start, session_end, resume_session
     task_tools.py            # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
-    task_helpers.py          # Shared helpers for task tools
-    triage_tools.py          # what_should_i_work_on (mode-based scoring + LLM reasons)
+    task_fields.py           # apply_task_fields — task field mutation helper
+    formatting.py            # task_contexts_to_json — session response serialisation
+    triage_tools.py          # what_should_i_work_on
     meeting_tools.py         # get_meeting, save_meeting_summary, ingest_meeting
-    query_tools.py           # get_tasks, get_task, get_sessions, get_session (paginated)
-  repositories/              # Query layer (package)
-    task.py                  # TaskRepository
-    note.py                  # NoteRepository
-    meeting.py               # MeetingRepository
-    session.py               # SessionRepository
-    task_state.py            # TaskStateRepository
+    query_tools.py           # get_tasks, get_task, get_sessions, get_session
+  repositories/              # query layer (package)
+    task.py
+    note.py
+    meeting.py
+    session.py
+    task_state.py
   resources.py               # 5 MCP read-only resources
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware
   transcript.py              # TranscriptReader (JSONL parser)
-  synthesis.py               # Synthesiser (auto-capture via LiteLLM — ordered backend failover)
-  llm_adapters.py            # LiteLLM completion wrapper, probe_backend_health, JSON parsing
-  mid_session.py             # Background mid-session synthesis state (MID_SESSION_TASKS)
-  toon.py                    # TOON encoder — compact tabular format for bulk task delivery
-  models.py                  # SQLModel entities (task, note, meeting, wizardsession, toolcall, task_state)
+  synthesis.py               # Synthesiser (ordered backend failover)
+  llm_adapters.py            # OllamaAdapter, LiteLLM wrapper, probe_backend_health
+  models.py                  # SQLModel entities
   schemas.py                 # Pydantic response schemas
   services.py                # SessionCloser
-  security.py                # PII scrubbing (regex + allowlist)
-  config.py                  # Pydantic settings + BackendConfig + JsonConfigSettingsSource
-  database.py                # SQLite connection management + run_migrations()
-  deps.py                    # FastMCP Depends() provider functions
+  security.py                # PII scrubbing
+  config.py                  # Pydantic settings + BackendConfig
+  database.py                # SQLite connection management
+  deps.py                    # FastMCP Depends() providers
   exceptions.py              # ConfigurationError
-  agent_registration.py      # Register MCP + hooks in agent configs; refresh_hooks()
-  alembic/                   # DB migrations — bundled in package for `wizard update`
-  hooks/                     # Hook scripts — bundled in package, copied to ~/.wizard/hooks/ on setup
+  agent_registration.py      # register MCP + hooks in agent configs
+  alembic/                   # DB migrations (bundled for wizard update)
+  hooks/                     # hook scripts (bundled, copied to ~/.wizard/hooks/ on setup)
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ on setup)
-hooks/                       # Hook scripts source (also bundled as src/wizard/hooks/ for installs)
-  session-end.sh             # Claude Code SessionEnd hook — transcript synthesis trigger
-  session-start.sh           # Claude Code SessionStart hook — personalization + session boot injection
+hooks/
+  session-end.sh             # SessionEnd hook — transcript synthesis trigger
+  session-start.sh           # SessionStart hook — personalization + session boot injection
 ```
+
+---
 
 ## License
 

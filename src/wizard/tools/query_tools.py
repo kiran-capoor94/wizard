@@ -9,8 +9,7 @@ from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from sqlmodel import Session
 
-from ..database import get_session as _get_db_session
-from ..deps import get_note_repo, get_session_repo, get_task_repo, get_task_state_repo
+from ..deps import get_db_session as _get_db_session, get_note_repo, get_session_repo, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
 from ..repositories import (
     NoteRepository,
