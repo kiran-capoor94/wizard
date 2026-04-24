@@ -100,6 +100,11 @@ class SentrySettings(BaseModel):
     profiles_sample_rate: float = 0.1
 
 
+class ModesSettings(BaseModel):
+    default: str | None = None
+    allowed: list[str] = Field(default_factory=list)
+
+
 class Settings(BaseSettings):
     model_config = {"extra": "ignore"}
 
@@ -112,6 +117,7 @@ class Settings(BaseSettings):
     )
     synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
     sentry: SentrySettings = Field(default_factory=SentrySettings)
+    modes: ModesSettings = Field(default_factory=ModesSettings)
 
     @classmethod
     def settings_customise_sources(
