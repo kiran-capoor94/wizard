@@ -11,13 +11,11 @@ from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
 from ..models import (
-    MeetingTasks,
     Note,
     NoteType,
     Task,
     TaskCategory,
     TaskPriority,
-    TaskState,
     TaskStatus,
 )
 from ..repositories import MeetingRepository, NoteRepository, TaskRepository, TaskStateRepository
