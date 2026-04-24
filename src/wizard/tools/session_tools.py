@@ -45,7 +45,6 @@ from ..services import SessionCloser
 from ..skills import (
     SKILL_SESSION_END,
     SKILL_SESSION_RESUME,
-    SKILL_SESSION_START,
     load_skill_post,
 )
 from .formatting import task_contexts_to_json
@@ -160,7 +159,6 @@ async def session_start(
             wizard_context=build_wizard_context(),
             closed_sessions=closed_sessions,
             prior_summaries=prior_summaries,
-            skill_instructions=load_skill_post(SKILL_SESSION_START),
             active_mode=session.active_mode,
             available_modes=build_available_modes(settings.modes),
         )
