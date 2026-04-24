@@ -127,6 +127,7 @@ async def task_start(
             if not skill_delivered:
                 await ctx.set_state("task_start_skill_delivered", True)
 
+            await ctx.info(f"Task {task.id} loaded: {task.name!r}.")
             return TaskStartResponse(
                 task=task_ctx,
                 compounding=total_notes > 0,
@@ -197,7 +198,10 @@ async def save_note(
                 raise ToolError(
                     "Internal error: note was not assigned an id after flush"
                 )
+            await ctx.report_progress(1, 2)
             t_state_repo.on_note_saved(db, task_id)
+            await ctx.report_progress(2, 2)
+            await ctx.info(f"Note {saved.id} saved ({note_type.value}).")
             return SaveNoteResponse(
                 note_id=saved.id,
                 mental_model_saved=saved.mental_model is not None,
@@ -212,6 +216,7 @@ async def save_note(
 
 
 async def update_task(
+    ctx: Context,
     task_id: int,
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
@@ -246,6 +251,7 @@ async def update_task(
             )
 
             t_repo.save(db, task)
+            await ctx.debug(f"Task {task_id} updated: {updated_fields}.")
 
             task_id_int = task.id
             if task_id_int is None:
@@ -273,6 +279,7 @@ async def update_task(
 
 
 async def create_task(
+    ctx: Context,
     name: str,
     priority: TaskPriority = TaskPriority.MEDIUM,
     category: TaskCategory = TaskCategory.ISSUE,
@@ -330,7 +337,7 @@ async def create_task(
         t_repo.save(db, task)
         if task.id is None:
             raise ToolError("Internal error: task was not assigned an id after flush")
-
+        await ctx.info(f"Task {task.id} created: {clean_name!r}.")
         t_state_repo.create_for_task(db, task)
 
         if meeting_id:
@@ -483,10 +490,7 @@ async def what_am_i_missing(
         return MissingResponse(signals=signals)
 
 
-# ---------------------------------------------------------------------------
 # Register tools with MCP
-# ---------------------------------------------------------------------------
-
 mcp.tool()(task_start)
 mcp.tool()(save_note)
 mcp.tool()(update_task)
