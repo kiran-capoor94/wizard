@@ -42,12 +42,59 @@ def _repair_json(s: str) -> str:
     return repaired
 
 
+_NOTE_TYPE_SYNONYMS: dict[str, str] = {
+    "finding": "investigation",
+    "findings": "investigation",
+    "choice": "decision",
+    "option": "decision",
+    "options": "decision",
+    "summary": "session_summary",
+    "doc": "docs",
+    "documentation": "docs",
+    "learning": "learnings",
+}
+
+
+def _coerce_task_id(value: object) -> int | None:
+    """Coerce LLM task_id quirks to int | None."""
+    if isinstance(value, list):
+        # Ambiguous multi-task association — drop entirely, anchor to session.
+        return None
+    if isinstance(value, float):
+        # Truncate (e.g. 177.9 → 177). Non-integer floats are treated as
+        # "close enough" rather than invalid, unlike the str path where
+        # int("177.9") would ValueError and return None.
+        coerced = int(value)
+        return coerced if coerced > 0 else None
+    if isinstance(value, str):
+        try:
+            coerced = int(value)
+            return coerced if coerced > 0 else None
+        except ValueError:
+            return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    return None
+
+
 def _coerce_note(n: dict) -> dict:
     """Coerce LLM quirks before Pydantic validation. Mutates a copy."""
-    if isinstance(n.get("task_id"), list):
-        # LLM returned multiple task IDs for one note — ambiguous, so drop the
-        # association entirely and let the note anchor to the session instead.
-        n["task_id"] = None
+    if "task_id" in n:
+        n["task_id"] = _coerce_task_id(n["task_id"])
+
+    note_type = n.get("note_type")
+    if isinstance(note_type, str):
+        normalised = note_type.lower().strip()
+        n["note_type"] = _NOTE_TYPE_SYNONYMS.get(normalised, normalised)
+
+    content = n.get("content")
+    if not isinstance(content, str):
+        n["content"] = str(content) if content is not None else ""
+
+    mental_model = n.get("mental_model")
+    if isinstance(mental_model, list):
+        n["mental_model"] = "\n".join(str(item) for item in mental_model)
+
     return n
 
 

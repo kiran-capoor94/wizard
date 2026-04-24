@@ -177,3 +177,98 @@ def test_parse_notes_coerces_empty_task_id_list_to_none():
     notes = _parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None
+
+
+def test_parse_notes_coerces_task_id_string_to_int():
+    """LLM returns task_id as a quoted integer string — must coerce to int."""
+    raw = json.dumps([
+        {"note_type": "decision", "content": "Made a call.", "task_id": "177"}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].task_id == 177
+
+
+def test_parse_notes_coerces_task_id_float_to_int():
+    """LLM returns task_id as float — must coerce to int."""
+    raw = json.dumps([
+        {"note_type": "decision", "content": "Made a call.", "task_id": 177.0}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].task_id == 177
+
+
+def test_parse_notes_normalises_note_type_case():
+    """LLM returns note_type with wrong case — must normalise to lowercase."""
+    raw = json.dumps([
+        {"note_type": "Investigation", "content": "Some finding.", "task_id": None}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].note_type == "investigation"
+
+
+def test_parse_notes_maps_note_type_synonym():
+    """LLM returns known synonym for note_type — must map to canonical value."""
+    raw = json.dumps([
+        {"note_type": "finding", "content": "Some finding.", "task_id": None}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].note_type == "investigation"
+
+
+def test_parse_notes_coerces_null_content():
+    """LLM returns null content — must coerce to empty string rather than fail."""
+    raw = json.dumps([
+        {"note_type": "investigation", "content": None, "task_id": None}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].content == ""
+
+
+def test_parse_notes_coerces_mental_model_list():
+    """LLM returns mental_model as a list — must join into a single string."""
+    raw = json.dumps([
+        {
+            "note_type": "investigation",
+            "content": "Finding.",
+            "task_id": None,
+            "mental_model": ["point one", "point two"],
+        }
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].mental_model == "point one\npoint two"
+
+
+def test_parse_notes_coerces_task_id_non_numeric_string_to_none():
+    """LLM returns task_id as a non-numeric string — ValueError fallback must coerce to None."""
+    raw = json.dumps([
+        {"note_type": "decision", "content": "Made a call.", "task_id": "abc"}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].task_id is None
+
+
+def test_parse_notes_coerces_non_string_content():
+    """LLM returns content as a non-string, non-None value — must coerce to string."""
+    raw = json.dumps([
+        {"note_type": "investigation", "content": 42, "task_id": None}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].content == "42"
+
+
+def test_parse_notes_coerces_zero_task_id_to_none():
+    """LLM returns task_id as 0 (invalid DB id) — must coerce to None."""
+    raw = json.dumps([
+        {"note_type": "decision", "content": "Made a call.", "task_id": 0}
+    ])
+    notes = _parse_notes(raw)
+    assert len(notes) == 1
+    assert notes[0].task_id is None
