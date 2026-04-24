@@ -235,7 +235,7 @@ async def update_task(
                     if isinstance(result, AcceptedElicitation) and result.data is False:
                         return UpdateTaskResponse(
                             task_id=task_id,
-                            updated_fields={},
+                            updated_fields=[],
                             task_state_updated=False,
                         )
                 except Exception as e:
