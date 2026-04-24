@@ -28,3 +28,7 @@ You are **picking up a dropped thread**. A prior session exists with state, note
 
 - If the engineer mentions a specific session (e.g. "resume session 42"): pass `session_id=42`
 - Otherwise: call with no arguments. Wizard finds the most recent session with notes.
+
+## Active Mode
+
+If `active_mode` is set in the `resume_session` response, invoke the Skill tool with that skill name before doing anything else.
