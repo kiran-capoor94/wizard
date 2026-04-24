@@ -112,7 +112,8 @@ async def session_start(
             keyed_dir.mkdir(parents=True, exist_ok=True)
             (keyed_dir / "wizard_id").write_text(str(session.id))
 
-        await ctx.info(f"Session {session.id} started.")
+        await ctx.info(f"Session {session.id} started (source={source}).")
+        await ctx.report_progress(1, 4)
 
         closed_sessions = await session_closer.close_recent_abandoned(
             db, ctx, session.id
@@ -123,9 +124,13 @@ async def session_start(
         except Exception as e:
             logger.warning("refresh_stale_days failed: %s", e)
 
+        await ctx.report_progress(2, 4)
+
         open_tasks_total = t_repo.count_open_tasks(db)
         open_tasks_list = t_repo.get_open_task_contexts(db, limit=20)
         blocked_list = t_repo.get_blocked_task_contexts(db)
+
+        await ctx.report_progress(3, 4)
 
         prior_summaries = build_prior_summaries(db, session.id)
 
@@ -142,6 +147,8 @@ async def session_start(
             closed_sessions=closed_sessions,
             prior_summaries=prior_summaries,
         )
+
+    await ctx.report_progress(4, 4)
 
     # Background task dispatched AFTER db context closes so it gets its own clean session
     asyncio.create_task(session_closer.close_abandoned_background(response.session_id))
@@ -352,6 +359,7 @@ async def resume_session(
                 "Internal error: session was not assigned an id after flush"
             )
         await ctx.set_state("current_session_id", new_session.id)
+        await ctx.info(f"Resumed session {new_session.id} (from {prior.id}).")
 
         # Write wizard integer ID to the agent-session keyed directory (mirrors session_start).
         if agent_session_id and new_session.id is not None:

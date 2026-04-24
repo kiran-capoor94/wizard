@@ -4,12 +4,11 @@ import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
-from sqlmodel import col, select
 
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo
 from ..mcp_instance import mcp
-from ..models import Meeting, MeetingCategory, MeetingTasks, Note, NoteType, TaskStatus
+from ..models import Meeting, MeetingCategory, Note, NoteType, TaskStatus
 from ..repositories import MeetingRepository, NoteRepository, TaskRepository
 from ..schemas import (
     GetMeetingResponse,
@@ -25,8 +24,8 @@ logger = logging.getLogger(__name__)
 async def get_meeting(
     ctx: Context,
     meeting_id: int,
-    m_repo: MeetingRepository = Depends(get_meeting_repo),
-    t_repo: TaskRepository = Depends(get_task_repo),
+    meetings_repo: MeetingRepository = Depends(get_meeting_repo),
+    tasks_repo: TaskRepository = Depends(get_task_repo),
 ) -> GetMeetingResponse:
     """Returns meeting transcript and linked open tasks.
 
@@ -36,20 +35,20 @@ async def get_meeting(
     logger.info("get_meeting meeting_id=%d", meeting_id)
     try:
         with get_session() as db:
-            meeting = m_repo.get_by_id(db, meeting_id)
+            meeting = meetings_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
                 raise ToolError(
                     "Internal error: meeting was not assigned an id after flush"
                 )
 
             open_task_ids = [
-                t.id
-                for t in meeting.tasks
-                if t.id is not None
-                and t.status
+                task.id
+                for task in meeting.tasks
+                if task.id is not None
+                and task.status
                 in (TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
             ]
-            linked_tasks = t_repo.get_task_contexts_by_ids(db, open_task_ids)
+            linked_tasks = tasks_repo.get_task_contexts_by_ids(db, open_task_ids)
 
             return GetMeetingResponse(
                 meeting_id=meeting.id,
@@ -65,7 +64,6 @@ async def get_meeting(
         logger.warning("get_meeting failed: %s", e)
         raise ToolError(str(e)) from e
     except Exception as e:
-        # Capture unexpected exceptions in Sentry
         sentry_sdk.capture_exception(e)
         raise
 
@@ -75,7 +73,7 @@ async def save_meeting_summary(
     meeting_id: int,
     summary: str,
     task_ids: list[int] | None = None,
-    m_repo: MeetingRepository = Depends(get_meeting_repo),
+    meetings_repo: MeetingRepository = Depends(get_meeting_repo),
     sec: SecurityService = Depends(get_security),
     n_repo: NoteRepository = Depends(get_note_repo),
 ) -> SaveMeetingSummaryResponse:
@@ -84,7 +82,7 @@ async def save_meeting_summary(
     try:
         with get_session() as db:
             session_id: int | None = await ctx.get_state("current_session_id")
-            meeting = m_repo.get_by_id(db, meeting_id)
+            meeting = meetings_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
                 raise ToolError(
                     "Internal error: meeting was not assigned an id after flush"
@@ -92,7 +90,7 @@ async def save_meeting_summary(
 
             clean_summary = sec.scrub(summary).clean
             meeting.summary = clean_summary
-            m_repo.save(db, meeting)
+            meetings_repo.save(db, meeting)
 
             note = Note(
                 note_type=NoteType.DOCS,
@@ -109,7 +107,7 @@ async def save_meeting_summary(
                 )
 
             if task_ids:
-                m_repo.link_tasks(db, meeting_id, task_ids)
+                meetings_repo.link_tasks(db, meeting_id, task_ids)
 
             linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
@@ -134,7 +132,7 @@ async def ingest_meeting(
     source_type: str | None = None,
     source_url: str | None = None,
     category: MeetingCategory = MeetingCategory.GENERAL,
-    m_repo: MeetingRepository = Depends(get_meeting_repo),
+    meetings_repo: MeetingRepository = Depends(get_meeting_repo),
     sec: SecurityService = Depends(get_security),
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
@@ -146,12 +144,12 @@ async def ingest_meeting(
         meeting: Meeting | None = None
         already_existed = False
         if source_id:
-            meeting = m_repo.get_by_source_id(db, source_id)
+            meeting = meetings_repo.get_by_source_id(db, source_id)
         if meeting:
             already_existed = True
             meeting.title = clean_title
             meeting.content = clean_content
-            m_repo.save(db, meeting)
+            meetings_repo.save(db, meeting)
         else:
             meeting = Meeting(
                 title=clean_title,
@@ -161,7 +159,7 @@ async def ingest_meeting(
                 source_url=source_url,
                 category=category,
             )
-            m_repo.save(db, meeting)
+            meetings_repo.save(db, meeting)
 
         if meeting.id is None:
             raise ToolError(

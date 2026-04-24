@@ -18,7 +18,6 @@ from wizard.repositories import (
 )
 from wizard.security import SecurityService
 
-
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------

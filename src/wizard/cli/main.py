@@ -104,10 +104,10 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
     agents_to_register: list[str] = (
         [a for a in _AGENT_CHOICES if a != "all"] if selected == "all" else [selected]
     )
-    
+
     results = _reg_service.register_agents(agents_to_register)
     _display_agent_registration(results)
-    
+
     registered = [r["id"] for r in results if r["success"]]
     agent_registration.write_registered_agents(registered)
     return registered
@@ -129,7 +129,7 @@ def setup(
     _reg_service.ensure_editable_pth()
     agent_registration.refresh_hooks()
     typer.echo(_reg_service.refresh_skills())
-    
+
     _wizard_db_env = os.environ.get("WIZARD_DB")
     db_path = Path(_wizard_db_env) if _wizard_db_env else (_reg_service.WIZARD_HOME / "wizard.db")
     if not db_is_healthy(db_path):
