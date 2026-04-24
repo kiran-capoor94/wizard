@@ -85,3 +85,63 @@ def test_build_available_modes_missing_skill(tmp_path):
     modes = ModesSettings(allowed=["nonexistent-skill"])
     result = build_available_modes(modes, roots=[tmp_path])
     assert result == []
+
+
+# Task 5: get_modes tests
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_get_modes_no_session(tmp_path):
+    """get_modes returns available_modes and None active_mode when no session_id given."""
+    from wizard.tools.mode_tools import get_modes
+
+    skill_dir = tmp_path / "socratic-mentor"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: socratic-mentor\ndescription: Mentor.\n---\n"
+    )
+
+    modes_cfg = ModesSettings(default=None, allowed=["socratic-mentor"])
+    with patch("wizard.tools.mode_tools.settings") as mock_settings:
+        mock_settings.modes = modes_cfg
+        result = await get_modes(session_id=None, _roots=[tmp_path])
+
+    assert isinstance(result, GetModesResponse)
+    assert len(result.available_modes) == 1
+    assert result.available_modes[0].name == "socratic-mentor"
+    assert result.active_mode is None
+
+
+@pytest.mark.asyncio
+async def test_get_modes_with_active_session(tmp_path):
+    """get_modes returns active_mode from DB when session_id given."""
+    from wizard.models import WizardSession
+    from wizard.tools.mode_tools import get_modes
+
+    skill_dir = tmp_path / "socratic-mentor"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: socratic-mentor\ndescription: Mentor.\n---\n"
+    )
+
+    mock_session_obj = MagicMock(spec=WizardSession)
+    mock_session_obj.active_mode = "socratic-mentor"
+
+    mock_db = MagicMock()
+    mock_db.get.return_value = mock_session_obj
+
+    modes_cfg = ModesSettings(allowed=["socratic-mentor"])
+    with patch("wizard.tools.mode_tools.settings") as mock_settings, \
+         patch("wizard.tools.mode_tools.get_session") as mock_get_session:
+        mock_settings.modes = modes_cfg
+        mock_get_session.return_value.__enter__ = lambda s: mock_db
+        mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+
+        result = await get_modes(session_id=42, _roots=[tmp_path])
+
+    assert result.active_mode == "socratic-mentor"
+    mock_db.get.assert_called_once_with(WizardSession, 42)
