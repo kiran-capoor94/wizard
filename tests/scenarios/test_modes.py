@@ -1,7 +1,18 @@
 """Scenario tests for wizard modes system."""
+from unittest.mock import MagicMock, patch
+
+import pytest
+from fastmcp.exceptions import ToolError
 
 from wizard.config import ModesSettings, Settings
-from wizard.schemas import GetModesResponse, ModeInfo, SetModeResponse
+from wizard.schemas import (
+    GetModesResponse,
+    ModeInfo,
+    ResumeSessionResponse,
+    SessionStartResponse,
+    SetModeResponse,
+)
+from wizard.tools.mode_tools import build_available_modes, get_modes, set_mode
 
 
 def test_modes_settings_defaults():
@@ -55,8 +66,6 @@ def test_set_mode_response_clear():
 
 # Task 4: build_available_modes tests
 
-from wizard.tools.mode_tools import build_available_modes
-
 
 def test_build_available_modes_filters_to_allowed(tmp_path):
     """Only skills in allowed list are returned."""
@@ -89,15 +98,10 @@ def test_build_available_modes_missing_skill(tmp_path):
 
 # Task 5: get_modes tests
 
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 @pytest.mark.asyncio
 async def test_get_modes_no_session(tmp_path):
     """get_modes returns available_modes and None active_mode when no session_id given."""
-    from wizard.tools.mode_tools import get_modes
 
     skill_dir = tmp_path / "socratic-mentor"
     skill_dir.mkdir()
@@ -120,7 +124,6 @@ async def test_get_modes_no_session(tmp_path):
 async def test_get_modes_with_active_session(tmp_path):
     """get_modes returns active_mode from DB when session_id given."""
     from wizard.models import WizardSession
-    from wizard.tools.mode_tools import get_modes
 
     skill_dir = tmp_path / "socratic-mentor"
     skill_dir.mkdir()
@@ -149,14 +152,11 @@ async def test_get_modes_with_active_session(tmp_path):
 
 # Task 6: set_mode tests
 
-from fastmcp.exceptions import ToolError
-
 
 @pytest.mark.asyncio
 async def test_set_mode_activates_mode(tmp_path):
     """set_mode writes active_mode to DB and returns instruction."""
     from wizard.models import WizardSession
-    from wizard.tools.mode_tools import set_mode
 
     skill_dir = tmp_path / "socratic-mentor"
     skill_dir.mkdir()
@@ -189,7 +189,6 @@ async def test_set_mode_activates_mode(tmp_path):
 async def test_set_mode_clears_mode(tmp_path):
     """set_mode(mode_name=None) clears active_mode and returns None instruction."""
     from wizard.models import WizardSession
-    from wizard.tools.mode_tools import set_mode
 
     mock_session_obj = MagicMock(spec=WizardSession)
     mock_session_obj.active_mode = "socratic-mentor"
@@ -214,8 +213,6 @@ async def test_set_mode_clears_mode(tmp_path):
 @pytest.mark.asyncio
 async def test_set_mode_rejects_unknown_mode(tmp_path):
     """set_mode raises ToolError for mode not in allowed list."""
-    from wizard.tools.mode_tools import set_mode
-
     modes_cfg = ModesSettings(allowed=["socratic-mentor"])
     with patch("wizard.tools.mode_tools.settings") as mock_settings:
         mock_settings.modes = modes_cfg
@@ -226,8 +223,6 @@ async def test_set_mode_rejects_unknown_mode(tmp_path):
 @pytest.mark.asyncio
 async def test_set_mode_session_not_found():
     """set_mode raises ToolError when session_id does not exist."""
-    from wizard.tools.mode_tools import set_mode
-
     mock_db = MagicMock()
     mock_db.get.return_value = None
 
@@ -240,3 +235,34 @@ async def test_set_mode_session_not_found():
 
         with pytest.raises(ToolError, match="Session 99 not found"):
             await set_mode(session_id=99, mode_name="socratic-mentor")
+
+
+
+# Task 7: Wire session_start
+
+def test_session_start_response_has_mode_fields():
+    """SessionStartResponse schema accepts active_mode and available_modes fields."""
+    r = SessionStartResponse(
+        session_id=1,
+        unsummarised_meetings=[],
+        active_mode="socratic-mentor",
+        available_modes=[ModeInfo(name="socratic-mentor", description="Mentor.")],
+    )
+    assert r.active_mode == "socratic-mentor"
+    assert len(r.available_modes) == 1
+
+
+# Task 8: Wire resume_session
+
+def test_resume_session_response_has_active_mode():
+    """ResumeSessionResponse schema accepts active_mode field."""
+    r = ResumeSessionResponse(
+        session_id=2,
+        resumed_from_session_id=1,
+        session_state=None,
+        working_set_tasks=[],
+        prior_notes=[],
+        unsummarised_meetings=[],
+        active_mode="socratic-mentor",
+    )
+    assert r.active_mode == "socratic-mentor"
