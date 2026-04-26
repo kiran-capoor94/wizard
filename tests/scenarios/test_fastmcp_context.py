@@ -209,6 +209,62 @@ async def test_save_note_no_elicit_when_mental_model_provided(mcp_client, seed_t
     assert len(elicit_results) == 0
 
 
+async def test_save_note_elicits_mental_model_for_decision(mcp_client, seed_task):
+    """save_note elicits a mental model prompt when note_type is decision and none provided."""
+    task = await seed_task(name="Decide on caching strategy")
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+
+    elicit_results = []
+
+    async def fake_elicit(self, message, **kwargs):
+        elicit_results.append(message)
+        return AcceptedElicitation(data="We will use Redis with a 5-minute TTL.")
+
+    with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
+        r = await mcp_client.call_tool("save_note", {
+            "task_id": task.id,
+            "note_type": "decision",
+            "content": "Chose Redis over Memcached for its persistence support.",
+        })
+
+    assert not r.is_error, r
+    assert len(elicit_results) == 1
+    assert r.structured_content["mental_model_saved"] is True
+
+
+async def test_save_meeting_summary_cancellation_skips_task_links(mcp_client, seed_task):
+    """Cancelling the task-link elicitation leaves tasks unlinked."""
+    task = await seed_task(name="Task to maybe link")
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+
+    r = await mcp_client.call_tool("ingest_meeting", {
+        "title": "Planning meeting",
+        "content": "We discussed next steps.",
+    })
+    assert not r.is_error, r
+    meeting_id = r.structured_content["meeting_id"]
+
+    class CancelledElicitation:
+        pass
+
+    async def fake_elicit_cancel(self, message, **kwargs):
+        return CancelledElicitation()
+
+    with patch("fastmcp.server.context.Context.elicit", new=fake_elicit_cancel):
+        r = await mcp_client.call_tool("save_meeting_summary", {
+            "meeting_id": meeting_id,
+            "summary": "We decided to focus on performance.",
+            "task_ids": [task.id],
+        })
+
+    assert not r.is_error, r
+    assert r.structured_content["tasks_linked"] == 0
+
+
 async def test_save_note_no_elicit_for_docs_type(mcp_client, seed_task):
     """save_note does not elicit for note types other than investigation/decision."""
     task = await seed_task(name="Document API endpoints")
