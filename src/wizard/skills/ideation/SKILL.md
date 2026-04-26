@@ -41,7 +41,7 @@ No fixed question count — stop when you genuinely have enough, not after N que
 
 ## Ideation Flow
 
-After elicitation, run as a continuous dialogue with `📍 CHECKPOINT` blocks every 3-4 exchanges.
+After elicitation, run as a continuous dialogue with `📍 CHECKPOINT` blocks every 3-4 user turns.
 
 **Checkpoint format:**
 
@@ -88,7 +88,7 @@ No prose summary after this block. The table + pick + rejections + next step is 
 
 ## Hard Gates
 
-1. **Elicitation complete** — must have asked at least one question and explicitly declared "I have enough context" before ideating
+1. **Elicitation complete** — must have asked at least one clarifying question, continued until the three elicitation goals are met, and explicitly declared "I have enough context" before ideating
 2. **Divergence exhausted** — must have generated ≥3 distinct ideas and asked "What are we not considering?" before converging
 3. **Recommendation grounded** — the pick must cite at least one constraint surfaced during elicitation, not just "this feels best"
 
