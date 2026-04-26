@@ -59,6 +59,27 @@ async def test_update_task_elicits_on_done(mcp_client, seed_task):
     assert "done" in elicit_results[0].lower()
 
 
+async def test_update_task_cancellation_aborts_done(mcp_client, seed_task):
+    """Cancelling the done-confirmation elicitation leaves the task status unchanged."""
+    task = await seed_task(name="Deploy feature to cancel")
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+
+    class CancelledElicitation:
+        pass
+
+    async def fake_elicit_cancel(self, message, **kwargs):
+        return CancelledElicitation()
+
+    with patch("fastmcp.server.context.Context.elicit", new=fake_elicit_cancel):
+        r = await mcp_client.call_tool("update_task", {"task_id": task.id, "status": "done"})
+
+    assert not r.is_error, r
+    result = r.structured_content
+    assert result["updated_fields"] == [], f"Expected no fields updated, got {result['updated_fields']}"
+
+
 async def test_update_task_no_elicit_on_other_status(mcp_client, seed_task):
     """Non-done status changes do not trigger elicitation."""
     task = await seed_task(name="Deploy feature abc")

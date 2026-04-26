@@ -77,12 +77,13 @@ class TaskRepository:
         existing = self.get_by_source_id(db, source_id)
         if not existing:
             return None
-        if existing.status not in (TaskStatus.DONE, TaskStatus.ARCHIVED):
-            existing.name = name
-            existing.priority = priority
-            if source_url and not existing.source_url:
-                existing.source_url = source_url
-            self.save(db, existing)
+        if existing.status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
+            return None
+        existing.name = name
+        existing.priority = priority
+        if source_url and not existing.source_url:
+            existing.source_url = source_url
+        self.save(db, existing)
         return existing
 
     def get_active_task_names(self, db: Session) -> list[str]:
