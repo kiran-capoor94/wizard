@@ -294,30 +294,32 @@ async def create_task(
             )
             if existing and existing.id is not None:
                 return CreateTaskResponse(task_id=existing.id, already_existed=True)
+        blocked_by = None
     else:
         # Phase 1: fetch names, close DB.  Phase 2: elicit outside DB context.
         with get_session() as db:
             existing_names = t_repo.get_active_task_names(db)
         blocked_by = await check_duplicate_name(ctx, name, existing_names)
-        if blocked_by is not None:
-            with get_session() as db:
-                existing = t_repo.get_by_name(db, blocked_by)
-                if existing and existing.id is not None:
-                    return CreateTaskResponse(task_id=existing.id, already_existed=True)
 
-    # Phase 3: create the task.
+    # Phase 3: create or return existing — single transaction eliminates TOCTOU window.
     clean_name = sec.scrub(name).clean
     task_status = TaskStatus(status)
-    task = Task(
-        name=clean_name,
-        priority=priority,
-        category=category,
-        status=task_status,
-        source_id=source_id,
-        source_type=source_type,
-        source_url=source_url,
-    )
     with get_session() as db:
+        if blocked_by is not None:
+            # Re-fetch inside this transaction: if task was renamed/deleted since
+            # elicitation, get_by_name returns None and we fall through to create.
+            existing = t_repo.get_by_name(db, blocked_by)
+            if existing and existing.id is not None:
+                return CreateTaskResponse(task_id=existing.id, already_existed=True)
+        task = Task(
+            name=clean_name,
+            priority=priority,
+            category=category,
+            status=task_status,
+            source_id=source_id,
+            source_type=source_type,
+            source_url=source_url,
+        )
         t_repo.save(db, task)
         if task.id is None:
             raise ToolError("Internal error: task was not assigned an id after flush")
