@@ -274,19 +274,19 @@ def test_build_available_modes_loads_architect(tmp_path):
     assert result[0].description == "Principal-level systems thinker. Challenges scope before solutions, holds the whole system in mind, and ensures decisions are recorded not just made."
 
 
-def test_build_available_modes_loads_brainstorm(tmp_path):
-    """build_available_modes returns correct ModeInfo for brainstorm skill."""
-    skill_dir = tmp_path / "brainstorm"
+def test_build_available_modes_loads_ideation(tmp_path):
+    """build_available_modes returns correct ModeInfo for ideation skill."""
+    skill_dir = tmp_path / "ideation"
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text(
-        "---\nname: brainstorm\ndescription: Creative thinking partner. Diverges hard before converging, challenges assumptions, ends with one concrete next action.\n---\n# Content"
+        "---\nname: ideation\ndescription: Creative thinking partner for divergent exploration. Always elicits context first, generates ideas without filtering, challenges assumptions, and ends with a ranked recommendation and concrete next step.\n---\n# Content"
     )
 
-    modes = ModesSettings(allowed=["brainstorm"])
+    modes = ModesSettings(allowed=["ideation"])
     result = build_available_modes(modes, roots=[tmp_path])
     assert len(result) == 1
-    assert result[0].name == "brainstorm"
-    assert result[0].description == "Creative thinking partner. Diverges hard before converging, challenges assumptions, ends with one concrete next action."
+    assert result[0].name == "ideation"
+    assert result[0].description == "Creative thinking partner for divergent exploration. Always elicits context first, generates ideas without filtering, challenges assumptions, and ends with a ranked recommendation and concrete next step."
 
 
 def test_build_available_modes_loads_product_owner(tmp_path):
@@ -312,8 +312,8 @@ def test_build_available_modes_loads_all_three_new_modes(tmp_path):
             "Principal-level systems thinker. Challenges scope before solutions, holds the whole system in mind, and ensures decisions are recorded not just made.",
         ),
         (
-            "brainstorm",
-            "Creative thinking partner. Diverges hard before converging, challenges assumptions, ends with one concrete next action.",
+            "ideation",
+            "Creative thinking partner for divergent exploration. Always elicits context first, generates ideas without filtering, challenges assumptions, and ends with a ranked recommendation and concrete next step.",
         ),
         (
             "product-owner",
@@ -326,11 +326,11 @@ def test_build_available_modes_loads_all_three_new_modes(tmp_path):
             f"---\nname: {name}\ndescription: {description}\n---\n# Content"
         )
 
-    modes = ModesSettings(allowed=["architect", "brainstorm", "product-owner"])
+    modes = ModesSettings(allowed=["architect", "ideation", "product-owner"])
     result = build_available_modes(modes, roots=[tmp_path])
 
     assert len(result) == 3
     names = [r.name for r in result]
     assert "architect" in names
-    assert "brainstorm" in names
+    assert "ideation" in names
     assert "product-owner" in names
