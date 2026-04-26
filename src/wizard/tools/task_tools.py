@@ -188,8 +188,8 @@ async def save_note(
             saved = n_repo.save(db, note)
             if saved.id is None:
                 raise ToolError("Internal error: note was not assigned an id after flush")
-            await ctx.report_progress(1, 2)
             t_state_repo.on_note_saved(db, task_db_id)
+        await ctx.report_progress(1, 2)
         await ctx.report_progress(2, 2)
         await ctx.info(f"Note {saved.id} saved ({note_type.value}).")
         return SaveNoteResponse(

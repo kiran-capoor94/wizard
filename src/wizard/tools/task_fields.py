@@ -37,9 +37,10 @@ async def elicit_done_confirmation(ctx: Context, task_name: str) -> bool:
         )
         if isinstance(result, AcceptedElicitation):
             return bool(result.data)
+        return False  # cancelled or rejected — do not proceed
     except Exception as e:
         logger.debug("ctx.elicit unavailable for done confirmation: %s", e)
-    return True  # default: proceed if elicitation unavailable
+        return True  # default: proceed if elicitation unavailable
 
 
 async def check_duplicate_name(ctx: Context, name: str, existing_names: list[str]) -> str | None:

@@ -81,39 +81,48 @@ async def save_meeting_summary(
     """Scrubs and persists the LLM-generated meeting summary."""
     logger.info("save_meeting_summary meeting_id=%d", meeting_id)
     try:
+        # Phase 1: fetch data needed for elicitation, then close DB.
+        session_id: int | None = await ctx.get_state("current_session_id")
+        task_names: list[str] = []
         with get_session() as db:
-            session_id: int | None = await ctx.get_state("current_session_id")
             meeting = meetings_repo.get_by_id(db, meeting_id)
             if meeting.id is None:
                 raise ToolError(
                     "Internal error: meeting was not assigned an id after flush"
                 )
-
+            meeting_db_id: int = meeting.id
+            meeting_artifact_id = meeting.artifact_id
             if task_ids:
                 task_names = [t.name for t in meeting.tasks if t.id in set(task_ids)]
-                names_str = ", ".join(repr(n) for n in task_names) if task_names else str(task_ids)
-                try:
-                    result = await ctx.elicit(
-                        f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
-                        response_type=bool,
-                    )
-                    if isinstance(result, AcceptedElicitation) and result.data is False:
-                        task_ids = None
-                except Exception as e:
-                    logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
 
-            clean_summary = sec.scrub(summary).clean
+        # Phase 2: elicit outside DB context so connection is not held open.
+        if task_ids:
+            names_str = ", ".join(repr(n) for n in task_names) if task_names else str(task_ids)
+            try:
+                result = await ctx.elicit(
+                    f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
+                    response_type=bool,
+                )
+                if isinstance(result, AcceptedElicitation) and result.data is False:
+                    task_ids = None
+            except Exception as e:
+                logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
+
+        # Phase 3: write summary and note.
+        clean_summary = sec.scrub(summary).clean
+        note = Note(
+            note_type=NoteType.DOCS,
+            content=clean_summary,
+            meeting_id=meeting_db_id,
+            session_id=session_id,
+            artifact_id=meeting_artifact_id,
+            artifact_type="meeting",
+        )
+        with get_session() as db:
+            meeting = meetings_repo.get_by_id(db, meeting_db_id)
             meeting.summary = clean_summary
             meetings_repo.save(db, meeting)
 
-            note = Note(
-                note_type=NoteType.DOCS,
-                content=clean_summary,
-                meeting_id=meeting.id,
-                session_id=session_id,
-                artifact_id=meeting.artifact_id,
-                artifact_type="meeting",
-            )
             saved = n_repo.save(db, note)
             if saved.id is None:
                 raise ToolError(
@@ -121,15 +130,15 @@ async def save_meeting_summary(
                 )
 
             if task_ids:
-                meetings_repo.link_tasks(db, meeting_id, task_ids)
+                meetings_repo.link_tasks(db, meeting_db_id, task_ids)
 
             linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
-            await ctx.info(f"Meeting {meeting.id} summary saved.")
-            return SaveMeetingSummaryResponse(
-                note_id=saved.id,
-                tasks_linked=len(linked_ids),
-            )
+        await ctx.info(f"Meeting {meeting_db_id} summary saved.")
+        return SaveMeetingSummaryResponse(
+            note_id=saved.id,
+            tasks_linked=len(linked_ids),
+        )
     except ValueError as e:
         logger.warning("save_meeting_summary failed: %s", e)
         raise ToolError(str(e)) from e
