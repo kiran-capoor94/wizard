@@ -243,8 +243,7 @@ def complete(
         kwargs["api_key"] = api_key
 
     logger.info(
-        "llm_adapters: calling %s at %s (local=%s)",
-        model,
+        "llm_adapters: calling backend at %s (local=%s)",
         base_url or "cloud",
         _is_local(base_url),
     )
