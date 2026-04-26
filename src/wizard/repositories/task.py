@@ -100,6 +100,12 @@ class TaskRepository:
         rows = db.exec(select(Task).where(Task.name == name)).all()
         return rows[0] if rows else None
 
+    def get_names_by_ids(self, db: Session, task_ids: list[int]) -> list[str]:
+        """Return task names for the given IDs, preserving input order where found."""
+        rows = db.exec(select(Task.id, Task.name).where(col(Task.id).in_(task_ids))).all()
+        name_by_id = {row[0]: row[1] for row in rows if row[0] is not None and row[1] is not None}
+        return [name_by_id[tid] for tid in task_ids if tid in name_by_id]
+
     def get_open_task_contexts(
         self, db: Session, limit: int | None = None
     ) -> list[TaskContext]:

@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 async def get_meeting(
-    ctx: Context,
     meeting_id: int,
     meetings_repo: MeetingRepository = Depends(get_meeting_repo),
     tasks_repo: TaskRepository = Depends(get_task_repo),
@@ -75,6 +74,7 @@ async def save_meeting_summary(
     summary: str,
     task_ids: list[int] | None = None,
     meetings_repo: MeetingRepository = Depends(get_meeting_repo),
+    t_repo: TaskRepository = Depends(get_task_repo),
     sec: SecurityService = Depends(get_security),
     n_repo: NoteRepository = Depends(get_note_repo),
 ) -> SaveMeetingSummaryResponse:
@@ -93,17 +93,21 @@ async def save_meeting_summary(
             meeting_db_id: int = meeting.id
             meeting_artifact_id = meeting.artifact_id
             if task_ids:
-                task_names = [t.name for t in meeting.tasks if t.id in set(task_ids)]
+                task_names = t_repo.get_names_by_ids(db, task_ids)
 
         # Phase 2: elicit outside DB context so connection is not held open.
         if task_ids:
-            names_str = ", ".join(repr(n) for n in task_names) if task_names else str(task_ids)
+            names_str = (
+                ", ".join(repr(n) for n in task_names)
+                if task_names
+                else ", ".join(str(i) for i in task_ids)
+            )
             try:
                 result = await ctx.elicit(
                     f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
                     response_type=bool,
                 )
-                if isinstance(result, AcceptedElicitation) and result.data is False:
+                if not isinstance(result, AcceptedElicitation) or result.data is False:
                     task_ids = None
             except Exception as e:
                 logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
@@ -161,10 +165,10 @@ async def ingest_meeting(
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
     logger.info("ingest_meeting source_id=%s", source_id)
+    clean_title = sec.scrub(title).clean
+    clean_content = sec.scrub(content).clean
+    await ctx.report_progress(1, 2)
     with get_session() as db:
-        clean_title = sec.scrub(title).clean
-        clean_content = sec.scrub(content).clean
-        await ctx.report_progress(1, 2)
 
         meeting: Meeting | None = None
         already_existed = False
