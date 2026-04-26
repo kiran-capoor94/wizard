@@ -144,7 +144,7 @@ Synthesis runs outside the MCP server at hook time — no round-trip cost, no de
 
 **Working modes**
 
-Switch the agent's behaviour mid-session with `set_mode`. Modes are skill-backed personas stored per-session. Available out of the box: `architect` (systems design), `brainstorm` (divergent exploration), `product-owner` (user-value focus). Configure allowed modes in `~/.wizard/config.json` under `modes.allowed`. The active mode surfaces in `session_start` and `get_modes` responses.
+Switch the agent's behaviour mid-session with `set_mode`. Modes are skill-backed personas stored per-session. Available out of the box: `architect` (systems design), `ideation` (divergent creative exploration), `product-owner` (user-value focus). Configure allowed modes in `~/.wizard/config.json` under `modes.allowed`. The active mode surfaces in `session_start` and `get_modes` responses.
 
 **PII scrubbing**
 
@@ -180,7 +180,7 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 | `what_am_i_missing`     | 7-point diagnostic — surfaces stale context, missing decisions, etc.             |
 | `what_should_i_work_on` | Scored recommendation with mode (focus / quick-wins / unblock) and time budget   |
 | `get_modes`             | List available modes and the active mode for the current session                 |
-| `set_mode`              | Activate or clear a working mode (e.g. architect, brainstorm, product-owner)     |
+| `set_mode`              | Activate or clear a working mode (e.g. architect, ideation, product-owner)       |
 | `get_meeting`           | Retrieve transcript and linked open tasks                                        |
 | `save_meeting_summary`  | Store meeting summary and create linked note                                     |
 | `ingest_meeting`        | Accept raw meeting data (e.g. from Krisp), scrub and store                       |
@@ -218,7 +218,7 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 | `code-review`           | Reviewing code changes with prior wizard context            |
 | `architecture-debate`   | Choosing between design approaches before implementing      |
 | `architect`             | Activated via `set_mode` — principal-level systems thinking |
-| `brainstorm`            | Activated via `set_mode` — divergent creative exploration   |
+| `ideation`              | Activated via `set_mode` — divergent creative exploration with elicitation and ranked recommendations |
 | `product-owner`         | Activated via `set_mode` — ruthless user-value focus        |
 
 ---
