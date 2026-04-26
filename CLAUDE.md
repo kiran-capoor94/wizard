@@ -168,7 +168,7 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
   },
   "modes": {
     "default": null,
-    "allowed": ["architect", "brainstorm", "product-owner"]
+    "allowed": ["architect", "ideation", "product-owner"]
   }
 }
 ```

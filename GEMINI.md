@@ -128,7 +128,7 @@ Wizard tracks three layers: Agent session (UUID), Wizard session (Integer PK), a
 
 ### Working Modes
 - `get_modes` lists available modes and the active mode for the current session.
-- `set_mode` activates a skill-backed persona (e.g. `architect`, `brainstorm`, `product-owner`) or clears it.
+- `set_mode` activates a skill-backed persona (e.g. `architect`, `ideation`, `product-owner`) or clears it.
 - Active mode is stored per-session on `WizardSession.active_mode` and returned by `session_start`.
 - Allowed modes are configured in `~/.wizard/config.json` under `modes.allowed`.
 
