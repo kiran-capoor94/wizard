@@ -9,7 +9,7 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from pydantic import ValidationError
-from sqlmodel import Session, col, select
+from sqlmodel import Session
 
 from ..config import settings
 from ..database import get_session
@@ -33,7 +33,6 @@ from ..repositories import (
 )
 from ..schemas import (
     NoteDetail,
-    PriorSessionSummary,
     ResumedTaskNotes,
     ResumeSessionResponse,
     SessionEndResponse,
@@ -46,136 +45,30 @@ from ..services import SessionCloser
 from ..skills import (
     SKILL_SESSION_END,
     SKILL_SESSION_RESUME,
-    SKILL_SESSION_START,
-    load_skill,
+    load_skill_post,
 )
-from ..synthesis import Synthesiser
-from ..toon import encode_task_contexts
-from ..transcript import TranscriptReader, find_transcript, read_new_lines
+from .formatting import task_contexts_to_json
+from .mode_tools import build_available_modes
+from .session_helpers import (
+    build_prior_summaries,
+    build_wizard_context,
+    find_previous_session_id,
+    mid_session_synthesis_loop,
+)
 
 logger = logging.getLogger(__name__)
 
 SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
 
 
-def _build_wizard_context() -> dict | None:
-    ks = settings.knowledge_store
-    if ks.type == "notion":
-        return {
-            "knowledge_store_type": "notion",
-            "tasks_db_id": ks.notion.tasks_db_id or None,
-            "meetings_db_id": ks.notion.meetings_db_id or None,
-            "daily_parent_id": ks.notion.daily_parent_id or None,
-        }
-    if ks.type == "obsidian":
-        return {
-            "knowledge_store_type": "obsidian",
-            "vault_path": ks.obsidian.vault_path or None,
-            "daily_notes_folder": ks.obsidian.daily_notes_folder,
-            "tasks_folder": ks.obsidian.tasks_folder,
-        }
-    return None
-
-
-def _make_synthesiser() -> Synthesiser:
-    """Construct a fully-wired Synthesiser for background mid-session synthesis."""
-    security = SecurityService(
-        allowlist=settings.scrubbing.allowlist,
-        enabled=settings.scrubbing.enabled,
-    )
-    return Synthesiser(
-        reader=TranscriptReader(),
-        note_repo=NoteRepository(),
-        security=security,
-        t_repo=TaskRepository(),
-    )
-
-
-async def _mid_session_synthesis_loop(
-    agent_session_id: str,
-    wizard_session_id: int,
-    interval_seconds: int = 300,
-) -> None:
-    """Poll the transcript file every `interval_seconds` and synthesise new lines.
-
-    Tracks processed line count in a local variable — ctx.state is not used
-    since this runs outside any request context. On failure, logs and retries
-    next poll; SessionEnd synthesis is the guaranteed full-synthesis path.
-    """
-    synthesiser = _make_synthesiser()
-    processed = 0
-    while True:
-        await asyncio.sleep(interval_seconds)
-        transcript_path = find_transcript(agent_session_id)
-        if not transcript_path:
-            continue
-        new_lines = read_new_lines(transcript_path, processed)
-        if not new_lines:
-            continue
-        try:
-
-            def _run_synthesis(lines: list[str]) -> int:
-                with get_session() as db:
-                    session = db.get(WizardSession, wizard_session_id)
-                    if session is None:
-                        return 0
-                    synthesiser.synthesise_lines(db, session, lines)
-                    return len(lines)
-
-            delta = await asyncio.to_thread(_run_synthesis, new_lines)
-            processed += delta
-        except Exception:
-            logger.debug(
-                "mid_session_synthesis: poll failed, will retry next interval",
-                exc_info=True,
-            )
-
-
-def _build_prior_summaries(
-    db: Session, current_session_id: int
-) -> list[PriorSessionSummary]:
-    """Return the 3 most recent closed sessions with summaries for prior-context surfacing."""
-    prior_sessions = db.exec(
-        select(WizardSession)
-        .where(
-            WizardSession.summary != None,  # noqa: E711
-            WizardSession.id != current_session_id,
-        )
-        .order_by(col(WizardSession.created_at).desc())
-        .limit(3)
-    ).all()
-
-    result = []
-    for s in prior_sessions:
-        if s.id is None or s.summary is None:
-            continue
-        task_ids: list[int] = []
-        if s.session_state:
-            try:
-                state_obj = SessionState.model_validate_json(s.session_state)
-                task_ids = state_obj.working_set
-            except (ValueError, ValidationError) as e:
-                logger.warning("prior_summaries: bad session_state sid=%s: %s", s.id, e)
-        result.append(
-            PriorSessionSummary(
-                session_id=s.id,
-                summary=s.summary,
-                closed_at=s.updated_at,
-                task_ids=task_ids,
-            )
-        )
-    return result
-
-
-def _find_previous_session_id() -> int | None:
-    """Return the most recently created WizardSession id, or None if none exists."""
-    with get_session() as db:
-        result = db.exec(
-            select(WizardSession.id)
-            .order_by(col(WizardSession.created_at).desc(), col(WizardSession.id).desc())
-            .limit(1)
-        ).first()
-        return result
+def _apply_default_mode(session: WizardSession) -> None:
+    """Apply default mode to session if not already set and allowed."""
+    if (
+        session.active_mode is None
+        and settings.modes.default
+        and settings.modes.default in settings.modes.allowed
+    ):
+        session.active_mode = settings.modes.default
 
 
 async def session_start(
@@ -205,7 +98,7 @@ async def session_start(
     # Compaction: link to the session that was compacted.
     continued_from_id: int | None = None
     if source == "compact":
-        continued_from_id = _find_previous_session_id()
+        continued_from_id = find_previous_session_id()
 
     with get_session() as db:
         session = WizardSession(
@@ -221,6 +114,10 @@ async def session_start(
                 "Internal error: session was not assigned an id after flush"
             )
 
+        # Apply default mode if none set and config specifies one
+        _apply_default_mode(session)
+        db.flush()
+
         await ctx.set_state("current_session_id", session.id)
 
         # Write wizard integer ID to the agent-session keyed directory.
@@ -229,43 +126,51 @@ async def session_start(
             keyed_dir.mkdir(parents=True, exist_ok=True)
             (keyed_dir / "wizard_id").write_text(str(session.id))
 
-        await ctx.info(f"Session {session.id} started.")
+        await ctx.info(f"Session {session.id} started (source={source}).")
 
         closed_sessions = await session_closer.close_recent_abandoned(
             db, ctx, session.id
         )
+        await ctx.report_progress(1, 4)
 
         try:
             ts_repo.refresh_stale_days(db)
         except Exception as e:
             logger.warning("refresh_stale_days failed: %s", e)
 
+        await ctx.report_progress(2, 4)
+
         open_tasks_total = t_repo.count_open_tasks(db)
         open_tasks_list = t_repo.get_open_task_contexts(db, limit=20)
         blocked_list = t_repo.get_blocked_task_contexts(db)
 
-        prior_summaries = _build_prior_summaries(db, session.id)
+        await ctx.report_progress(3, 4)
+
+        prior_summaries = build_prior_summaries(db, session.id)
 
         response = SessionStartResponse(
             session_id=session.id,
             continued_from_id=continued_from_id,
             source=source,
-            open_tasks=encode_task_contexts("open_tasks", open_tasks_list),
+            open_tasks=task_contexts_to_json(open_tasks_list),
             open_tasks_total=open_tasks_total,
-            blocked_tasks=encode_task_contexts("blocked_tasks", blocked_list),
+            blocked_tasks=task_contexts_to_json(blocked_list),
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
-            wizard_context=_build_wizard_context(),
-            skill_instructions=load_skill(SKILL_SESSION_START),
+            wizard_context=build_wizard_context(),
             closed_sessions=closed_sessions,
             prior_summaries=prior_summaries,
+            active_mode=session.active_mode,
+            available_modes=build_available_modes(settings.modes),
         )
+
+    await ctx.report_progress(4, 4)
 
     # Background task dispatched AFTER db context closes so it gets its own clean session
     asyncio.create_task(session_closer.close_abandoned_background(response.session_id))
 
     if agent_session_id and settings.synthesis.enabled:
         mid_task = asyncio.create_task(
-            _mid_session_synthesis_loop(
+            mid_session_synthesis_loop(
                 agent_session_id=agent_session_id,
                 wizard_session_id=response.session_id,
             )
@@ -333,6 +238,8 @@ async def session_end(
                 note_type=NoteType.SESSION_SUMMARY,
                 content=clean_summary,
                 session_id=session.id,
+                artifact_id=session.artifact_id,
+                artifact_type="session",
             )
             saved = n_repo.save(db, note)
             if saved.id is None:
@@ -353,7 +260,7 @@ async def session_end(
                 open_loops_count=len(open_loops),
                 next_actions_count=len(next_actions),
                 intent=intent,
-                skill_instructions=load_skill(SKILL_SESSION_END),
+                skill_instructions=load_skill_post(SKILL_SESSION_END),
             )
     except ValueError as e:
         logger.warning("session_end failed: %s", e)
@@ -467,6 +374,7 @@ async def resume_session(
                 "Internal error: session was not assigned an id after flush"
             )
         await ctx.set_state("current_session_id", new_session.id)
+        await ctx.info(f"Resumed session {new_session.id} (from {prior.id}).")
 
         # Write wizard integer ID to the agent-session keyed directory (mirrors session_start).
         if agent_session_id and new_session.id is not None:
@@ -486,7 +394,8 @@ async def resume_session(
             working_set_tasks=working_set_tasks,
             prior_notes=prior_notes,
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
-            skill_instructions=load_skill(SKILL_SESSION_RESUME),
+            skill_instructions=load_skill_post(SKILL_SESSION_RESUME),
+            active_mode=prior.active_mode,
         )
 
 

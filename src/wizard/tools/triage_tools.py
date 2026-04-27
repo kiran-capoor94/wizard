@@ -8,7 +8,7 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from sqlmodel import Session
 
-from ..database import get_session
+from ..deps import get_db_session as get_session
 from ..deps import get_task_repo
 from ..mcp_instance import mcp
 from ..repositories import TaskRepository
@@ -185,7 +185,10 @@ async def what_should_i_work_on(
         ),
     )
 
+    await ctx.report_progress(1, 3)
     shortlist = scored[:_MAX_SAMPLE_COUNT]
+    await ctx.debug(f"Scored {len(tasks)} tasks; shortlisted {len(shortlist)} for sampling.")
+    await ctx.report_progress(2, 3)
 
     # Build recommendations with LLM-sampled reasons
     recs: list[TaskRecommendation] = []
@@ -204,6 +207,7 @@ async def what_should_i_work_on(
             )
         )
 
+    await ctx.report_progress(3, 3)
     skill_content = load_skill(SKILL_TRIAGE)
     if skill_content:
         await ctx.info(f"[wizard skill]\n{skill_content}")

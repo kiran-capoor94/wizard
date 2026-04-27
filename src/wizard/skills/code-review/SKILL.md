@@ -51,6 +51,10 @@ You are a **context-aware reviewer**. Unlike a generic code reviewer, you have a
 
 ## Steps
 
+### Step 0 — Fetch Tool Schemas (if not already loaded)
+
+If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__task_start,mcp__wizard__what_am_i_missing,mcp__wizard__save_note,mcp__wizard__update_task"` before proceeding.
+
 ### Step 1 — Load Task Context
 
 Call `task_start` with the task ID. Read:

@@ -1,10 +1,14 @@
+import logging
 import os
 import stat
 import sys
 from pathlib import Path
 
 import sentry_sdk
+from pythonjsonlogger import json as jsonlogger
+from sentry_sdk.integrations.litellm import LiteLLMIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
+from sentry_sdk.integrations.mcp import MCPIntegration
 
 import wizard.prompts  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.prompt decorators
 import wizard.resources  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.resource decorators
@@ -32,6 +36,15 @@ if hasattr(os, "chflags"):
 
 
 if __name__ == "__main__":
+    # Configure structured JSON logging
+    log_handler = logging.StreamHandler()
+    formatter = jsonlogger.JsonFormatter(
+        "%(asctime)s %(name)s %(levelname)s %(message)s"
+    )
+    log_handler.setFormatter(formatter)
+    # Using force=True to override any default handlers already configured by dependencies
+    logging.basicConfig(level=logging.INFO, handlers=[log_handler], force=True)
+
     # Initialize Sentry if DSN is provided
     if settings.sentry.dsn and settings.sentry.enabled:
         sentry_sdk.init(
@@ -40,12 +53,15 @@ if __name__ == "__main__":
             profiles_sample_rate=settings.sentry.profiles_sample_rate,
             # Add wizard-specific context
             release=f"wizard@{settings.version}",
+            enable_logs=True,
             integrations=[
+                LiteLLMIntegration(),
+                MCPIntegration(),
                 LoggingIntegration(
                     level=None,  # Capture all logs as breadcrumbs
                     event_level=None,  # Don't send logs as events
                 ),
             ],
         )
-    
+
     mcp.run()

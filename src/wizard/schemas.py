@@ -57,6 +57,22 @@ class SessionState(BaseModel):
 # --- Resource response models (read-only data exposed via FastMCP URIs) ---
 
 
+class ModeInfo(BaseModel):
+    name: str
+    description: str
+
+
+class GetModesResponse(BaseModel):
+    available_modes: list[ModeInfo]
+    active_mode: str | None = None
+
+
+class SetModeResponse(BaseModel):
+    active_mode: str | None
+    description: str | None
+    instruction: str | None
+
+
 class SessionResource(BaseModel):
     session_id: int | None
     open_task_count: int
@@ -209,8 +225,8 @@ class PriorSessionSummary(BaseModel):
 class SessionStartResponse(BaseModel):
     session_id: int
     continued_from_id: int | None = None
-    open_tasks: str = ""  # TOON-encoded; see encode_task_contexts
-    blocked_tasks: str = ""  # TOON-encoded; see encode_task_contexts
+    open_tasks: str = ""  # JSON array of TaskContext objects
+    blocked_tasks: str = ""  # JSON array of TaskContext objects
     unsummarised_meetings: list[MeetingContext]
     wizard_context: dict | None = None
     skill_instructions: str | None = None
@@ -218,6 +234,8 @@ class SessionStartResponse(BaseModel):
     open_tasks_total: int = 0
     source: str = "startup"
     prior_summaries: list[PriorSessionSummary] = Field(default_factory=list)
+    active_mode: str | None = None
+    available_modes: list[ModeInfo] = Field(default_factory=list)
 
 
 class TaskStartResponse(BaseModel):
@@ -306,6 +324,7 @@ class ResumeSessionResponse(BaseModel):
     prior_notes: list[ResumedTaskNotes]
     unsummarised_meetings: list[MeetingContext]
     skill_instructions: str | None = None
+    active_mode: str | None = None
 
 
 class SynthesisNote(BaseModel):

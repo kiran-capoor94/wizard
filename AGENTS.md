@@ -18,8 +18,10 @@ dependencies live in the uv venv, not the system Python.
 ## Running the Server
 
 ```bash
-uv run server.py          # stdio transport (as used by MCP clients)
-uv run alembic upgrade head   # run pending DB migrations
+uv run server.py          # stdio transport — dev use from repo
+wizard-server             # installed entry point (after `uv tool install`)
+uv run alembic upgrade head   # run pending DB migrations (dev only)
+wizard update             # upgrade install + run migrations + re-register agents (installed use)
 ```
 
 ## Project Layout
@@ -28,8 +30,10 @@ uv run alembic upgrade head   # run pending DB migrations
 server.py                    # Entry point — imports mcp_instance, tools, resources, prompts
 src/wizard/
   cli/
-    main.py                  # Typer app: setup, configure, doctor, analytics, update, uninstall, capture
-    configure.py             # configure knowledge-store subcommand (Notion/Obsidian)
+    main.py                  # Typer app: setup, configure, doctor, analytics, update, uninstall
+    serve.py                 # wizard-server entry point (installed MCP binary)
+    capture.py               # wizard capture — transcript synthesis trigger (called by hooks)
+    configure.py             # configure knowledge-store + synthesis backends subcommands
     doctor.py                # 8-point health checks (wizard doctor)
     analytics.py             # Session/note/task usage stats (wizard analytics)
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
@@ -37,30 +41,43 @@ src/wizard/
   tools/                       # MCP tools package (split by domain)
     __init__.py                # Re-exports all tool functions
     session_tools.py           # session_start, session_end, resume_session
+    session_helpers.py         # build_prior_summaries, find_previous_session_id, mid-session synthesis loop
     task_tools.py              # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
-    task_helpers.py            # Shared helpers for task tools
+    task_fields.py             # apply_task_fields + elicitation helpers (mental model, done confirm, duplicate check)
+    formatting.py              # task_contexts_to_json — session response serialisation
+    mode_tools.py              # get_modes, set_mode — working mode activation
     triage_tools.py            # what_should_i_work_on (mode-based scoring + LLM reasons)
     meeting_tools.py           # get_meeting, save_meeting_summary, ingest_meeting
     query_tools.py             # get_tasks, get_task, get_sessions, get_session (paginated, no session required)
+  repositories/              # Query layer (package)
+    task.py                  # TaskRepository
+    note.py                  # NoteRepository
+    meeting.py               # MeetingRepository
+    session.py               # SessionRepository
+    task_state.py            # TaskStateRepository
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
   transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
-  synthesis.py               # Synthesiser (auto-capture via LiteLLM — any compatible provider)
+  synthesis.py               # Synthesiser (auto-capture — ordered backend failover)
+  llm_adapters.py            # OllamaAdapter + LiteLLM completion wrapper, probe_backend_health, JSON parsing
+  mid_session.py             # Background mid-session synthesis state (MID_SESSION_TASKS dict)
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools
-  repositories.py            # Query layer over SQLite (TaskRepo, NoteRepo, MeetingRepo, etc.)
   services.py                # SessionCloser — auto-closes abandoned sessions
   security.py                # SecurityService — regex PII scrubbing with allowlist
-  config.py                  # Pydantic Settings + JsonConfigSettingsSource
+  config.py                  # Pydantic Settings + BackendConfig + ModesSettings + JsonConfigSettingsSource
   database.py                # SQLite session factory (SQLModel engine)
-  deps.py                    # FastMCP Depends() provider functions
-  agent_registration.py      # Write MCP + hook config into agent JSON/TOML files
+  deps.py                    # FastMCP Depends() provider functions (incl. get_skill_roots)
+  exceptions.py              # ConfigurationError
+  agent_registration.py      # Write MCP + hook config into agent JSON/TOML files; refresh_hooks()
+  alembic/                   # DB migrations — bundled in package for `wizard update`
+  hooks/                     # Hook scripts — bundled in package, copied to ~/.wizard/hooks/ on setup
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
-hooks/                       # Agent hook scripts (installed by wizard setup)
+hooks/                       # Hook scripts source (also bundled as src/wizard/hooks/ for installs)
   session-end.sh             # Claude Code SessionEnd hook — calls `wizard capture --close` to synthesise transcript
   session-start.sh           # Claude Code SessionStart hook — personalization refresh (80%) + session boot injection
-alembic/                     # DB migration scripts
+alembic/                     # DB migration scripts (dev use; bundled copy lives in src/wizard/alembic/)
 tests/                       # pytest suite
 ```
 
@@ -70,8 +87,6 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
 
 ```json
 {
-  "name": "wizard",
-  "version": "2.1.0",
   "db": "~/.wizard/wizard.db",
   "knowledge_store": {
     "type": "",
@@ -91,10 +106,20 @@ Config file: `~/.wizard/config.json` (override: `WIZARD_CONFIG_FILE` env var)
     "allowlist": []
   },
   "synthesis": {
-    "model": "ollama/gemma4:latest-64k",
-    "base_url": "http://localhost:11434",
-    "api_key": "",
-    "enabled": true
+    "enabled": true,
+    "backends": [
+      {
+        "model": "ollama/qwen3.5:4b",
+        "base_url": "http://localhost:11434",
+        "api_key": "",
+        "description": "Local Ollama (primary)"
+      },
+      {
+        "model": "gemini/gemini-2.5-flash-lite",
+        "api_key": "",
+        "description": "Cloud fallback"
+      }
+    ]
   }
 }
 ```
@@ -189,8 +214,9 @@ global hooks config. Supported agents and their config locations:
 | `gemini` | `~/.gemini/settings.json` | `~/.gemini/settings.json` | SessionEnd |
 | `opencode` | `~/.config/opencode/opencode.json` | _(TypeScript plugin)_ | — |
 | `codex` | `~/.codex/config.toml` | `~/.codex/hooks.json` | Stop |
+| `copilot` | `~/.copilot/mcp-config.json` | `~/.copilot/config.json` | sessionEnd |
 
-`wizard setup --agent all` registers all five (MCP) and installs hooks
+`wizard setup --agent all` registers all six (MCP) and installs hooks
 where supported. `wizard update` re-registers both. `wizard uninstall`
 removes both.
 
@@ -198,8 +224,9 @@ MCP entry point:
 
 ```json
 {
-  "command": "uv",
-  "args": ["--directory", "<repo-path>", "run", "server.py"]
+  "command": "wizard-server",
+  "args": [],
+  "type": "stdio"
 }
 ```
 
@@ -224,9 +251,11 @@ Each top-level agent session owns an isolated directory. Sub-agents have no dire
 
 The directory is deleted by `session-end.sh` after `wizard capture` completes.
 
-**Sub-agent suppression:** Both `session-start.sh` and `session-end.sh` exit immediately (`exit 0`) when `agent_id` is present in the hook payload. Top-level sessions never have `agent_id` — this is the suppression signal from Claude Code.
+**Sub-agent suppression:**
 
-**Continuation detection** (`session_start` tool):
+Both `session-start.sh` and `session-end.sh` exit immediately (`exit 0`) when `agent_id` is present in the hook payload. Top-level sessions never have `agent_id` — this is the suppression signal from Claude Code.
+
+**Continuation detection (`session_start` tool):**
 
 1. The `SessionStart` hook writes `source` (from payload) to `~/.wizard/sessions/<uuid>/source`.
 2. The hook emits `agent_session_id=<uuid> source=<source>` in `additionalContext`.
@@ -255,9 +284,12 @@ accumulate context as you work.
 3. `wizard capture` finds the wizard session matching `--session-id` (written
    by `session_start`) or the most recent unsynthesised session within 24h,
    sets `transcript_path`, `agent`, and `agent_session_id`, then calls
-   `Synthesiser` which calls a LiteLLM-compatible provider via `LiteLLMAdapter`
-   and saves the resulting notes to SQLite. On success,
-   `WizardSession.is_synthesised` is set to `True`.
+   `Synthesiser` which routes to `OllamaAdapter` (native `/api/chat`, no
+   grammar constraint, `think:false`) for Ollama backends, or to LiteLLM for
+   cloud providers, and saves the resulting notes to SQLite.
+   On success, `WizardSession.is_synthesised` is set to `True`.
+   Raw transcript JSONL is persisted to `wizardsession.transcript_raw` before
+   synthesis so re-synthesis remains possible after the agent deletes the file.
 
 **Synthesis is fully decoupled from the MCP server.** It runs at hook time,
 before the next session starts. No `ctx.sample()` involved — no round-trip
@@ -269,10 +301,18 @@ with `wizard capture --close --session-id <id>` when the server is available.
 
 **Key files:**
 - `transcript.py` — `TranscriptReader` (JSONL parser)
-- `synthesis.py` — `Synthesiser` (LLM call + note persistence)
+- `synthesis.py` — `Synthesiser` (backend selection + note persistence)
+- `llm_adapters.py` — `OllamaAdapter`, `complete()` (LiteLLM call), `probe_backend_health()`, JSON parsing
 - `hooks/session-end.sh` — Claude Code hook script
 - `agent_registration.py` — `register_hook()` / `deregister_hook()`
-- `config.py` — `SynthesisSettings` (model, base_url, api_key, enabled)
+- `config.py` — `SynthesisSettings` + `BackendConfig` (ordered backends list)
+
+**`WIZARD_AGENT` environment variable:** `session-end.sh` uses this to
+identify the agent type when building the `wizard capture` command. It is
+set in the hook command registered by `register_hook()` at setup time
+(e.g. `WIZARD_AGENT=gemini bash /path/to/session-end.sh`). Valid values
+match `TranscriptReader._PARSERS`: `claude-code`, `codex`, `gemini`,
+`opencode`, `copilot`. Defaults to `claude-code` if unset.
 
 **Transcript format:** Claude Code writes JSONL with `type` field
 (`user`, `assistant`, `progress`, `file-history-snapshot`, `system`,
@@ -284,9 +324,9 @@ Wizard owns task matching — the LLM is not shown the task list.
 
 **Limitations:**
 - No mid-session intelligence — synthesis runs at session boundaries only
-- Transcript file must exist at synthesis time (not deleted/rotated)
-- Only Claude Code parser is implemented; Gemini/OpenCode/Codex are stubs
-- Requires a running LiteLLM-compatible instance for the configured model string
+- Transcript file must exist at synthesis time; if deleted, falls back to `wizardsession.transcript_raw` (persisted at capture time)
+- Parsers: Claude Code (full), Codex, Gemini, OpenCode, Copilot CLI
+- Ollama backends require a running Ollama server; cloud backends require a valid API key
 
 ## Session Personalization
 
@@ -327,7 +367,7 @@ SQLite error or missing config file never blocks the session boot injection.
 
 | Tool | Key inputs | Key outputs |
 |------|-----------|------------|
-| `session_start` | agent_session_id? | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions |
+| `session_start` | agent_session_id? | session_id, source, continued_from_id, open_tasks, open_tasks_total, blocked_tasks, unsummarised_meetings, wizard_context, closed_sessions, active_mode, available_modes |
 | `session_end` | session_id, summary, intent, working_set, state_delta, open_loops, next_actions, closure_status | note_id, session_state_saved |
 | `resume_session` | session_id? | session_id, resumed_from, session_state, working_set_tasks, prior_notes |
 | `task_start` | task_id | task, notes_by_type, prior_notes, latest_mental_model, compounding |
@@ -337,6 +377,8 @@ SQLite error or missing config file never blocks the session boot injection.
 | `save_note` | task_id, note_type, content, mental_model? | note_id, mental_model_saved |
 | `what_am_i_missing` | task_id | list of Signal(type, severity, message) |
 | `what_should_i_work_on` | session_id, mode, time_budget? | recommended_task, alternatives, skipped_blocked |
+| `get_modes` | session_id? | available_modes, active_mode |
+| `set_mode` | session_id, mode_name | active_mode, description, instruction |
 | `get_meeting` | meeting_id | title, content, open_tasks, already_summarised |
 | `save_meeting_summary` | meeting_id, summary, task_ids? | note_id, tasks_linked |
 | `ingest_meeting` | title, content, source_url?, category? | meeting_id, already_existed |
@@ -449,6 +491,4 @@ opportunities:
 | `uninstall` | `cli/main.py` | 14 | file cleanup, agent deregistration |
 | `resume_session` | `tools/session_tools.py` | 13 | state deserialization, note grouping |
 
-**Near-cap files:** `cli/main.py` is at 500 lines (the hard cap). The next
-addition requires splitting — extract `capture` into `cli/capture.py` or
-split agent registration helpers into a separate module.
+**Near-cap files:** `cli/configure.py` (~307 lines) and `cli/analytics.py` (~305 lines) are approaching the cap. The next significant addition to either may require splitting.
