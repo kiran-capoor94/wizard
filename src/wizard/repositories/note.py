@@ -78,9 +78,33 @@ class NoteRepository:
             select(func.count()).select_from(Note).where(Note.session_id == session_id)
         ).one()
 
-    def count_for_sessions(
-        self, db: Session, session_ids: list[int]
-    ) -> dict[int, int]:
+    def get_notes_by_artifact_id(
+        self,
+        db: Session,
+        artifact_id: str,
+        ascending: bool = False,
+        limit: int | None = None,
+    ) -> list[Note]:
+        order = col(Note.created_at).asc() if ascending else col(Note.created_at).desc()
+        stmt = select(Note).where(Note.artifact_id == artifact_id).order_by(order)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(db.exec(stmt).all())
+
+    def get_artifact_id_hashes(self, db: Session, artifact_id: str) -> set[str]:
+        """Return synthesis_content_hash values for notes on this artifact.
+
+        Used by synthesis to pre-filter exact duplicate candidates before LLM calls.
+        Returns only non-null hashes.
+        """
+        stmt = (
+            select(Note.synthesis_content_hash)
+            .where(Note.artifact_id == artifact_id)
+            .where(Note.synthesis_content_hash.is_not(None))  # type: ignore[union-attr]
+        )
+        return set(db.exec(stmt).all())
+
+    def count_for_sessions(self, db: Session, session_ids: list[int]) -> dict[int, int]:
         """Batch-count notes per session. Returns {session_id: count}."""
         if not session_ids:
             return {}
@@ -100,7 +124,36 @@ def build_rolling_summary(notes: list[Note]) -> str | None:
     """
     entries = []
     for n in sorted(notes, key=lambda x: x.created_at, reverse=True):
+        if n.status not in ("active", None):
+            continue
         if n.mental_model:
             dt = n.created_at.strftime("%Y-%m-%d")
             entries.append(f"[{dt} {n.note_type.value}] {n.mental_model}")
     return "\n".join(entries) if entries else None
+
+
+def detect_drift(
+    old_ids: set[int],
+    new_ids: set[int],
+    entity_id: int,
+    artifact_id: str,
+) -> dict | None:
+    """Compare legacy FK path vs artifact_id path note sets.
+
+    Temporary migration utility for Phase 2 shadow-read comparison (artifact identity v3).
+    Will be removed after Phase 3 cutover is complete.
+
+    Returns None if both paths return identical note ID sets.
+    Returns a dict with drift details if they differ — caller should log
+    and halt Phase 3 cutover until resolved.
+    """
+    missing_from_new = old_ids - new_ids
+    missing_from_old = new_ids - old_ids
+    if not missing_from_new and not missing_from_old:
+        return None
+    return {
+        "entity_id": entity_id,
+        "artifact_id": artifact_id,
+        "missing_from_new": missing_from_new,
+        "missing_from_old": missing_from_old,
+    }

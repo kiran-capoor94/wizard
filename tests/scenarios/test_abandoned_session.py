@@ -1,60 +1,35 @@
 """Scenario: session started, work done, session_end never called. New session starts."""
 
-import pytest
 
-from wizard.models import NoteType
-from wizard.tools.session_tools import session_start
-from wizard.tools.task_tools import save_note, task_start
-
-
-@pytest.mark.asyncio
-async def test_abandoned_session(
-    db_session, fake_ctx,
-    task_repo, note_repo, meeting_repo, task_state_repo, security,
-    seed_task, session_closer,
-):
+async def test_abandoned_session(mcp_client, seed_task):
     task = await seed_task(name="Debug memory leak")
 
     # Session 1: start, do work, DON'T end
-    start_resp = await session_start(
-        ctx=fake_ctx,
-        t_repo=task_repo,
-        m_repo=meeting_repo,
-        ts_repo=task_state_repo,
-        session_closer=session_closer,
-    )
-    session_1_id = start_resp.session_id
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+    session_1_id = r.structured_content["session_id"]
 
-    await save_note(
-        ctx=fake_ctx, task_id=task.id, note_type=NoteType.INVESTIGATION,
-        content="Heap dump shows growing object count",
-        t_repo=task_repo, sec=security, n_repo=note_repo,
-        t_state_repo=task_state_repo,
-    )
+    r = await mcp_client.call_tool("save_note", {
+        "task_id": task.id, "note_type": "investigation",
+        "content": "Heap dump shows growing object count",
+    })
+    assert not r.is_error, r
 
     # Session 2: start fresh without ending session 1
-    fresh_ctx = type(fake_ctx)()
-    fresh_ctx.sample_error = RuntimeError("No sampling in tests")
-    start_resp2 = await session_start(
-        ctx=fresh_ctx,
-        t_repo=task_repo,
-        m_repo=meeting_repo,
-        ts_repo=task_state_repo,
-        session_closer=session_closer,
-    )
-    assert start_resp2.session_id is not None
-    assert start_resp2.session_id != session_1_id
+    # (sampling unavailable in test client -> synthetic fallback)
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+    assert r.structured_content["session_id"] != session_1_id
 
-    # Session 1 was auto-closed — observable via the response
-    assert len(start_resp2.closed_sessions) == 1
-    assert start_resp2.closed_sessions[0].session_id == session_1_id
-    assert start_resp2.closed_sessions[0].closed_via == "synthetic"
-    assert start_resp2.closed_sessions[0].summary is not None
+    # Session 1 was auto-closed with a synthetic summary
+    closed = r.structured_content["closed_sessions"]
+    assert len(closed) == 1
+    assert closed[0]["session_id"] == session_1_id
+    assert closed[0]["closed_via"] == "synthetic"
+    assert closed[0]["summary"] is not None
 
-    # Notes from session 1 are still there
-    ts_resp = await task_start(
-        ctx=fresh_ctx, task_id=task.id,
-        t_repo=task_repo, n_repo=note_repo,
-    )
-    assert ts_resp.compounding is True
-    assert sum(ts_resp.notes_by_type.values()) >= 1
+    # Notes from session 1 are still accessible via task_start
+    r = await mcp_client.call_tool("task_start", {"task_id": task.id})
+    assert not r.is_error, r
+    assert r.structured_content["compounding"] is True
+    assert sum(r.structured_content["notes_by_type"].values()) >= 1

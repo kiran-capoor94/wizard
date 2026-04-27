@@ -1,22 +1,29 @@
 import datetime
+import importlib.metadata as importlib_metadata
 import json
 import logging
 import os
 import shutil
-import stat
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 
+import click
 import typer
+from rich import print as rprint
+from rich.panel import Panel
+from rich.table import Table
 
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
 from wizard.cli.capture import capture
+from wizard.cli.configure import synthesis_app
 from wizard.cli.doctor import db_is_healthy, doctor
+from wizard.cli.verify import verify
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
+from wizard.services import RegistrationService
 
 logger = logging.getLogger(__name__)
 
@@ -28,84 +35,34 @@ app = typer.Typer(
 
 app.command()(doctor)
 app.command()(capture)
+app.command()(verify)
 
 configure_app = typer.Typer(help="Configure wizard settings.")
 app.add_typer(configure_app, name="configure")
 
-WIZARD_HOME = Path.home() / ".wizard"
+_reg_service = RegistrationService(settings)
 
-_DEFAULT_CONFIG = {
-    "scrubbing": {"enabled": True, "allowlist": []},
-}
+_AGENT_CHOICES = [
+    "claude-code",
+    "claude-desktop",
+    "gemini",
+    "opencode",
+    "codex",
+    "copilot",
+    "all",
+]
 
-_AGENT_CHOICES = ["claude-code", "claude-desktop", "gemini", "opencode", "codex", "all"]
-
-
-def _ensure_editable_pth() -> None:
-    """Clear the UF_HIDDEN macOS flag from the hatchling editable .pth file.
-
-    uv sets UF_HIDDEN on all .pth files it creates inside .venv. Python 3.14+
-    respects UF_HIDDEN and silently skips those files, so the editable install
-    silently breaks. os.chflags clears the bit; uv sync does not re-set it on
-    files it doesn't need to recreate, so this is persistent across syncs.
-
-    Only needs to be re-run after a full venv rebuild (uv venv / uv pip install -e .).
-    """
-    repo_root = Path(__file__).resolve().parents[3]
-    py_ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
-    site_packages = repo_root / ".venv" / "lib" / py_ver / "site-packages"
-    if not site_packages.exists():
-        return
-
-    pth_file = site_packages / "_editable_impl_wizard.pth"
-    if not pth_file.exists():
-        return
-
-    if not hasattr(os, "chflags"):
-        return  # non-macOS — no-op
-
-    st = os.lstat(pth_file)
-    if getattr(st, "st_flags", 0) & stat.UF_HIDDEN:
-        os.chflags(pth_file, st.st_flags & ~stat.UF_HIDDEN)
-
-
-def _package_skills_dir() -> Path:
-    """Resolve the skills directory shipped inside the wizard package."""
-    return Path(__file__).resolve().parent.parent / "skills"
-
-
-def _refresh_skills(dest: Path) -> None:
-    """Copy skills from the package into dest (wizard internal cache),
-    replacing any existing copy."""
-    source = _package_skills_dir()
-    if source.exists():
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(source, dest)
-        typer.echo(f"Installed skills to {dest}")
-    else:
-        typer.echo("No skills found in package — skipping skill install")
-
-
-def _install_skills_for_agents(agent_ids: list[str]) -> None:
-    """Copy wizard skills into each agent's native skills directory."""
-    source = _package_skills_dir()
-    if not source.exists():
-        return
-    for aid in agent_ids:
-        if agent_registration.install_skills(aid, source):
-            dest = agent_registration._AGENT_SKILLS_DIRS[aid]
-            typer.echo(f"  Installed skills for {aid} → {dest}")
-
-
-def _uninstall_skills_for_agents(agent_ids: list[str]) -> None:
-    """Remove wizard-managed skills from each agent's native skills directory."""
-    source = _package_skills_dir()
-    if not source.exists():
-        return
-    for aid in agent_ids:
-        if agent_registration.uninstall_skills(aid, source):
-            typer.echo(f"  Removed skills for {aid}")
+def is_editable_install() -> bool:
+    """True for editable (dev); False for `uv tool install`."""
+    try:
+        dist = importlib_metadata.distribution("wizard")
+        url_json = dist.read_text("direct_url.json")
+        if not url_json:
+            return True
+        data = json.loads(url_json)
+        return bool(data.get("editable") or data.get("dir_info", {}).get("editable"))
+    except Exception:
+        return True
 
 
 def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
@@ -113,50 +70,47 @@ def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]
     typer.echo(f"  {label}...", nl=False)
     result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
     ok = result.returncode == 0
-    typer.echo(" ok" if ok else " FAILED")
+    status = (
+        typer.style(" ok", fg=typer.colors.GREEN)
+        if ok
+        else typer.style(" FAILED", fg=typer.colors.RED, bold=True)
+    )
+    typer.echo(status)
     return ok, (result.stdout + result.stderr).strip()
 
 
-def _register_agents(agent_ids: list[str], verb: str = "Registered") -> None:
-    """Register MCP, install hooks, and install skills for each agent ID."""
-    for aid in agent_ids:
-        try:
-            agent_registration.register(aid)
-            hook_ok = agent_registration.register_hook(aid)
-            typer.echo(f"  {verb} {aid}" + (" + hook" if hook_ok else ""))
-        except Exception as exc:
-            typer.echo(f"  Warning: could not register {aid}: {exc}", err=True)
-    _install_skills_for_agents(agent_ids)
+def _display_agent_registration(results: list[dict]) -> None:
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column(width=2)
+    table.add_column(min_width=16)
+    table.add_column(style="dim")
+
+    for res in results:
+        status = "[green]✓[/green]" if res["success"] else "[red]✗[/red]"
+        desc = " + ".join(res["parts"]) if res["success"] else res["error"]
+        table.add_row(status, res["id"], desc)
+    rprint(table)
 
 
 def _prompt_and_register_agents(agent: str | None) -> list[str]:
-    """Run agent selection prompt (or validate --agent flag) and register.
-
-    Returns list of registered agent IDs.
-    """
     if agent is None:
-        typer.echo("Which agent would you like to register?")
-        for i, choice in enumerate(_AGENT_CHOICES, 1):
-            typer.echo(f"  {i}. {choice}")
-        selection = typer.prompt(f"Enter number (1-{len(_AGENT_CHOICES)})")
-        try:
-            idx = int(selection) - 1
-            agent = _AGENT_CHOICES[idx]
-        except ValueError, IndexError:
-            typer.echo("Invalid selection.", err=True)
-            raise typer.Exit(1) from None
+        agent = typer.prompt(
+            "Agent to register",
+            type=click.Choice(_AGENT_CHOICES, case_sensitive=False),
+            default="claude-code",
+        )
 
-    if agent == "all":
-        agents_to_register = [a for a in _AGENT_CHOICES if a != "all"]
-    elif agent not in [a for a in _AGENT_CHOICES if a != "all"]:
-        typer.echo(f"Unknown agent: {agent}", err=True)
-        raise typer.Exit(1)
-    else:
-        agents_to_register = [agent]
+    selected: str = str(agent)
+    agents_to_register: list[str] = (
+        [a for a in _AGENT_CHOICES if a != "all"] if selected == "all" else [selected]
+    )
 
-    _register_agents(agents_to_register, verb="Registered")
-    agent_registration.write_registered_agents(agents_to_register)
-    return agents_to_register
+    results = _reg_service.register_agents(agents_to_register)
+    _display_agent_registration(results)
+
+    registered = [r["id"] for r in results if r["success"]]
+    agent_registration.write_registered_agents(registered)
+    return registered
 
 
 @app.command()
@@ -168,66 +122,59 @@ def setup(
     ),
 ) -> None:
     """Create ~/.wizard, default config, install skills, and register MCP."""
-    WIZARD_HOME.mkdir(parents=True, exist_ok=True)
+    _reg_service.ensure_wizard_home()
+    typer.echo(_reg_service.initialize_config())
+    typer.echo(_reg_service.initialize_allowlist())
 
-    config_path = WIZARD_HOME / "config.json"
-    if not config_path.exists():
-        config_path.write_text(json.dumps(_DEFAULT_CONFIG, indent=2))
-        typer.echo(f"Created default config at {config_path}")
-    else:
-        typer.echo(f"Config already exists at {config_path}")
-
-    _ensure_editable_pth()
-    _refresh_skills(WIZARD_HOME / "skills")
+    _reg_service.ensure_editable_pth()
+    agent_registration.refresh_hooks()
+    typer.echo(_reg_service.refresh_skills())
 
     _wizard_db_env = os.environ.get("WIZARD_DB")
-    db_path = Path(_wizard_db_env) if _wizard_db_env else (WIZARD_HOME / "wizard.db")
+    db_path = Path(_wizard_db_env) if _wizard_db_env else (_reg_service.WIZARD_HOME / "wizard.db")
     if not db_is_healthy(db_path):
+        from wizard.database import run_migrations
         typer.echo("Initialising database...")
-        repo_root = Path(__file__).resolve().parents[3]
-        alembic_args = (
-            ["uv", "run", "alembic", "upgrade", "head"]
-            if shutil.which("uv")
-            else [sys.executable, "-m", "alembic", "upgrade", "head"]
-        )
-        ok, output = _run_update_step("run migrations", alembic_args, repo_root)
-        if not ok:
-            typer.echo(output, err=True)
-            raise typer.Exit(1)
+        try:
+            run_migrations()
+        except Exception as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
 
     agents_to_register = _prompt_and_register_agents(agent)
 
-    typer.echo("\n" + "─" * 45)
-    typer.echo("Setup complete.")
-    typer.echo(f"  Agent  {', '.join(agents_to_register)}")
-    typer.echo(
-        "\nTo configure a knowledge store, run: wizard configure knowledge-store"
+    agent_line = (
+        f"  ✅  [bold]{', '.join(agents_to_register)}[/bold] registered\n"
+        if agents_to_register
+        else ""
     )
+    rprint(Panel(
+        "  ✅  Installed\n"
+        f"{agent_line}"
+        "\n"
+        "  Next steps:\n"
+        "    1. Run [bold]wizard verify[/bold] to confirm MCP is working.\n"
+        "    2. Open your agent — the wizard: tools are available automatically.\n"
+        "    3. The SessionStart hook calls wizard:session_start for you.\n"
+        "\n"
+        "  Optionally: [dim]wizard configure knowledge-store[/dim]",
+        title="[green]Setup complete[/green]",
+        border_style="green",
+    ))
 
 
 @configure_app.command("knowledge-store")
 def configure_knowledge_store() -> None:
     """Configure where session summaries are written."""
-    config_file = Path.home() / ".wizard" / "config.json"
+    config_file = _reg_service.WIZARD_HOME / "config.json"
     existing = json.loads(config_file.read_text()) if config_file.exists() else {}
 
-    ks_type = (
-        typer.prompt(
-            "Knowledge store type",
-            default="",
-            prompt_suffix=" [notion/obsidian/none]: ",
-        )
-        .strip()
-        .lower()
+    raw = typer.prompt(
+        "Knowledge store type",
+        type=click.Choice(["notion", "obsidian", "none"], case_sensitive=False),
+        default="none",
     )
-    if ks_type == "none":
-        ks_type = ""
-
-    if ks_type not in ("notion", "obsidian", ""):
-        typer.echo(
-            f"Unknown type: {ks_type}. Valid: notion, obsidian, or leave blank for none."
-        )
-        raise typer.Exit(1)
+    ks_type = "" if raw == "none" else raw
 
     ks_config: dict = {"type": ks_type, "notion": {}, "obsidian": {}}
 
@@ -255,34 +202,26 @@ def configure_knowledge_store() -> None:
     typer.echo(f"Knowledge store configured: {ks_type or 'none'}")
 
 
+configure_app.add_typer(synthesis_app, name="synthesis")
+
+
 def _confirm_uninstall(
     registered: list[str],
     existing_files: list[tuple[str, str | None]],
     has_wizard_dir: bool,
 ) -> bool:
     """Print deletion manifest and prompt for confirmation. Returns True if confirmed."""
-    typer.echo("This will permanently delete:")
+    items: list[str] = []
     for name, desc in existing_files:
-        suffix = f"  ({desc})" if desc else ""
-        typer.echo(f"  ~/.wizard/{name}{suffix}")
+        items.append(f"~/.wizard/{name}" + (f"  [dim]({desc})[/dim]" if desc else ""))
     if has_wizard_dir and not existing_files:
-        typer.echo("  ~/.wizard/")
+        items.append("~/.wizard/")
     for aid in registered:
-        typer.echo(f"  wizard MCP entry for {aid}")
-    typer.echo("")
+        items.append(f"wizard MCP entry for [bold]{aid}[/bold]")
+    rprint(Panel(
+        "\n".join(items), title="[red]This will permanently delete[/red]", border_style="red"
+    ))
     return typer.confirm("Are you sure?")
-
-
-def _deregister_agents(registered: list[str]) -> None:
-    """Deregister MCP, remove hooks, and remove skills for all agents."""
-    for aid in registered:
-        try:
-            agent_registration.deregister(aid)
-            agent_registration.deregister_hook(aid)
-            typer.echo(f"  Removed wizard from {aid}")
-        except Exception as exc:
-            typer.echo(f"  Warning: could not deregister {aid}: {exc}", err=True)
-    _uninstall_skills_for_agents(registered)
 
 
 @app.command()
@@ -301,11 +240,11 @@ def uninstall(
     }
     existing_files: list[tuple[str, str | None]] = []
     for name, desc in wizard_files.items():
-        path = WIZARD_HOME / name.rstrip("/")
+        path = _reg_service.WIZARD_HOME / name.rstrip("/")
         if path.exists():
             existing_files.append((name, desc))
 
-    has_wizard_dir = WIZARD_HOME.exists()
+    has_wizard_dir = _reg_service.WIZARD_HOME.exists()
     has_anything = has_wizard_dir or bool(registered)
 
     if not has_anything:
@@ -316,25 +255,20 @@ def uninstall(
         typer.echo("Aborted.")
         return
 
-    _deregister_agents(registered)
+    results = _reg_service.deregister_agents(registered)
+    _display_agent_registration(results)
 
     if has_wizard_dir:
-        try:
-            shutil.rmtree(WIZARD_HOME)
-            typer.echo(f"  Removed {WIZARD_HOME}")
-        except OSError as e:
-            typer.echo(f"  Failed to remove {WIZARD_HOME}: {e}", err=True)
-            raise typer.Exit(code=1) from e
+        typer.echo(_reg_service.uninstall_wizard())
 
-    typer.echo(
-        "Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package."
-    )
+    typer.echo("Wizard uninstalled. Run `uv pip uninstall wizard` to remove the package.")
 
 
 @app.command()
 def analytics(
     day: bool = typer.Option(False, "--day", help="Show today's analytics"),
     week: bool = typer.Option(False, "--week", help="Show last 7 days (default)"),
+    month: bool = typer.Option(False, "--month", help="Show last 30 days"),
     from_date: Optional[str] = typer.Option(
         None, "--from", help="Start date YYYY-MM-DD"
     ),
@@ -343,10 +277,11 @@ def analytics(
     """Show wizard usage analytics."""
     today = datetime.date.today()
 
-    options_set = sum([day, week, bool(from_date or to_date)])
+    options_set = sum([day, week, month, bool(from_date or to_date)])
     if options_set > 1:
         typer.echo(
-            "Options --day, --week, --from/--to are mutually exclusive.", err=True
+            "Options --day, --week, --month, --year, --from/--to are mutually exclusive.",
+            err=True,
         )
         raise typer.Exit(1)
 
@@ -364,8 +299,14 @@ def analytics(
         except ValueError as exc:
             typer.echo(f"Invalid date format: {exc}", err=True)
             raise typer.Exit(1) from exc
-    else:
+    elif week:
         start = today - datetime.timedelta(days=7)
+        end = today
+    elif month:
+        start = today - datetime.timedelta(days=30)
+        end = today
+    else:  # year
+        start = today - datetime.timedelta(days=365)
         end = today
 
     db_path = Path(os.environ.get("WIZARD_DB", settings.db))
@@ -379,48 +320,77 @@ def analytics(
         tasks_data = analytics_module.query_tasks(db, start, end)
         compounding = analytics_module.query_compounding(db, start, end)
 
-    combined = {
-        "sessions": sessions_data,
-        "notes": notes_data,
-        "tasks": tasks_data,
-        "compounding": compounding,
-    }
-    typer.echo(analytics_module.format_table(combined, start, end))
+    analytics_module.print_analytics(
+        {
+            "sessions": sessions_data, "notes": notes_data,
+            "tasks": tasks_data, "compounding": compounding,
+        },
+        start, end,
+    )
 
 
 @app.command()
 def update() -> None:
-    """Pull latest code, sync deps, run migrations, and refresh skills."""
-    repo_root = Path(__file__).resolve().parents[3]
-    sync_args = (
-        ["uv", "sync"]
-        if shutil.which("uv")
-        else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
-    )
-    alembic_args = (
-        ["uv", "run", "alembic", "upgrade", "head"]
-        if shutil.which("uv")
-        else [sys.executable, "-m", "alembic", "upgrade", "head"]
-    )
+    """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
+    from wizard.database import run_migrations
 
-    steps: list[tuple[str, list[str]]] = [
-        ("git pull", ["git", "pull"]),
-        ("sync deps", sync_args),
-        ("run migrations", alembic_args),
-    ]
+    skills_dest = _reg_service.WIZARD_HOME / "skills"
 
-    for label, args in steps:
-        ok, output = _run_update_step(label, args, repo_root)
+    if is_editable_install():
+        # Dev mode: git pull + uv sync
+        repo_root = Path(__file__).resolve().parents[3]
+        sync_args = (
+            ["uv", "sync"]
+            if shutil.which("uv")
+            else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
+        )
+        steps = [
+            ("git pull", ["git", "pull"]),
+            ("sync deps", sync_args),
+        ]
+        for label, args in steps:
+            ok, output = _run_update_step(label, args, repo_root)
+            if not ok:
+                typer.echo(output, err=True)
+                raise typer.Exit(1)
+        _reg_service.ensure_editable_pth()
+    else:
+        # Installed mode: uv tool upgrade
+        if not shutil.which("uv"):
+            typer.echo("uv not found — cannot upgrade", err=True)
+            raise typer.Exit(1)
+        ok, output = _run_update_step(
+            "upgrade", ["uv", "tool", "upgrade", "wizard"], Path.home()
+        )
         if not ok:
             typer.echo(output, err=True)
             raise typer.Exit(1)
 
-    _ensure_editable_pth()
-    _refresh_skills(WIZARD_HOME / "skills")
+    typer.echo("  run migrations... ", nl=False)
+    try:
+        run_migrations()
+        typer.echo("ok")
+    except Exception as exc:
+        typer.echo(f"FAILED\n{exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    agent_registration.refresh_hooks()
+    _reg_service.refresh_skills()
 
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
-    _register_agents(registered, verb="Re-registered")
 
-    typer.echo("Wizard updated.")
+    if registered:
+        typer.echo("\nAgents:")
+        results = _reg_service.register_agents(registered)
+        _display_agent_registration(results)
+    else:
+        typer.echo("\nNo registered agents found — run: wizard setup --agent <agent>")
+
+    rprint(Panel(
+        f"Skills cache: [dim]{skills_dest}[/dim]\n"
+        f"Agents updated: [bold]{', '.join(registered) if registered else 'none'}[/bold]",
+        title="[green]Wizard updated[/green]",
+        border_style="green",
+    ))

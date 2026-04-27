@@ -36,6 +36,13 @@ class TaskRepository:
             raise ValueError(f"Task {task_id} not found")
         return task
 
+    def save(self, db: Session, task: Task) -> Task:
+        """Persist a Task to the database."""
+        db.add(task)
+        db.flush()
+        db.refresh(task)
+        return task
+
     def list_paginated(
         self,
         db: Session,
@@ -54,6 +61,50 @@ class TaskRepository:
 
     def get_by_source_id(self, db: Session, source_id: str) -> Task | None:
         return db.exec(select(Task).where(Task.source_id == source_id)).first()
+
+    def upsert_by_source_id(
+        self,
+        db: Session,
+        source_id: str,
+        name: str,
+        priority: TaskPriority,
+        source_url: str | None,
+    ) -> Task | None:
+        """Update existing task by source_id if found; return it, or None if not found.
+
+        Does not update done/archived tasks' name or priority.
+        """
+        existing = self.get_by_source_id(db, source_id)
+        if not existing:
+            return None
+        if existing.status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
+            return None
+        existing.name = name
+        existing.priority = priority
+        if source_url and not existing.source_url:
+            existing.source_url = source_url
+        self.save(db, existing)
+        return existing
+
+    def get_active_task_names(self, db: Session) -> list[str]:
+        """Return names of all non-done, non-archived tasks."""
+        rows = db.exec(
+            select(Task.name).where(
+                col(Task.status).not_in([TaskStatus.DONE, TaskStatus.ARCHIVED])
+            )
+        ).all()
+        return [r for r in rows if r is not None]
+
+    def get_by_name(self, db: Session, name: str) -> Task | None:
+        """Return the first task with an exact name match."""
+        rows = db.exec(select(Task).where(Task.name == name)).all()
+        return rows[0] if rows else None
+
+    def get_names_by_ids(self, db: Session, task_ids: list[int]) -> list[str]:
+        """Return task names for the given IDs, preserving input order where found."""
+        rows = db.exec(select(Task.id, Task.name).where(col(Task.id).in_(task_ids))).all()
+        name_by_id = {row[0]: row[1] for row in rows if row[0] is not None and row[1] is not None}
+        return [name_by_id[tid] for tid in task_ids if tid in name_by_id]
 
     def get_open_task_contexts(
         self, db: Session, limit: int | None = None

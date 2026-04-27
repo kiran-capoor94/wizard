@@ -1,8 +1,14 @@
 """Provider functions for FastMCP Depends() injection."""
 
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
+from pathlib import Path
+
+from sqlmodel import Session
 
 from .config import settings
+from .database import get_session as _get_db_session_impl
 from .repositories import (
     MeetingRepository,
     NoteRepository,
@@ -14,6 +20,17 @@ from .security import SecurityService
 from .services import SessionCloser
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def get_db_session() -> Generator[Session, None, None]:
+    """Provide a DB session for Depends() injection.
+
+    Centralised here so tests can patch a single target
+    (``wizard.deps.get_db_session``) instead of every per-module binding.
+    """
+    with _get_db_session_impl() as db:
+        yield db
 
 
 def get_security() -> SecurityService:
@@ -44,4 +61,12 @@ def get_session_repo() -> SessionRepository:
 
 
 def get_session_closer() -> SessionCloser:
-    return SessionCloser(security=get_security())
+    return SessionCloser(security=get_security(), settings=settings)
+
+
+def get_skill_roots() -> list[Path]:
+    """Return the default skill search roots for mode tools."""
+    return [
+        Path.home() / ".wizard" / "skills",
+        Path(__file__).resolve().parent / "skills",
+    ]

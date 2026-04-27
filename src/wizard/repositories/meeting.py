@@ -1,8 +1,8 @@
 import logging
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
-from ..models import Meeting
+from ..models import Meeting, MeetingTasks
 from ..schemas import MeetingContext
 
 logger = logging.getLogger(__name__)
@@ -37,3 +37,30 @@ class MeetingRepository:
                 )
             )
         return results
+
+    def save(self, db: Session, meeting: Meeting) -> Meeting:
+        """Persist a Meeting to the database."""
+        db.add(meeting)
+        db.flush()
+        db.refresh(meeting)
+        return meeting
+
+    def link_tasks(self, db: Session, meeting_id: int, task_ids: list[int]) -> None:
+        """Link multiple tasks to a meeting, avoiding duplicates."""
+        if not task_ids:
+            return
+
+        existing_links = {
+            mt.task_id
+            for mt in db.exec(
+                select(MeetingTasks).where(
+                    MeetingTasks.meeting_id == meeting_id,
+                    col(MeetingTasks.task_id).in_(task_ids),
+                )
+            ).all()
+        }
+
+        for tid in task_ids:
+            if tid not in existing_links:
+                db.add(MeetingTasks(meeting_id=meeting_id, task_id=tid))
+        db.flush()

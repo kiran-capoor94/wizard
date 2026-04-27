@@ -5,6 +5,8 @@ from pathlib import Path
 
 import typer
 from alembic.runtime.migration import MigrationContext
+from rich import print as rprint
+from rich.table import Table
 from sqlalchemy import create_engine
 
 from wizard import agent_registration
@@ -33,7 +35,7 @@ def db_is_healthy(db_path: Path) -> bool:
         return False
 
 
-def _check_db_file() -> tuple[bool, str]:
+def check_db_file() -> tuple[bool, str]:
     db_path_str = os.environ.get("WIZARD_DB", settings.db)
     db_path = Path(db_path_str)
     if db_path.exists():
@@ -41,7 +43,7 @@ def _check_db_file() -> tuple[bool, str]:
     return False, f"Database not found: {db_path} — run 'wizard setup' first"
 
 
-def _check_db_tables() -> tuple[bool, str]:
+def check_db_tables() -> tuple[bool, str]:
     db_path_str = os.environ.get("WIZARD_DB", settings.db)
     db_path = Path(db_path_str)
     if not db_path.exists():
@@ -66,7 +68,7 @@ def _check_db_tables() -> tuple[bool, str]:
         return False, f"Could not inspect tables: {exc}"
 
 
-def _check_config_file() -> tuple[bool, str]:
+def check_config_file() -> tuple[bool, str]:
     config_path = Path(
         os.environ.get(
             "WIZARD_CONFIG_FILE", str(Path.home() / ".wizard" / "config.json")
@@ -81,7 +83,7 @@ def _check_allowlist_file() -> tuple[bool, str]:
     allowlist = Path.home() / ".wizard" / "allowlist.txt"
     if allowlist.exists():
         return True, f"Allowlist found: {allowlist}"
-    return False, f"Allowlist not found: {allowlist}"
+    return True, f"Allowlist not found at {allowlist} — run 'wizard setup' to create it"
 
 
 def _check_agent_registrations() -> tuple[bool, str]:
@@ -105,7 +107,7 @@ def _check_migration_current() -> tuple[bool, str]:
         return False, f"Migration check failed: {exc}"
 
 
-def _check_skills_installed() -> tuple[bool, str]:
+def check_skills_installed() -> tuple[bool, str]:
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
@@ -137,13 +139,13 @@ def _check_knowledge_store() -> tuple[bool, str]:
 def run_checks(stop_on_failure: bool = True) -> list[tuple[str, bool, str]]:
     """Run all checks and return list of (name, passed, message) tuples."""
     checks = [
-        ("DB file exists", _check_db_file),
-        ("Config file", _check_config_file),
-        ("DB tables", _check_db_tables),
+        ("DB file exists", check_db_file),
+        ("Config file", check_config_file),
+        ("DB tables", check_db_tables),
         ("Allowlist file", _check_allowlist_file),
         ("Agent registered", _check_agent_registrations),
         ("Migration current", _check_migration_current),
-        ("Skills installed", _check_skills_installed),
+        ("Skills installed", check_skills_installed),
         ("Knowledge store", _check_knowledge_store),
     ]
 
@@ -165,14 +167,20 @@ def doctor(
     """Run health checks on the wizard installation."""
     results = run_checks(stop_on_failure=not all_checks)
 
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Check", min_width=22)
+    table.add_column("Status", width=6)
+    table.add_column("Details")
+
     failures = []
     for i, (name, passed, message) in enumerate(results, 1):
-        status = "PASS" if passed else "FAIL"
-        typer.echo(f"  [{i:2d}] {status}  {name}: {message}")
-
+        status = "[green]PASS[/green]" if passed else "[bold red]FAIL[/bold red]"
+        table.add_row(str(i), name, status, message)
         if not passed:
             failures.append((i, name, message))
 
+    rprint(table)
     if failures:
         raise typer.Exit(1)
     typer.echo("All checks passed.")

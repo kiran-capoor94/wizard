@@ -4,7 +4,7 @@ version = "2.2.1"
 description = "Source-agnostic local memory layer for AI agents"
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.18.4",
     "fastmcp[tasks]>=3.2.0",
@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 wizard = "wizard.cli.main:app"
+wizard-server = "wizard.cli.serve:serve"
 
 [build-system]
 requires = ["hatchling"]
@@ -35,6 +36,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "respx>=0.23.1",
     "ruff>=0.11.0",
+    "wizard",
 ]
 
 [tool.pytest.ini_options]
@@ -44,7 +46,7 @@ addopts = "-m 'not integration'"
 markers = ["integration: live API tests (require real credentials)"]
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
@@ -66,6 +68,11 @@ ignore = [
 "src/wizard/prompts.py" = [
     "E501",   # prompt templates contain long prose lines — wrapping harms readability
 ]
+"src/wizard/alembic/**" = [
+    "E501",   # auto-generated migration files contain long lines — do not reformat
+    "W291",   # auto-generated migration files may have trailing whitespace
+    "I001",   # auto-generated migration files have non-standard import ordering
+]
 "tests/**" = [
     "E402",   # module-level imports not at top — test files use late imports by design
     "E501",   # long lines in tests — assertion messages, mock data, URLs are clearer unsplit
@@ -77,3 +84,6 @@ max-complexity = 10
 
 [tool.ruff.lint.isort]
 known-first-party = ["wizard"]
+
+[tool.uv.sources]
+wizard = { workspace = true }

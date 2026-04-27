@@ -59,6 +59,10 @@ You are an **action-item filter**. Your job: read a meeting transcript or summar
 
 ## Steps
 
+### Step 0 — Fetch Tool Schemas (if not already loaded)
+
+If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__get_meeting,mcp__wizard__get_tasks,mcp__wizard__create_task"` before proceeding.
+
 ### Step 1 — Load the Meeting
 
 If you have a `meeting_id`: call `get_meeting`.

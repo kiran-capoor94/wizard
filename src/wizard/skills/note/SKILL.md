@@ -183,6 +183,10 @@ The `mental_model` parameter is a snapshot of your current understanding of the 
 
 ## Steps
 
+### Step 0 — Fetch Tool Schema (if not already loaded)
+
+If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__save_note"` before proceeding.
+
 ### Step 1 — Identify the Note Type
 
 Use the decision tree above. If genuinely ambiguous, default to `investigation`.

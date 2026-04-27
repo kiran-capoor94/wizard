@@ -14,6 +14,10 @@ Trigger this skill when the user says:
 - "quick win" / "something easy" / "I'm back"
 - "what's blocked?" / "what's stuck?"
 
+## Step 0 — Fetch Tool Schemas (if not already loaded)
+
+If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__what_should_i_work_on,mcp__wizard__task_start,mcp__wizard__session_start"` before proceeding.
+
 ## Step 1 — Infer parameters
 
 Before calling the tool, map the user's language to params:

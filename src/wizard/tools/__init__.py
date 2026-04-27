@@ -1,4 +1,5 @@
 from .meeting_tools import get_meeting, ingest_meeting, save_meeting_summary
+from .mode_tools import get_modes, set_mode
 from .query_tools import get_session, get_sessions, get_task, get_tasks
 from .session_tools import resume_session, session_end, session_start
 from .task_tools import (
@@ -18,4 +19,5 @@ __all__ = [
     "get_meeting", "save_meeting_summary", "ingest_meeting",
     "get_tasks", "get_task", "get_sessions", "get_session",
     "what_should_i_work_on",
+    "get_modes", "set_mode",
 ]

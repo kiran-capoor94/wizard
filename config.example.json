@@ -1,30 +1,53 @@
 {
   "name": "wizard",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "db": "~/.wizard/wizard.db",
-  "jira": {
-    "base_url": "https://yourorg.atlassian.net",
-    "project_key": "ENG",
-    "token": "your-jira-api-token"
-  },
-  "notion": {
-    "daily_page_id": "notion-daily-page-id",
-    "tasks_db_id": "your-notion-tasks-database-id",
-    "meetings_db_id": "your-notion-meetings-database-id",
-    "token": "your-notion-integration-token"
-  },
   "scrubbing": {
     "enabled": true,
-    "allowlist": ["SISU", "AUTH-\\d+", "ENG-\\d+"]
+    "allowlist": ["ENG-\\d+"]
   },
   "synthesis": {
     "model": "ollama/gemma4:latest-64k",
     "base_url": "http://localhost:11434",
     "api_key": "",
-    "enabled": true
+    "enabled": true,
+    "context_chars": 200000,
+    "backends": [
+      {
+        "model": "ollama/gemma4:latest-64k",
+        "base_url": "http://localhost:11434",
+        "api_key": "",
+        "description": "Local Ollama (primary)"
+      },
+      {
+        "model": "openai/unsloth/gemma-4-E2B-it-GGUF",
+        "base_url": "http://localhost:8888/v1",
+        "api_key": "your-unsloth-api-key",
+        "description": "Local Unsloth server (secondary, higher context)"
+      },
+      {
+        "model": "gemini/gemini-2.5-flash-lite",
+        "base_url": "",
+        "api_key": "your-google-api-key",
+        "description": "Google Gemini Flash Lite (cloud fallback)"
+      }
+    ]
+  },
+  "knowledge_store": {
+    "type": "",
+    "notion": {
+      "daily_parent_id": "",
+      "tasks_db_id": "",
+      "meetings_db_id": ""
+    },
+    "obsidian": {
+      "vault_path": "",
+      "daily_notes_folder": "Daily",
+      "tasks_folder": "Tasks"
+    }
   },
   "sentry": {
-    "dsn": "your-sentry-dsn-here",
+    "dsn": "",
     "enabled": false,
     "traces_sample_rate": 0.1,
     "profiles_sample_rate": 0.1

@@ -1,8 +1,9 @@
 import datetime
+import uuid as _uuid
 from enum import Enum
 
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, ForeignKey, Integer
+from sqlalchemy import Column, ForeignKey, Integer, Text
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -95,6 +96,11 @@ class Task(TimestampMixin, table=True):
     )
     source_type: str | None = Field(default=None, index=True)
     source_url: str | None = Field(default=None)
+    artifact_id: str | None = Field(
+        default_factory=lambda: str(_uuid.uuid4()), unique=True, index=True
+    )
+    persistence: str = Field(default="persistent")
+    workspace: str | None = Field(default=None)
 
 
 class Meeting(TimestampMixin, table=True):
@@ -112,6 +118,11 @@ class Meeting(TimestampMixin, table=True):
     )
     source_type: str | None = Field(default=None, index=True)
     source_url: str | None = Field(default=None)
+    artifact_id: str | None = Field(
+        default_factory=lambda: str(_uuid.uuid4()), unique=True, index=True
+    )
+    persistence: str = Field(default="persistent")
+    workspace: str | None = Field(default=None)
 
 
 class WizardSession(TimestampMixin, table=True):
@@ -157,9 +168,34 @@ class WizardSession(TimestampMixin, table=True):
         index=True,
         description="Wizard session ID this session continues from (unclean prior close).",
     )
+    active_mode: str | None = Field(
+        default=None,
+        description="Skill name of the active mode for this session, e.g. 'socratic-mentor'.",
+    )
     is_synthesised: bool = Field(
         default=False,
         description="True once Synthesiser has processed transcript_path into notes.",
+    )
+    artifact_id: str | None = Field(
+        default_factory=lambda: str(_uuid.uuid4()), unique=True, index=True
+    )
+    persistence: str = Field(default="ephemeral")
+    workspace: str | None = Field(default=None)
+    synthesis_status: str = Field(
+        default="pending",
+        description=(
+            "Synthesis lifecycle: 'pending' | 'complete' | 'partial_failure'. "
+            "partial_failure covers both partial success (some notes saved, some chunks failed) "
+            "and total failure (no notes saved). Retry with wizard capture --close --session-id."
+        ),
+    )
+    transcript_raw: str | None = Field(
+        default=None,
+        sa_type=Text(),
+        description=(
+            "Raw JSONL content of all synthesised transcript files, persisted at capture "
+            "time so re-synthesis remains possible after the agent deletes the file."
+        ),
     )
     notes: list["Note"] = Relationship(back_populates="session")
 
@@ -178,6 +214,22 @@ class Note(TimestampMixin, table=True):
     session_id: int | None = Field(default=None, foreign_key="wizardsession.id")
     task_id: int | None = Field(default=None, foreign_key="task.id")
     meeting_id: int | None = Field(default=None, foreign_key="meeting.id")
+    # Artifact identity layer (v3) — single anchor replacing polymorphic FKs above.
+    # Old FKs are kept as a safety net during migration.
+    artifact_id: str | None = Field(default=None, index=True)
+    artifact_type: str | None = Field(default=None)  # 'task'|'session'|'meeting' — debug only
+    # Synthesis provenance
+    synthesis_content_hash: str | None = Field(default=None, index=True)
+    synthesis_session_id: int | None = Field(default=None)
+    transcript_offset_start: int | None = Field(default=None)
+    transcript_offset_end: int | None = Field(default=None)
+    synthesis_confidence: float | None = Field(default=None)
+    source_note_ids: str | None = Field(default=None)  # JSON array of note IDs
+    # Conflict / lifecycle state
+    supersedes_note_id: int | None = Field(default=None)
+    # 'active' | 'superseded' | 'contradicted' | 'archived' | 'invalid' | 'unclassified'
+    status: str = Field(default="active")
+    reference_count: int = Field(default=0)
     session: WizardSession | None = Relationship(back_populates="notes")
 
 
@@ -222,6 +274,7 @@ class TaskState(TimestampMixin, table=True):
     stale_days: int = Field(default=0, nullable=False)
     rolling_summary: str | None = Field(
         default=None,
+        sa_type=Text(),
         description=(
             "Synthesised overview of all prior notes, built from mental_models. "
             "Updated on every note save. Used by task_start for tiered context delivery."

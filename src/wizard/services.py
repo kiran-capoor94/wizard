@@ -1,9 +1,18 @@
 import datetime
+import json
 import logging
+import os
+import shutil
+import stat
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
 
+import sentry_sdk
 from fastmcp import Context
 from sqlmodel import Session, or_, select
 
+from . import agent_registration
 from .database import get_session
 from .mid_session import cancel_mid_session_synthesis
 from .models import Note, NoteType, WizardSession
@@ -11,7 +20,109 @@ from .repositories import NoteRepository
 from .schemas import AutoCloseSummary, ClosedSessionSummary, SessionState
 from .security import SecurityService
 
+if TYPE_CHECKING:
+    from wizard.config import Settings
+
 logger = logging.getLogger(__name__)
+
+
+class RegistrationService:
+    """Handles agent registration, setup, and uninstallation logic."""
+
+    def __init__(self, settings: "Settings"):
+        self._settings = settings
+        self.WIZARD_HOME = Path(settings.db).parent
+
+    def ensure_wizard_home(self) -> None:
+        self.WIZARD_HOME.mkdir(parents=True, exist_ok=True)
+
+    def initialize_config(self) -> str:
+        config_path = self.WIZARD_HOME / "config.json"
+        if not config_path.exists():
+            # Use model_dump to get dict from Pydantic model
+            config_data = self._settings.model_dump(exclude={"name", "version", "db", "sentry"})
+            config_path.write_text(json.dumps(config_data, indent=2))
+            return f"Created default config at {config_path}"
+        return f"Config already exists at {config_path}"
+
+    def initialize_allowlist(self) -> str:
+        allowlist_path = self.WIZARD_HOME / "allowlist.txt"
+        if not allowlist_path.exists():
+            allowlist_path.touch()
+            return f"Created allowlist file at {allowlist_path}"
+        return f"Allowlist already exists at {allowlist_path}"
+
+    def refresh_skills(self) -> str:
+        dest = self.WIZARD_HOME / "skills"
+        source = Path(__file__).resolve().parent / "skills"
+        if source.exists():
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.copytree(source, dest)
+            return f"Installed skills to {dest}"
+        return "No skills found in package — skipping skill install"
+
+    def register_agents(self, agent_ids: list[str]) -> list[dict]:
+        results = []
+        source = Path(__file__).resolve().parent / "skills"
+        for aid in agent_ids:
+            res = {"id": aid, "success": False, "parts": [], "error": None}
+            try:
+                agent_registration.register(aid)
+                res["parts"].append("MCP")
+                if agent_registration.register_hook(aid):
+                    res["parts"].append("hook")
+                if source.exists() and agent_registration.install_skills(aid, source):
+                    res["parts"].append("skills")
+                res["success"] = True
+            except Exception as e:
+                res["error"] = str(e)
+            results.append(res)
+        return results
+
+    def deregister_agents(self, agent_ids: list[str]) -> list[dict]:
+        results = []
+        source = Path(__file__).resolve().parent / "skills"
+        for aid in agent_ids:
+            res = {"id": aid, "success": False, "parts": [], "error": None}
+            try:
+                agent_registration.deregister(aid)
+                res["parts"].append("MCP")
+                if agent_registration.deregister_hook(aid):
+                    res["parts"].append("hook")
+                if source.exists() and agent_registration.uninstall_skills(aid, source):
+                    res["parts"].append("skills")
+                res["success"] = True
+            except Exception as e:
+                res["error"] = str(e)
+            results.append(res)
+        return results
+
+    def uninstall_wizard(self) -> str:
+        if self.WIZARD_HOME.exists():
+            shutil.rmtree(self.WIZARD_HOME)
+            return f"Removed {self.WIZARD_HOME}"
+        return "Nothing to remove"
+
+    @staticmethod
+    def ensure_editable_pth() -> None:
+        """Clear the UF_HIDDEN macOS flag from the hatchling editable .pth file."""
+        repo_root = Path(__file__).resolve().parents[2]
+        py_ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        site_packages = repo_root / ".venv" / "lib" / py_ver / "site-packages"
+        if not site_packages.exists():
+            return
+
+        pth_file = site_packages / "_editable_impl_wizard.pth"
+        if not pth_file.exists():
+            return
+
+        if not hasattr(os, "chflags"):
+            return
+
+        st = os.lstat(pth_file)
+        if getattr(st, "st_flags", 0) & stat.UF_HIDDEN:
+            os.chflags(pth_file, st.st_flags & ~stat.UF_HIDDEN)
 
 
 class SessionCloser:
@@ -25,9 +136,11 @@ class SessionCloser:
         self,
         note_repo: NoteRepository | None = None,
         security: SecurityService | None = None,
+        settings: "Settings" | None = None,
     ):
         self._note_repo = note_repo or NoteRepository()
         self._security = security or SecurityService()
+        self._settings = settings
 
     async def close_recent_abandoned(
         self,
@@ -40,11 +153,7 @@ class SessionCloser:
         return [await self._close_one(db, s, ctx) for s in recent]
 
     async def close_abandoned_background(self, current_session_id: int) -> None:
-        """Synthetically close sessions older than 24h with no summary. Opens its own DB session.
-
-        Hook-marked sessions (with transcripts) are handled inline in session_start so that
-        ctx.sample() is available. This task only handles sessions with closed_by=None.
-        """
+        """Synthetically close sessions older than 24h with no summary. Opens its own DB session."""
         try:
             with get_session() as db:
                 old = self._find_old_abandoned(db, current_session_id)
@@ -54,6 +163,7 @@ class SessionCloser:
                         await self._close_one(db, session, ctx=None)
                         count += 1
                     except Exception as e:
+                        sentry_sdk.capture_exception(e)
                         logger.warning(
                             "close_abandoned_background: failed for session %d: %s",
                             session.id,
@@ -61,6 +171,7 @@ class SessionCloser:
                         )
                 logger.info("close_abandoned_background: closed %d session(s)", count)
         except Exception as e:
+            sentry_sdk.capture_exception(e)
             logger.warning("close_abandoned_background: outer failure: %s", e)
 
     def _find_recent_abandoned(
@@ -152,6 +263,8 @@ class SessionCloser:
             note_type=NoteType.SESSION_SUMMARY,
             content=clean_summary,
             session_id=session_id,
+            artifact_id=session.artifact_id,
+            artifact_type="session",
         )
         self._note_repo.save(db, note)
         return ClosedSessionSummary(
@@ -190,6 +303,7 @@ class SessionCloser:
             auto_summary: AutoCloseSummary = result.result
             return auto_summary.summary, "sampling"
         except Exception as e:
+            sentry_sdk.capture_exception(e)
             logger.warning("SessionCloser sampling failed: %s", e)
             return None, ""
 
