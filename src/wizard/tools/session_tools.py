@@ -129,7 +129,7 @@ async def session_start(
         await ctx.info(f"Session {session.id} started (source={source}).")
 
         closed_sessions = await session_closer.close_recent_abandoned(
-            db, ctx, session.id
+            db, session.id
         )
         await ctx.report_progress(1, 4)
 
