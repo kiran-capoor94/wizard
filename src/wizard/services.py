@@ -126,10 +126,10 @@ class RegistrationService:
 
 
 class SessionCloser:
-    """Auto-closes abandoned sessions with a three-tier fallback chain:
-    1. LLM sampling via ctx.sample()
-    2. Synthetic summary from DB data
-    3. Minimal warn fallback
+    """Auto-closes abandoned sessions.
+
+    Inline (close_recent_abandoned): synthetic summary only — no ctx.sample().
+    Background (close_abandoned_background): also synthetic, runs after session_start returns.
     """
 
     def __init__(
@@ -145,12 +145,16 @@ class SessionCloser:
     async def close_recent_abandoned(
         self,
         db: Session,
-        ctx: Context,
         current_session_id: int,
     ) -> list[ClosedSessionSummary]:
-        """Close sessions abandoned within the last 2h inline. Uses LLM synthesis via ctx."""
+        """Close sessions abandoned within the last 2h inline using synthetic summaries.
+
+        Does not call ctx.sample() — sampling during an active tool call deadlocks
+        the stdio transport (server sends createMessage while client waits for
+        session_start response).
+        """
         recent = self._find_recent_abandoned(db, current_session_id)
-        return [await self._close_one(db, s, ctx) for s in recent]
+        return [await self._close_one(db, s, ctx=None) for s in recent]
 
     async def close_abandoned_background(self, current_session_id: int) -> None:
         """Synthetically close sessions older than 24h with no summary. Opens its own DB session."""
