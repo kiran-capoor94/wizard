@@ -9,7 +9,7 @@ import anyio
 from ..schemas import TaskContext
 
 
-async def _try_notify(coro: Coroutine[Any, Any, None]) -> None:
+async def try_notify(coro: Coroutine[Any, Any, None]) -> None:
     """Run a ctx.info / ctx.report_progress / ctx.debug call, ignoring closed-transport errors."""
     with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
         await coro

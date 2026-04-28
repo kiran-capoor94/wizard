@@ -14,7 +14,7 @@ from ..mcp_instance import mcp
 from ..repositories import TaskRepository
 from ..schemas import TaskContext, TaskRecommendation, WorkRecommendationResponse
 from ..skills import SKILL_TRIAGE, load_skill
-from .formatting import _try_notify
+from .formatting import try_notify
 
 logger = logging.getLogger(__name__)
 
@@ -188,11 +188,11 @@ async def what_should_i_work_on(
         ),
     )
 
-    await _try_notify(ctx.report_progress(1, 3))
+    await try_notify(ctx.report_progress(1, 3))
     shortlist = scored[:_MAX_SAMPLE_COUNT]
     msg = f"Scored {len(tasks)} tasks; shortlisted {len(shortlist)} for sampling."
-    await _try_notify(ctx.debug(msg))
-    await _try_notify(ctx.report_progress(2, 3))
+    await try_notify(ctx.debug(msg))
+    await try_notify(ctx.report_progress(2, 3))
 
     # Build recommendations with LLM-sampled reasons
     recs: list[TaskRecommendation] = []
@@ -211,10 +211,10 @@ async def what_should_i_work_on(
             )
         )
 
-    await _try_notify(ctx.report_progress(3, 3))
+    await try_notify(ctx.report_progress(3, 3))
     skill_content = load_skill(SKILL_TRIAGE)
     if skill_content:
-        await _try_notify(ctx.info(f"[wizard skill]\n{skill_content}"))
+        await try_notify(ctx.info(f"[wizard skill]\n{skill_content}"))
 
     return WorkRecommendationResponse(
         recommended_task=recs[0],

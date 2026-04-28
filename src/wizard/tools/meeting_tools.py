@@ -18,7 +18,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..skills import SKILL_MEETING, load_skill_post
-from .formatting import _try_notify
+from .formatting import try_notify
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ async def save_meeting_summary(
 
             linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
-        await _try_notify(ctx.info(f"Meeting {meeting_db_id} summary saved."))
+        await try_notify(ctx.info(f"Meeting {meeting_db_id} summary saved."))
         return SaveMeetingSummaryResponse(
             note_id=saved_note_id,
             tasks_linked=len(linked_ids),
@@ -169,7 +169,7 @@ async def ingest_meeting(
     logger.info("ingest_meeting source_id=%s", source_id)
     clean_title = sec.scrub(title).clean
     clean_content = sec.scrub(content).clean
-    await _try_notify(ctx.report_progress(1, 2))
+    await try_notify(ctx.report_progress(1, 2))
     with get_session() as db:
 
         meeting: Meeting | None = None
@@ -197,8 +197,8 @@ async def ingest_meeting(
                 "Internal error: meeting was not assigned an id after flush"
             )
 
-        await _try_notify(ctx.report_progress(2, 2))
-        await _try_notify(ctx.info(f"Meeting {meeting.id} ingested (existed={already_existed})."))
+        await try_notify(ctx.report_progress(2, 2))
+        await try_notify(ctx.info(f"Meeting {meeting.id} ingested (existed={already_existed})."))
         return IngestMeetingResponse(
             meeting_id=meeting.id,
             already_existed=already_existed,
