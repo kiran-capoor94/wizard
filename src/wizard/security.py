@@ -6,7 +6,7 @@ from collections.abc import Callable
 import phonenumbers
 import sqlalchemy as sa
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ class PseudonymStore:
     Falls back to an opaque stub on any DB error — scrubbing never raises.
     """
 
-    def __init__(self, engine=None):
+    def __init__(self, engine: Engine | None = None):
         if engine is not None:
             self._engine = engine
         else:
@@ -136,27 +136,30 @@ class PseudonymStore:
         key = f"{entity_type}:{original.strip().lower()}"
         original_hash = hashlib.sha256(key.encode()).hexdigest()
         try:
-            with Session(self._engine) as db:
-                existing = db.exec(
+            with self._engine.connect() as conn:
+                existing = conn.execute(
                     sa.text(
                         "SELECT fake_value FROM pseudonym_map WHERE original_hash = :h"
-                    ).bindparams(h=original_hash)
+                    ),
+                    {"h": original_hash},
                 ).first()
                 if existing:
                     return existing[0]
                 fake_value = generator()
-                db.exec(
+                conn.execute(
                     sa.text(
                         "INSERT OR IGNORE INTO pseudonym_map "
                         "(original_hash, entity_type, fake_value) "
                         "VALUES (:h, :et, :fv)"
-                    ).bindparams(h=original_hash, et=entity_type, fv=fake_value)
+                    ),
+                    {"h": original_hash, "et": entity_type, "fv": fake_value},
                 )
-                db.commit()
-                result = db.exec(
+                conn.commit()
+                result = conn.execute(
                     sa.text(
                         "SELECT fake_value FROM pseudonym_map WHERE original_hash = :h"
-                    ).bindparams(h=original_hash)
+                    ),
+                    {"h": original_hash},
                 ).first()
                 return result[0] if result else fake_value
         except Exception as e:
@@ -262,7 +265,7 @@ class SecurityService:
     ) -> str:
         name_spans = self._name_finder.find_spans(text)
         replacements: list[tuple[str, str]] = []
-        for _start, _end, matched in name_spans:
+        for _, _, matched in name_spans:
             if matched in original_to_stub:
                 continue
             if self._store is not None and self._faker is not None:
