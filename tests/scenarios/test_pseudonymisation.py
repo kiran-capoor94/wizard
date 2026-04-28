@@ -1,6 +1,7 @@
 """Behaviour tests for PseudonymStore and SecurityService pseudonymisation."""
 
 import pytest
+from sqlalchemy import text
 from sqlmodel import create_engine
 
 from wizard.security import PseudonymStore, SecurityService
@@ -8,7 +9,6 @@ from wizard.security import PseudonymStore, SecurityService
 
 @pytest.fixture
 def mem_engine():
-    from sqlalchemy import text
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     with engine.connect() as conn:
         conn.execute(text(
