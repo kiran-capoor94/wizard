@@ -1,10 +1,8 @@
 import logging
-from pathlib import Path
+
+from .config import settings
 
 logger = logging.getLogger(__name__)
-
-_INSTALLED_SKILLS = Path.home() / ".wizard" / "skills"
-_PACKAGE_SKILLS = Path(__file__).resolve().parent / "skills"
 
 # Canonical skill names — use these instead of magic strings.
 SKILL_SESSION_START = "session-start"
@@ -23,7 +21,7 @@ def load_skill(name: str) -> str | None:
 
     Returns the file content as a string, or None if not found in either location.
     """
-    for root in (_INSTALLED_SKILLS, _PACKAGE_SKILLS):
+    for root in (settings.paths.installed_skills, settings.paths.package_skills):
         path = root / name / "SKILL.md"
         if path.is_file():
             try:
@@ -42,7 +40,7 @@ def load_skill_post(name: str) -> str | None:
     Post-call content (schema reference, hard gates, presentation rules)
     is injected in tool responses; it is NOT copied to agent skill dirs.
     """
-    for root in (_INSTALLED_SKILLS, _PACKAGE_SKILLS):
+    for root in (settings.paths.installed_skills, settings.paths.package_skills):
         path = root / name / "SKILL-POST.md"
         if path.is_file():
             try:
