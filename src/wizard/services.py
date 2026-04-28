@@ -54,10 +54,7 @@ class RegistrationService:
 
     def refresh_skills(self, source_override: Path | None = None) -> str:
         dest = self.WIZARD_HOME / "skills"
-        if source_override is not None:
-            source = source_override
-        else:
-            source = Path(__file__).resolve().parent / "skills"
+        source = source_override or Path(__file__).resolve().parent / "skills"
         if source.exists():
             if dest.exists():
                 shutil.rmtree(dest)
@@ -72,7 +69,7 @@ class RegistrationService:
             return
         try:
             config = json.loads(config_path.read_text())
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError:
             return
         modes = config.setdefault("modes", {})
         existing = set(modes.get("allowed", []))
