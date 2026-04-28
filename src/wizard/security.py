@@ -46,7 +46,7 @@ class HeuristicNameFinder:
         rf"\b({_TITLE_WORD})\s+({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
     )
     _CONTEXT_RE = re.compile(
-        rf"(?i){_CONTEXT_TRIGGERS}({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
+        rf"(?i:{_CONTEXT_TRIGGERS})({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
     )
 
     def __init__(self, allowlist_patterns: list[re.Pattern[str]]):
@@ -62,6 +62,9 @@ class HeuristicNameFinder:
     def _honorific_spans(self, text: str) -> list[tuple[int, int, str]]:
         spans = []
         for m in self._HONORIFIC_RE.finditer(text):
+            parts = [g for g in m.groups()[1:] if g]  # skip the honorific itself
+            if any(p in _BLOCKLIST for p in parts):
+                continue
             matched = m.group(0)
             if self._is_allowlisted(matched):
                 continue
@@ -89,8 +92,8 @@ class HeuristicNameFinder:
             if any(p in _BLOCKLIST for p in groups):
                 continue
             name = " ".join(groups)
-            name_start = m.start() + text[m.start():].index(groups[0])
-            name_end = name_start + len(name)
+            name_start = m.start(1)
+            name_end = m.end(2) if m.group(2) else m.end(1)
             if self._is_allowlisted(name):
                 continue
             spans.append((name_start, name_end, name))
