@@ -397,8 +397,8 @@ class Synthesiser:
     ) -> list[int]:
         """Rebuild TaskState for every task that received notes in this session.
 
-        Fetches the affected task IDs in one query, then calls on_note_saved per
-        task (2 queries each: Task lookup + notes for that task). 2N queries total.
+        Fetches the affected task IDs in one query, then calls recompute_for_task per
+        task (3 queries each: Task lookup + count query + mental_model notes). 3N queries total.
         """
         if wizard_session.id is None:
             return []
@@ -416,5 +416,5 @@ class Synthesiser:
         if not task_ids:
             return []
         for task_id in task_ids:
-            self._task_state_repo.on_note_saved(db, task_id)
+            self._task_state_repo.recompute_for_task(db, task_id)
         return task_ids

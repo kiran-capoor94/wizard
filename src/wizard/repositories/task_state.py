@@ -38,26 +38,77 @@ class TaskStateRepository:
         db.refresh(state)
         return state
 
-    def on_note_saved(self, db: Session, task_id: int) -> TaskState:
-        """Re-query notes for the task and recompute note_count, decision_count,
-        last_note_at, last_touched_at, stale_days, rolling_summary.
-        Does NOT touch last_status_change_at."""
+    def on_note_saved(self, db: Session, task_id: int, note_type: NoteType) -> TaskState:
+        """Increment note_count (and decision_count if DECISION) without re-querying all notes.
+        Rebuilds rolling_summary from only mental_model-bearing notes — targeted query.
+        Does NOT touch last_status_change_at.
+        """
         task = db.get(Task, task_id)
         if task is None:
             raise ValueError(f"Task {task_id} not found")
+        state = self._get_or_create(db, task)
+        now = _dt.datetime.now()
 
+        state.note_count = (state.note_count or 0) + 1
+        if note_type == NoteType.DECISION:
+            state.decision_count = (state.decision_count or 0) + 1
+        state.last_note_at = now
+        state.last_touched_at = now
+        state.stale_days = 0
+
+        mental_model_notes = list(
+            db.exec(
+                select(Note)
+                .where(Note.task_id == task_id, Note.mental_model.is_not(None))  # type: ignore[union-attr]
+                .order_by(col(Note.created_at).desc())
+            ).all()
+        )
+        state.rolling_summary = build_rolling_summary(mental_model_notes)
+
+        db.add(state)
+        db.flush()
+        db.refresh(state)
+        return state
+
+    def recompute_for_task(self, db: Session, task_id: int) -> TaskState:
+        """Full recompute of note_count, decision_count, last_note_at, and rolling_summary
+        from the database. Used by synthesis after bulk note writes where the exact
+        note types are not known at call time.
+        Does NOT touch last_status_change_at.
+        """
+        task = db.get(Task, task_id)
+        if task is None:
+            raise ValueError(f"Task {task_id} not found")
         state = self._get_or_create(db, task)
 
-        notes = list(db.exec(select(Note).where(Note.task_id == task_id)).all())
+        count_row = db.exec(
+            select(func.count(Note.id), func.max(Note.created_at))  # type: ignore[arg-type]
+            .where(Note.task_id == task_id)
+        ).one()
+        decision_row = db.exec(
+            select(func.count(Note.id))  # type: ignore[arg-type]
+            .where(Note.task_id == task_id, Note.note_type == NoteType.DECISION)
+        ).one()
 
-        state.note_count = len(notes)
-        state.decision_count = sum(1 for n in notes if n.note_type == NoteType.DECISION)
-        state.last_note_at = max(n.created_at for n in notes) if notes else None
-        state.last_touched_at = (
-            state.last_note_at if state.last_note_at is not None else task.created_at
+        total_count, last_note_at = count_row
+        decision_count = decision_row
+
+        now = _dt.datetime.now()
+        state.note_count = total_count or 0
+        state.decision_count = decision_count or 0
+        state.last_note_at = last_note_at
+        state.last_touched_at = last_note_at if last_note_at is not None else task.created_at
+        state.stale_days = (now - state.last_touched_at).days
+
+        mental_model_notes = list(
+            db.exec(
+                select(Note)
+                .where(Note.task_id == task_id, Note.mental_model.is_not(None))  # type: ignore[union-attr]
+                .order_by(col(Note.created_at).desc())
+            ).all()
         )
-        state.stale_days = (_dt.datetime.now() - state.last_touched_at).days
-        state.rolling_summary = build_rolling_summary(notes)
+        state.rolling_summary = build_rolling_summary(mental_model_notes)
+
         db.add(state)
         db.flush()
         db.refresh(state)
