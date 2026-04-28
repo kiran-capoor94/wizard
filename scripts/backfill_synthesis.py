@@ -40,13 +40,17 @@ def _find_transcript(agent_session_id: str) -> Path | None:
     return matches[0] if matches else None
 
 
-def _get_transcript_raw(db_path: Path, session_id: int) -> str | None:
-    """Return stored transcript_raw content for the session, if any."""
+def _load_transcript_raws(db_path: Path, session_ids: list[int]) -> dict[int, str]:
+    """Batch-load transcript_raw for all session IDs in a single query."""
+    if not session_ids:
+        return {}
+    placeholders = ",".join("?" * len(session_ids))
     with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            "SELECT transcript_raw FROM wizardsession WHERE id = ?", (session_id,)
-        ).fetchone()
-    return row[0] if row and row[0] else None
+        rows = conn.execute(
+            f"SELECT id, transcript_raw FROM wizardsession WHERE id IN ({placeholders})",  # noqa: S608
+            session_ids,
+        ).fetchall()
+    return {sid: raw for sid, raw in rows if raw}
 
 
 def _reset_synthesised(db_path: Path, session_id: int) -> None:
@@ -124,6 +128,10 @@ def _query_rows(db_path: Path, session_id: int | None) -> list:
 
 def _resolve_sessions(db_path: Path, rows: list) -> list:
     """Resolve each row to a (sid, path, agent, raw_or_flag) tuple."""
+    # Batch-load all transcript_raw values upfront — avoids N+1 connections.
+    all_ids = [r[0] for r in rows]
+    raws = _load_transcript_raws(db_path, all_ids)
+
     to_process = []
     for sid, transcript_path, agent_session_id, agent in rows:
         path: Path | None = None
@@ -134,15 +142,13 @@ def _resolve_sessions(db_path: Path, rows: list) -> list:
 
         if path:
             to_process.append((sid, path, agent, False))
+        elif sid in raws:
+            to_process.append((sid, None, agent, raws[sid]))
         else:
-            raw = _get_transcript_raw(db_path, sid)
-            if raw:
-                to_process.append((sid, None, agent, raw))
-            else:
-                print(
-                    f"  [{sid}] WARNING: transcript not found and no stored raw content "
-                    f"(path={transcript_path}, agent_session_id={agent_session_id})"
-                )
+            print(
+                f"  [{sid}] WARNING: transcript not found and no stored raw content "
+                f"(path={transcript_path}, agent_session_id={agent_session_id})"
+            )
     return to_process
 
 

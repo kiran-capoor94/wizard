@@ -326,11 +326,12 @@ async def create_task(
         t_repo.save(db, task)
         if task.id is None:
             raise ToolError("Internal error: task was not assigned an id after flush")
+        task_id = task.id
         t_state_repo.create_for_task(db, task)
         if meeting_id:
-            m_repo.link_tasks(db, meeting_id, [task.id])
-    await try_notify(ctx.info(f"Task {task.id} created: {clean_name!r}."))
-    return CreateTaskResponse(task_id=task.id, already_existed=False)
+            m_repo.link_tasks(db, meeting_id, [task_id])
+    await try_notify(ctx.info(f"Task {task_id} created: {clean_name!r}."))
+    return CreateTaskResponse(task_id=task_id, already_existed=False)
 
 
 async def rewind_task(
