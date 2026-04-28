@@ -94,6 +94,14 @@ No prose summary after this block. The table + pick + rejections + next step is 
 
 ---
 
+## Sub-Skill Trigger Table
+
+| Situation | Sub-skill to invoke |
+|---|---|
+| Any diagram, map, or visualisation request | `wizard-playground` |
+
+---
+
 ## Anti-Patterns
 
 - ⚠️ Do NOT validate the user's initial framing — probe it first
