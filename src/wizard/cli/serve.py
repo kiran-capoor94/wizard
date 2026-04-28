@@ -4,6 +4,8 @@ def serve() -> None:
     Registered in pyproject.toml [project.scripts] as wizard-server.
     Used by agent configs installed via `wizard setup`.
     """
+    import sys
+
     import sentry_sdk
     from sentry_sdk.integrations.litellm import LiteLLMIntegration
     from sentry_sdk.integrations.logging import LoggingIntegration
@@ -29,4 +31,14 @@ def serve() -> None:
             ],
         )
 
-    mcp.run()
+    try:
+        mcp.run()
+    except BaseExceptionGroup as eg:
+        # Rich's on_broken_pipe() raises SystemExit(1) when stderr is closed,
+        # which anyio wraps into a BaseExceptionGroup. Exit cleanly in that case.
+        exits = [e for e in eg.exceptions if isinstance(e, SystemExit)]
+        others = [e for e in eg.exceptions if not isinstance(e, SystemExit)]
+        if others:
+            raise
+        code = max((e.code for e in exits if isinstance(e.code, int)), default=1)
+        sys.exit(code)

@@ -32,6 +32,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..skills import SKILL_TASK_START, load_skill_post
+from .formatting import _try_notify
 from .task_fields import (
     apply_task_fields,
     check_duplicate_name,
@@ -122,7 +123,7 @@ async def task_start(
             if not skill_delivered:
                 await ctx.set_state("task_start_skill_delivered", True)
 
-            await ctx.info(f"Task {task.id} loaded: {task.name!r}.")
+            await _try_notify(ctx.info(f"Task {task.id} loaded: {task.name!r}."))
             return TaskStartResponse(
                 task=task_ctx,
                 compounding=total_notes > 0,
@@ -189,12 +190,14 @@ async def save_note(
             if saved.id is None:
                 raise ToolError("Internal error: note was not assigned an id after flush")
             t_state_repo.on_note_saved(db, task_db_id)
-        await ctx.report_progress(1, 2)
-        await ctx.report_progress(2, 2)
-        await ctx.info(f"Note {saved.id} saved ({note_type.value}).")
+            note_id = saved.id
+            mental_model_saved = saved.mental_model is not None
+        await _try_notify(ctx.report_progress(1, 2))
+        await _try_notify(ctx.report_progress(2, 2))
+        await _try_notify(ctx.info(f"Note {note_id} saved ({note_type.value})."))
         return SaveNoteResponse(
-            note_id=saved.id,
-            mental_model_saved=saved.mental_model is not None,
+            note_id=note_id,
+            mental_model_saved=mental_model_saved,
         )
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
@@ -246,7 +249,7 @@ async def update_task(
             task_id_int = task.id
             if task_id_int is None:
                 raise ToolError("Internal error: task was not assigned an id after flush")
-            await ctx.debug(f"Task {task_id} updated: {updated_fields}.")
+            await _try_notify(ctx.debug(f"Task {task_id} updated: {updated_fields}."))
             task_state_updated = False
             if "status" in updated_fields:
                 t_state_repo.on_status_changed(db, task_id_int)
@@ -326,7 +329,7 @@ async def create_task(
         t_state_repo.create_for_task(db, task)
         if meeting_id:
             m_repo.link_tasks(db, meeting_id, [task.id])
-    await ctx.info(f"Task {task.id} created: {clean_name!r}.")
+    await _try_notify(ctx.info(f"Task {task.id} created: {clean_name!r}."))
     return CreateTaskResponse(task_id=task.id, already_existed=False)
 
 
