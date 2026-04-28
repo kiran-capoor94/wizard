@@ -105,6 +105,17 @@ class ModesSettings(BaseModel):
     allowed: list[str] = Field(default_factory=list)
 
 
+class WizardPaths(BaseModel):
+    model_config = {"frozen": True}
+
+    installed_skills: Path = Field(default_factory=lambda: Path.home() / ".wizard" / "skills")
+    package_skills: Path = Field(
+        default_factory=lambda: Path(__file__).resolve().parent / "skills"
+    )
+    sessions_dir: Path = Field(default_factory=lambda: Path.home() / ".wizard" / "sessions")
+    hooks_dir: Path = Field(default_factory=lambda: Path.home() / ".wizard" / "hooks")
+
+
 WIZARD_MODES: list[str] = ["architect", "ideation", "product-owner"]
 
 
@@ -121,6 +132,7 @@ class Settings(BaseSettings):
     synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
     sentry: SentrySettings = Field(default_factory=SentrySettings)
     modes: ModesSettings = Field(default_factory=ModesSettings)
+    paths: WizardPaths = Field(default_factory=WizardPaths)
 
     @classmethod
     def settings_customise_sources(
