@@ -1,8 +1,12 @@
+import hashlib
 import logging
 import re
+from collections.abc import Callable
 
 import phonenumbers
+import sqlalchemy as sa
 from pydantic import BaseModel
+from sqlmodel import Session
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,54 @@ class HeuristicNameFinder:
         return result
 
 
+class PseudonymStore:
+    """Persistent PII-to-fake-value mapping backed by the pseudonym_map SQLite table.
+
+    Thread-safe: INSERT OR IGNORE + re-read handles concurrent writers.
+    Falls back to an opaque stub on any DB error — scrubbing never raises.
+    """
+
+    def __init__(self, engine=None):
+        if engine is not None:
+            self._engine = engine
+        else:
+            from .database import engine as _default_engine
+            self._engine = _default_engine
+
+    def get_or_create(self, original: str, entity_type: str, generator: Callable[[], str]) -> str:
+        key = f"{entity_type}:{original.strip().lower()}"
+        original_hash = hashlib.sha256(key.encode()).hexdigest()
+        try:
+            with Session(self._engine) as db:
+                existing = db.exec(
+                    sa.text(
+                        "SELECT fake_value FROM pseudonym_map WHERE original_hash = :h"
+                    ).bindparams(h=original_hash)
+                ).first()
+                if existing:
+                    return existing[0]
+                fake_value = generator()
+                db.exec(
+                    sa.text(
+                        "INSERT OR IGNORE INTO pseudonym_map "
+                        "(original_hash, entity_type, fake_value) "
+                        "VALUES (:h, :et, :fv)"
+                    ).bindparams(h=original_hash, et=entity_type, fv=fake_value)
+                )
+                db.commit()
+                result = db.exec(
+                    sa.text(
+                        "SELECT fake_value FROM pseudonym_map WHERE original_hash = :h"
+                    ).bindparams(h=original_hash)
+                ).first()
+                return result[0] if result else fake_value
+        except Exception as e:
+            logger.warning(
+                "PseudonymStore: DB error for %r, falling back to stub: %s", original, e
+            )
+            return "[PERSON_?]"
+
+
 class ScrubResult(BaseModel):
     clean: str
     original_to_stub: dict[str, str]
@@ -133,13 +185,24 @@ class SecurityService:
         ("SECRET", r"(Bearer\s[A-Za-z0-9\-._~+/]+=*|sk-[A-Za-z0-9]{20,})", "SECRET"),
     ]
 
-    def __init__(self, allowlist: list[str] | None = None, enabled: bool = True):
+    def __init__(
+        self,
+        allowlist: list[str] | None = None,
+        enabled: bool = True,
+        store: "PseudonymStore | None" = None,
+    ):
         self._allowlist = allowlist or []
         try:
             self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
         except re.error as e:
             raise ValueError(f"Invalid allowlist regex: {e}") from e
         self._enabled = enabled
+        self._store = store
+        self._name_finder = HeuristicNameFinder(allowlist_patterns=self._allowlist_patterns)
+        self._faker = None
+        if store is not None:
+            from faker import Faker
+            self._faker = Faker()
 
     def scrub(self, content: str | None) -> ScrubResult:
         if content is None:
@@ -177,6 +240,9 @@ class SecurityService:
             clean, original_to_stub, counters, regions=["GB", "US", "AU", "DE", "FR"]
         )
 
+        # 4. Name detection + pseudonymisation
+        clean = self._scrub_names(clean, original_to_stub, counters)
+
         if original_to_stub:
             logger.info(
                 "PII scrubbed: %d substitution(s) across patterns",
@@ -187,6 +253,28 @@ class SecurityService:
             original_to_stub=original_to_stub,
             was_modified=clean != content,
         )
+
+    def _scrub_names(
+        self,
+        text: str,
+        original_to_stub: dict[str, str],
+        counters: dict[str, int],
+    ) -> str:
+        name_spans = self._name_finder.find_spans(text)
+        replacements: list[tuple[str, str]] = []
+        for _start, _end, matched in name_spans:
+            if matched in original_to_stub:
+                continue
+            if self._store is not None and self._faker is not None:
+                fake = self._store.get_or_create(matched, "PERSON", self._faker.name)
+            else:
+                counters["PERSON"] = counters.get("PERSON", 0) + 1
+                fake = f"[PERSON_{counters['PERSON']}]"
+            original_to_stub[matched] = fake
+            replacements.append((matched, fake))
+        for original, fake in sorted(replacements, key=lambda x: len(x[0]), reverse=True):
+            text = text.replace(original, fake)
+        return text
 
     def _scrub_phones(
         self,
