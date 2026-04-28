@@ -38,7 +38,7 @@ Invoke the appropriate sub-skill when the situation matches. The mode is the fra
 
 | Situation | Sub-skill to invoke |
 |---|---|
-| Choosing between two or more structural approaches | `architecture-debate` |
+| Choosing between two or more structural approaches | `architecture-debate` (top-level skill — invoke via Skill tool) |
 | Auditing existing architecture / "what's wrong with X" | `arch-review` (references/ — already in context) |
 | Designing constraints, invariants, or rules before building | `constraints-designer` (references/ — already in context) |
 | Any diagram request — architecture, sequence, ERD, flow, state | `wizard-playground` |
