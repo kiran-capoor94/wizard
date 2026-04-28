@@ -41,7 +41,7 @@ Invoke the appropriate sub-skill when the situation matches. The mode is the fra
 | Choosing between two or more structural approaches | `architecture-debate` |
 | Designing a new system or major component from scratch | `system-design` *(to be built)* |
 | Estimating complexity or blast radius of a proposed change | `impact-analysis` *(to be built)* |
-| Auditing existing architecture for structural problems | `architecture-review` *(to be built)* |
+| Auditing existing architecture for structural problems | `arch-review` — see `references/arch-review.md` |
 
 If no sub-skill matches, apply the architect mindset directly:
 1. State the constraints
