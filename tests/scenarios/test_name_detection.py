@@ -30,10 +30,13 @@ class TestHonorificDetection:
         assert any(t == "Prof James Clark" for _, _, t in spans)
 
 
-class TestTitleCasePairs:
-    def test_two_title_case_words(self, finder):
+class TestFalsePositiveReduction:
+    def test_two_title_case_words_not_detected_without_context(self, finder):
+        # Title-case pair detection removed: "John Smith" without honorific or
+        # context trigger should NOT be pseudonymised (avoids "Unit Tests",
+        # "Pull Request", "Lambda Function" false positives).
         spans = finder.find_spans("John Smith attended the meeting.")
-        assert any(t == "John Smith" for _, _, t in spans)
+        assert not any(t == "John Smith" for _, _, t in spans)
 
     def test_single_title_case_not_matched(self, finder):
         spans = finder.find_spans("Monday is the deadline.")
@@ -41,9 +44,20 @@ class TestTitleCasePairs:
         assert "Monday" not in texts
 
     def test_product_blocklist_skipped(self, finder):
+        # "from" removed from context triggers — "Synced from Notion" should not match.
         spans = finder.find_spans("Synced from Notion today.")
         texts = [t for _, _, t in spans]
         assert not any("Notion" in t for t in texts)
+
+    def test_from_not_a_context_trigger(self, finder):
+        # "from" was removed to prevent false positives like "from London", "data from System".
+        spans = finder.find_spans("Synced from Github today.")
+        texts = [t for _, _, t in spans]
+        assert not any("Github" in t for t in texts)
+
+    def test_engineering_terms_not_pseudonymised(self, finder):
+        spans = finder.find_spans("Unit Tests cover the Load Balancer and Feature Flag.")
+        assert len(spans) == 0
 
 
 class TestContextTriggers:
@@ -78,7 +92,7 @@ class TestFalsePositiveGuards:
         finder_with_al = HeuristicNameFinder(
             allowlist_patterns=[re.compile(r"ENG-\d+")]
         )
-        spans = finder_with_al.find_spans("John Smith closed ENG-123.")
+        spans = finder_with_al.find_spans("Meeting with John Smith who closed ENG-123.")
         texts = [t for _, _, t in spans]
         assert any("John Smith" in t for t in texts)
         assert not any("ENG-123" in t for t in texts)

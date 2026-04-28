@@ -1,32 +1,13 @@
 """Behaviour tests for PseudonymStore and SecurityService pseudonymisation."""
 
 import pytest
-from sqlalchemy import text
-from sqlmodel import create_engine
 
 from wizard.security import PseudonymStore, SecurityService
 
 
 @pytest.fixture
-def mem_engine():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    with engine.connect() as conn:
-        conn.execute(text(
-            "CREATE TABLE pseudonym_map ("
-            "id INTEGER PRIMARY KEY, "
-            "original_hash TEXT NOT NULL UNIQUE, "
-            "entity_type TEXT NOT NULL, "
-            "fake_value TEXT NOT NULL, "
-            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
-            ")"
-        ))
-        conn.commit()
-    return engine
-
-
-@pytest.fixture
-def store(mem_engine):
-    return PseudonymStore(engine=mem_engine)
+def store(pseudonym_engine):
+    return PseudonymStore(engine=pseudonym_engine)
 
 
 class TestPseudonymStore:
@@ -95,8 +76,8 @@ class TestSecurityServiceWithStore:
 
     def test_same_name_consistent_across_calls(self, store):
         sec = SecurityService(store=store)
-        r1 = sec.scrub("John Smith sent the report.")
-        r2 = sec.scrub("Follow up with John Smith.")
+        r1 = sec.scrub("Meeting with John Smith about the report.")
+        r2 = sec.scrub("Spoke with John Smith again.")
         assert "John Smith" not in r1.clean
         assert "John Smith" not in r2.clean
         fake1 = r1.original_to_stub.get("John Smith")

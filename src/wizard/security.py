@@ -5,8 +5,11 @@ from collections.abc import Callable
 
 import phonenumbers
 import sqlalchemy as sa
+from faker import Faker
 from pydantic import BaseModel
 from sqlalchemy.engine import Engine
+
+from .database import engine as _wizard_engine
 
 logger = logging.getLogger(__name__)
 
@@ -33,21 +36,18 @@ _BLOCKLIST: frozenset[str] = frozenset([
 _TITLE_WORD = r"[A-Z][a-z]+'?[a-z]*|[A-Z][a-z]+"
 _CONTEXT_TRIGGERS = (
     r"(?:meeting with|spoke with|called by|call with|speak with|"
-    r"from|assigned to|owned by|reported by|raised by|contact)\s+"
+    r"assigned to|owned by|reported by|raised by|contact)\s+"
 )
 
 
 class HeuristicNameFinder:
-    """Detects likely person names via honorifics, title-case pairs, and context triggers.
+    """Detects likely person names via honorifics and context triggers.
 
     Returns (start, end, text) spans — non-overlapping, position order.
     """
 
     _HONORIFIC_RE = re.compile(
         rf"\b({_HONORIFICS})\s+({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
-    )
-    _TITLE_PAIR_RE = re.compile(
-        rf"\b({_TITLE_WORD})\s+({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
     )
     _CONTEXT_RE = re.compile(
         rf"(?i:{_CONTEXT_TRIGGERS})({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
@@ -59,7 +59,6 @@ class HeuristicNameFinder:
     def find_spans(self, text: str) -> list[tuple[int, int, str]]:
         raw: list[tuple[int, int, str]] = []
         raw.extend(self._honorific_spans(text))
-        raw.extend(self._title_pair_spans(text))
         raw.extend(self._context_spans(text))
         return self._deduplicate(raw)
 
@@ -67,18 +66,6 @@ class HeuristicNameFinder:
         spans = []
         for m in self._HONORIFIC_RE.finditer(text):
             parts = [g for g in m.groups()[1:] if g]  # skip the honorific itself
-            if any(p in _BLOCKLIST for p in parts):
-                continue
-            matched = m.group(0)
-            if self._is_allowlisted(matched):
-                continue
-            spans.append((m.start(), m.end(), matched))
-        return spans
-
-    def _title_pair_spans(self, text: str) -> list[tuple[int, int, str]]:
-        spans = []
-        for m in self._TITLE_PAIR_RE.finditer(text):
-            parts = [g for g in m.groups() if g]
             if any(p in _BLOCKLIST for p in parts):
                 continue
             matched = m.group(0)
@@ -126,11 +113,7 @@ class PseudonymStore:
     """
 
     def __init__(self, engine: Engine | None = None):
-        if engine is not None:
-            self._engine = engine
-        else:
-            from .database import engine as _default_engine
-            self._engine = _default_engine
+        self._engine = engine if engine is not None else _wizard_engine
 
     def get_or_create(self, original: str, entity_type: str, generator: Callable[[], str]) -> str:
         key = f"{entity_type}:{original.strip().lower()}"
@@ -202,10 +185,7 @@ class SecurityService:
         self._enabled = enabled
         self._store = store
         self._name_finder = HeuristicNameFinder(allowlist_patterns=self._allowlist_patterns)
-        self._faker = None
-        if store is not None:
-            from faker import Faker
-            self._faker = Faker()
+        self._faker = Faker() if store is not None else None
 
     def scrub(self, content: str | None) -> ScrubResult:
         if content is None:
