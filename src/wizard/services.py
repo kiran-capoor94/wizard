@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import sentry_sdk
-from fastmcp import Context
 from sqlmodel import Session, or_, select
 
 from . import agent_registration
@@ -17,7 +16,7 @@ from .database import get_session
 from .mid_session import cancel_mid_session_synthesis
 from .models import Note, NoteType, WizardSession
 from .repositories import NoteRepository
-from .schemas import AutoCloseSummary, ClosedSessionSummary, SessionState
+from .schemas import ClosedSessionSummary, SessionState
 from .security import SecurityService
 
 if TYPE_CHECKING:
@@ -126,10 +125,10 @@ class RegistrationService:
 
 
 class SessionCloser:
-    """Auto-closes abandoned sessions with a three-tier fallback chain:
-    1. LLM sampling via ctx.sample()
-    2. Synthetic summary from DB data
-    3. Minimal warn fallback
+    """Auto-closes abandoned sessions using synthetic summaries.
+
+    Inline (close_recent_abandoned): runs inside session_start, safe for the stdio transport.
+    Background (close_abandoned_background): asyncio task dispatched after session_start returns.
     """
 
     def __init__(
@@ -145,12 +144,16 @@ class SessionCloser:
     async def close_recent_abandoned(
         self,
         db: Session,
-        ctx: Context,
         current_session_id: int,
     ) -> list[ClosedSessionSummary]:
-        """Close sessions abandoned within the last 2h inline. Uses LLM synthesis via ctx."""
+        """Close sessions abandoned within the last 2h inline using synthetic summaries.
+
+        Does not call ctx.sample() — sampling during an active tool call deadlocks
+        the stdio transport (server sends createMessage while client waits for
+        session_start response).
+        """
         recent = self._find_recent_abandoned(db, current_session_id)
-        return [await self._close_one(db, s, ctx) for s in recent]
+        return [await self._close_one(db, s) for s in recent]
 
     async def close_abandoned_background(self, current_session_id: int) -> None:
         """Synthetically close sessions older than 24h with no summary. Opens its own DB session."""
@@ -160,7 +163,7 @@ class SessionCloser:
                 count = 0
                 for session in old:
                     try:
-                        await self._close_one(db, session, ctx=None)
+                        await self._close_one(db, session)
                         count += 1
                     except Exception as e:
                         sentry_sdk.capture_exception(e)
@@ -226,12 +229,10 @@ class SessionCloser:
         self,
         db: Session,
         session: WizardSession,
-        ctx: Context | None = None,
     ) -> ClosedSessionSummary:
         session_id = session.id
         assert session_id is not None
 
-        # Clean up background synthesis tasks if this is an abandoned session
         if session.agent_session_id:
             cancel_mid_session_synthesis(session.agent_session_id)
 
@@ -246,12 +247,7 @@ class SessionCloser:
             next_actions=[],
             closure_status="interrupted",
         )
-        summary_text: str | None = None
-        closed_via = ""
-        if ctx is not None:
-            summary_text, closed_via = await self._try_sampling(ctx, notes)
-        if summary_text is None:
-            summary_text, closed_via = self._synthetic_summary(session, notes, task_ids)
+        summary_text, closed_via = self._synthetic_summary(session, notes, task_ids)
         clean_summary = self._security.scrub(summary_text).clean
         session.summary = clean_summary
         session.session_state = state.model_dump_json()
@@ -282,40 +278,6 @@ class SessionCloser:
             .order_by(Note.created_at.asc())  # type: ignore[union-attr]
         )
         return list(db.exec(stmt).all())
-
-    async def _try_sampling(
-        self, ctx: Context, notes: list[Note]
-    ) -> tuple[str | None, str]:
-        if not notes:
-            return None, ""
-        prompt = self._build_sampling_prompt(notes)
-        try:
-            result = await ctx.sample(
-                messages=prompt,
-                system_prompt=(
-                    "You are summarising an abandoned coding session. "
-                    "Be concise. Focus on what was accomplished and what remains."
-                ),
-                result_type=AutoCloseSummary,
-                max_tokens=500,
-                temperature=0.3,
-            )
-            auto_summary: AutoCloseSummary = result.result
-            return auto_summary.summary, "sampling"
-        except Exception as e:
-            sentry_sdk.capture_exception(e)
-            logger.warning("SessionCloser sampling failed: %s", e)
-            return None, ""
-
-    def _build_sampling_prompt(self, notes: list[Note]) -> str:
-        lines = ["The following notes were saved during an abandoned session:\n"]
-        for n in notes:
-            lines.append(f"- [{n.note_type.value}] {n.content[:300]}")
-        lines.append(
-            "\nSummarise what was accomplished, the likely intent, "
-            "and any open loops."
-        )
-        return "\n".join(lines)
 
     def _synthetic_summary(
         self,

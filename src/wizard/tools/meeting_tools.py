@@ -18,6 +18,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..skills import SKILL_MEETING, load_skill_post
+from .formatting import try_notify
 
 logger = logging.getLogger(__name__)
 
@@ -132,15 +133,16 @@ async def save_meeting_summary(
                 raise ToolError(
                     "Internal error: note was not assigned an id after flush"
                 )
+            saved_note_id = saved.id
 
             if task_ids:
                 meetings_repo.link_tasks(db, meeting_db_id, task_ids)
 
             linked_ids = [t.id for t in meeting.tasks if t.id is not None]
 
-        await ctx.info(f"Meeting {meeting_db_id} summary saved.")
+        await try_notify(ctx.info(f"Meeting {meeting_db_id} summary saved."))
         return SaveMeetingSummaryResponse(
-            note_id=saved.id,
+            note_id=saved_note_id,
             tasks_linked=len(linked_ids),
         )
     except ValueError as e:
@@ -167,7 +169,7 @@ async def ingest_meeting(
     logger.info("ingest_meeting source_id=%s", source_id)
     clean_title = sec.scrub(title).clean
     clean_content = sec.scrub(content).clean
-    await ctx.report_progress(1, 2)
+    await try_notify(ctx.report_progress(1, 2))
     with get_session() as db:
 
         meeting: Meeting | None = None
@@ -195,8 +197,8 @@ async def ingest_meeting(
                 "Internal error: meeting was not assigned an id after flush"
             )
 
-        await ctx.report_progress(2, 2)
-        await ctx.info(f"Meeting {meeting.id} ingested (existed={already_existed}).")
+        await try_notify(ctx.report_progress(2, 2))
+        await try_notify(ctx.info(f"Meeting {meeting.id} ingested (existed={already_existed})."))
         return IngestMeetingResponse(
             meeting_id=meeting.id,
             already_existed=already_existed,
