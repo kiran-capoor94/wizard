@@ -141,7 +141,7 @@ function copySource() {
     .catch(() => flashButton('btnCopySource', 'Failed'));
 }
 function copySVG() {
-  const svg = document.getElementById('diagram').querySelector('svg');
+  const svg = document.getElementById('output').querySelector('svg');
   if (!svg) return;
   navigator.clipboard.writeText(svg.outerHTML)
     .then(() => flashButton('btnCopySVG', 'Copied!'))
@@ -164,7 +164,7 @@ loadPreset('flowchart');
 
 1. **Understand** what the user wants to diagram — ask one clarifying question if the scope is ambiguous.
 2. **Choose the closest preset** as the starting point (flowchart, sequence, ERD, state machine, or C4 context).
-3. **Write the Mermaid source** for the user's specific diagram. Inject it by setting `document.getElementById('source').value = \`<your diagram source>\`` and calling `render()` after page load, OR by replacing the body of the matching PRESETS entry. Call `loadPreset('<matching-key>')` at the end to ensure the correct preset tab is selected.
+3. **Write the Mermaid source** for the user's specific diagram. Replace the body of the matching PRESETS entry with the user's diagram source (e.g. replace the `flowchart` string with the actual diagram). Then call `loadPreset('<matching-key>')` at the end so the correct preset tab is selected on load.
 4. **Write the HTML file** — use a descriptive filename, e.g. `api-layers-diagram.html` or `login-sequence.html`.
 5. **Run `open <filename>.html`** to open it in the browser.
 6. **Tell the user** they can edit the source in the left panel to update the diagram live, and use the toolbar to switch presets or copy output.
