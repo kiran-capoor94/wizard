@@ -12,6 +12,7 @@ import sentry_sdk
 from sqlmodel import Session, or_, select
 
 from . import agent_registration
+from .config import WIZARD_MODES
 from .database import get_session
 from .mid_session import cancel_mid_session_synthesis
 from .models import Note, NoteType, WizardSession
@@ -23,8 +24,6 @@ if TYPE_CHECKING:
     from wizard.config import Settings
 
 logger = logging.getLogger(__name__)
-
-WIZARD_MODES: list[str] = ["architect", "ideation", "product-owner"]
 
 
 class RegistrationService:
