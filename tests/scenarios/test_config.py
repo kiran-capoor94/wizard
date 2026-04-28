@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import wizard
 from wizard.config import settings
 
 
@@ -8,8 +9,6 @@ def test_wizard_paths_installed_skills():
 
 
 def test_wizard_paths_package_skills():
-    import wizard
-
     assert settings.paths.package_skills == Path(wizard.__file__).resolve().parent / "skills"
 
 
