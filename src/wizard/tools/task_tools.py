@@ -37,7 +37,6 @@ from .task_fields import (
     apply_task_fields,
     check_duplicate_name,
     elicit_done_confirmation,
-    elicit_mental_model,
 )
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -165,10 +164,6 @@ async def save_note(
             if task.id is None:
                 raise ToolError("Internal error: task has no id")
             task_db_id: int = task.id
-
-        # Phase 2: elicit outside DB context so the connection is not held open.
-        if note_type in (NoteType.INVESTIGATION, NoteType.DECISION) and mental_model is None:
-            mental_model = await elicit_mental_model(ctx, sec)
 
         # Phase 3: validate and write.
         if len(content) > 100_000:
