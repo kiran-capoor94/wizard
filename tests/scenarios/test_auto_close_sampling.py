@@ -1,9 +1,11 @@
-"""Scenario: abandoned session is auto-closed; when sampling succeeds, closed_via='sampling'."""
+"""Scenario: abandoned session is auto-closed inline with synthetic summary.
 
-from unittest.mock import patch
+Sampling via ctx.sample() is not used in close_recent_abandoned — it deadlocks
+the stdio transport. All inline auto-closes use the synthetic summary path.
+"""
 
 
-async def test_auto_close_via_sampling(mcp_client, seed_task):
+async def test_auto_close_uses_synthetic_summary(mcp_client, seed_task):
     task = await seed_task(name="Debug memory leak")
 
     # Session 1: start, save a note, DON'T end
@@ -17,19 +19,14 @@ async def test_auto_close_via_sampling(mcp_client, seed_task):
     })
     assert not r.is_error, r
 
-    # Patch _try_sampling to simulate a successful LLM sampling response
-    async def _fake_sampling(_self, _ctx, _notes):
-        return ("Investigated memory leak via heap dumps", "sampling")
-
-    with patch("wizard.services.SessionCloser._try_sampling", _fake_sampling):
-        r = await mcp_client.call_tool("session_start", {})
-
+    # Session 2 auto-closes session 1 inline using synthetic summary (no sampling)
+    r = await mcp_client.call_tool("session_start", {})
     assert not r.is_error, r
     assert r.structured_content["session_id"] != sid1
 
     closed = r.structured_content["closed_sessions"]
     assert len(closed) == 1
     assert closed[0]["session_id"] == sid1
-    assert closed[0]["closed_via"] == "sampling"
+    assert closed[0]["closed_via"] == "synthetic"
     assert closed[0]["note_count"] >= 1
     assert task.id in closed[0]["task_ids"]

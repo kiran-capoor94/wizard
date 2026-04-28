@@ -1,8 +1,18 @@
-"""Serialisation helpers for MCP tool responses."""
+"""Serialisation helpers and shared notification utilities for MCP tool responses."""
 
+import contextlib
 import json
+from typing import Any, Coroutine
+
+import anyio
 
 from ..schemas import TaskContext
+
+
+async def try_notify(coro: Coroutine[Any, Any, None]) -> None:
+    """Run a ctx.info / ctx.report_progress / ctx.debug call, ignoring closed-transport errors."""
+    with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
+        await coro
 
 
 def task_contexts_to_json(tasks: list[TaskContext]) -> str:
