@@ -78,6 +78,7 @@ class SessionStateMiddleware(Middleware):
                     "current_session_id"
                 )
                 if session_id is not None:
+                    sentry_sdk.set_user({"id": str(session_id)})
                     with get_session() as db:
                         self.snapshot_session_state(db, session_id)
         except Exception as e:

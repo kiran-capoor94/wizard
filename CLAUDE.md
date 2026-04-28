@@ -99,7 +99,7 @@ src/wizard/
     analytics.py             # AnalyticsRepository — session/note/task usage stats
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
-  middleware.py              # ToolLoggingMiddleware — logs tool name on every invocation
+  middleware.py              # ToolLoggingMiddleware (Sentry spans per tool) + SessionStateMiddleware (session snapshot + Sentry user tag)
   transcript.py              # TranscriptReader (JSONL parser for agent transcripts)
   synthesis.py               # Synthesiser (auto-capture — ordered backend failover)
   llm_adapters.py            # OllamaAdapter + LiteLLM completion wrapper, probe_backend_health, JSON parsing
@@ -116,6 +116,14 @@ src/wizard/
   alembic/                   # DB migrations — bundled in package for `wizard update`
   hooks/                     # Hook scripts — bundled in package, copied to ~/.wizard/hooks/ on setup
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ by setup)
+    architect/               # Architect mode skill
+      SKILL.md
+      references/            # Sub-skills loaded as supporting context when architect mode is active
+        arch-review.md       # Architecture audit protocol
+        constraints-designer.md  # Constraints/invariants elicitation protocol
+    ideation/                # Ideation mode skill (SKILL.md)
+    product-owner/           # Product-owner mode skill (SKILL.md)
+    wizard-playground/       # Mermaid diagram workbench (invocable skill, not a mode)
 hooks/                       # Hook scripts source (also bundled as src/wizard/hooks/ for installs)
   session-end.sh             # Claude Code SessionEnd hook — calls `wizard capture --close` to synthesise transcript
   session-start.sh           # Claude Code SessionStart hook — personalization refresh (80%) + session boot injection
