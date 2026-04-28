@@ -55,6 +55,13 @@ class TestContextTriggers:
         spans = finder.find_spans("spoke with James Brown re: deployment.")
         assert any("James Brown" in t for _, _, t in spans)
 
+    def test_single_name_after_trigger(self, finder):
+        spans = finder.find_spans("meeting with Smith about the project.")
+        texts = [t for _, _, t in spans]
+        # Should capture just "Smith", not "Smith about"
+        assert any(t == "Smith" for t in texts)
+        assert not any("about" in t for t in texts)
+
 
 class TestFalsePositiveGuards:
     def test_month_names_skipped(self, finder):
