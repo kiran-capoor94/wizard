@@ -42,6 +42,7 @@ Invoke the appropriate sub-skill when the situation matches. The mode is the fra
 | Designing a new system or major component from scratch | `system-design` *(to be built)* |
 | Estimating complexity or blast radius of a proposed change | `impact-analysis` *(to be built)* |
 | Auditing existing architecture for structural problems | `arch-review` — see `references/arch-review.md` |
+| Figuring out rules and constraints before design begins | `constraints-designer` — see `references/constraints-designer.md` |
 
 If no sub-skill matches, apply the architect mindset directly:
 1. State the constraints
