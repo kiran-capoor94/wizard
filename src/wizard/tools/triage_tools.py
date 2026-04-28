@@ -14,6 +14,7 @@ from ..mcp_instance import mcp
 from ..repositories import TaskRepository
 from ..schemas import TaskContext, TaskRecommendation, WorkRecommendationResponse
 from ..skills import SKILL_TRIAGE, load_skill
+from .formatting import _try_notify
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +127,10 @@ async def _sample_reason(
     try:
         result = await ctx.sample(prompt, max_tokens=60)
         return result.result.strip()
+    except ValueError as e:
+        logger.debug("Sampling not available for task %d, using fallback: %s", task.id, e)
+        return _fallback_reason(task, dominant)
     except Exception as e:
-        # Capture exception in Sentry
         sentry_sdk.capture_exception(e)
         logger.warning("Reason sampling failed for task %d, using fallback", task.id)
         return _fallback_reason(task, dominant)
@@ -185,10 +188,11 @@ async def what_should_i_work_on(
         ),
     )
 
-    await ctx.report_progress(1, 3)
+    await _try_notify(ctx.report_progress(1, 3))
     shortlist = scored[:_MAX_SAMPLE_COUNT]
-    await ctx.debug(f"Scored {len(tasks)} tasks; shortlisted {len(shortlist)} for sampling.")
-    await ctx.report_progress(2, 3)
+    msg = f"Scored {len(tasks)} tasks; shortlisted {len(shortlist)} for sampling."
+    await _try_notify(ctx.debug(msg))
+    await _try_notify(ctx.report_progress(2, 3))
 
     # Build recommendations with LLM-sampled reasons
     recs: list[TaskRecommendation] = []
@@ -207,10 +211,10 @@ async def what_should_i_work_on(
             )
         )
 
-    await ctx.report_progress(3, 3)
+    await _try_notify(ctx.report_progress(3, 3))
     skill_content = load_skill(SKILL_TRIAGE)
     if skill_content:
-        await ctx.info(f"[wizard skill]\n{skill_content}")
+        await _try_notify(ctx.info(f"[wizard skill]\n{skill_content}"))
 
     return WorkRecommendationResponse(
         recommended_task=recs[0],
