@@ -113,7 +113,6 @@ class WizardPaths(BaseModel):
         default_factory=lambda: Path(__file__).resolve().parent / "skills"
     )
     sessions_dir: Path = Field(default_factory=lambda: Path.home() / ".wizard" / "sessions")
-    hooks_dir: Path = Field(default_factory=lambda: Path.home() / ".wizard" / "hooks")
 
 
 WIZARD_MODES: list[str] = ["architect", "ideation", "product-owner"]

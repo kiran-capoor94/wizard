@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import uuid
-from pathlib import Path
 from typing import Literal
 
 import sentry_sdk
@@ -58,8 +57,6 @@ from .session_helpers import (
 
 logger = logging.getLogger(__name__)
 
-SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
-
 
 def _apply_default_mode(session: WizardSession) -> None:
     """Apply default mode to session if not already set and allowed."""
@@ -91,7 +88,7 @@ async def session_start(
     # Read session source from hook-written keyed directory.
     source = "startup"
     if agent_session_id:
-        source_file = SESSIONS_DIR / agent_session_id / "source"
+        source_file = settings.paths.sessions_dir / agent_session_id / "source"
         if source_file.exists():
             source = source_file.read_text().strip() or "startup"
 
@@ -122,7 +119,7 @@ async def session_start(
 
         # Write wizard integer ID to the agent-session keyed directory.
         if agent_session_id:
-            keyed_dir = SESSIONS_DIR / agent_session_id
+            keyed_dir = settings.paths.sessions_dir / agent_session_id
             keyed_dir.mkdir(parents=True, exist_ok=True)
             (keyed_dir / "wizard_id").write_text(str(session.id))
 
@@ -378,7 +375,7 @@ async def resume_session(
 
         # Write wizard integer ID to the agent-session keyed directory (mirrors session_start).
         if agent_session_id and new_session.id is not None:
-            keyed_dir = SESSIONS_DIR / agent_session_id
+            keyed_dir = settings.paths.sessions_dir / agent_session_id
             keyed_dir.mkdir(parents=True, exist_ok=True)
             (keyed_dir / "wizard_id").write_text(str(new_session.id))
 
