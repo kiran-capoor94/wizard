@@ -38,7 +38,13 @@ class TaskStateRepository:
         db.refresh(state)
         return state
 
-    def on_note_saved(self, db: Session, task_id: int, note_type: NoteType) -> TaskState:
+    def on_note_saved(
+        self,
+        db: Session,
+        task_id: int,
+        note_type: NoteType,
+        note_created_at: _dt.datetime | None = None,
+    ) -> TaskState:
         """Increment note_count (and decision_count if DECISION) without re-querying all notes.
         Rebuilds rolling_summary from only mental_model-bearing notes — targeted query.
         Does NOT touch last_status_change_at.
@@ -47,13 +53,13 @@ class TaskStateRepository:
         if task is None:
             raise ValueError(f"Task {task_id} not found")
         state = self._get_or_create(db, task)
-        now = _dt.datetime.now()
+        ts = note_created_at if note_created_at is not None else _dt.datetime.now()
 
         state.note_count = (state.note_count or 0) + 1
         if note_type == NoteType.DECISION:
             state.decision_count = (state.decision_count or 0) + 1
-        state.last_note_at = now
-        state.last_touched_at = now
+        state.last_note_at = ts
+        state.last_touched_at = ts
         state.stale_days = 0
 
         mental_model_notes = list(
