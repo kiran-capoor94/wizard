@@ -33,11 +33,9 @@ async def elicit_done_confirmation(ctx: Context, task_name: str) -> bool:
     try:
         result = await ctx.elicit(
             f"Mark {task_name!r} as done? This closes the task.",
-            response_type=bool,
+            response_type={"yes": {"title": "Yes"}, "no": {"title": "No"}},
         )
-        if isinstance(result, AcceptedElicitation):
-            return bool(result.data)
-        return False  # cancelled or rejected — do not proceed
+        return isinstance(result, AcceptedElicitation) and result.data == "yes"
     except Exception as e:
         logger.debug("ctx.elicit unavailable for done confirmation: %s", e)
         return True  # default: proceed if elicitation unavailable
@@ -61,12 +59,11 @@ async def check_duplicate_name(ctx: Context, name: str, existing_names: list[str
     try:
         elicit_result = await ctx.elicit(
             f"A task named {matching!r} already exists. Create anyway?",
-            response_type=bool,
+            response_type={"yes": {"title": "Yes, create"}, "no": {"title": "No, use existing"}},
         )
-        if isinstance(elicit_result, AcceptedElicitation):
-            return None if elicit_result.data else matching
-        # Cancelled or rejected — treat as "don't create".
-        return matching
+        if isinstance(elicit_result, AcceptedElicitation) and elicit_result.data == "yes":
+            return None  # proceed with creation
+        return matching  # use existing task
     except Exception as e:
         logger.debug("ctx.elicit unavailable for duplicate check: %s", e)
         return None

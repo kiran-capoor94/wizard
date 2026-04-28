@@ -106,9 +106,9 @@ async def save_meeting_summary(
             try:
                 result = await ctx.elicit(
                     f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
-                    response_type=bool,
+                    response_type={"yes": {"title": "Yes"}, "no": {"title": "No"}},
                 )
-                if not isinstance(result, AcceptedElicitation) or result.data is False:
+                if not (isinstance(result, AcceptedElicitation) and result.data == "yes"):
                     task_ids = None
             except Exception as e:
                 logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)

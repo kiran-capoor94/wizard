@@ -13,7 +13,7 @@ async def test_create_task_elicits_on_duplicate_name(mcp_client, seed_task):
 
     async def fake_elicit(self, message, **kwargs):
         elicit_results.append(message)
-        return AcceptedElicitation(data=True)
+        return AcceptedElicitation(data="yes")
 
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("create_task", {"name": "Fix auth"})
@@ -29,7 +29,7 @@ async def test_create_task_no_elicit_when_no_duplicate(mcp_client):
 
     async def fake_elicit(self, message, **kwargs):
         elicit_results.append(message)
-        return AcceptedElicitation(data=True)
+        return AcceptedElicitation(data="yes")
 
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("create_task", {"name": "Totally new task xyz"})
@@ -49,7 +49,7 @@ async def test_update_task_elicits_on_done(mcp_client, seed_task):
 
     async def fake_elicit(self, message, **kwargs):
         elicit_results.append(message)
-        return AcceptedElicitation(data=True)
+        return AcceptedElicitation(data="yes")
 
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("update_task", {"task_id": task.id, "status": "done"})
@@ -91,7 +91,7 @@ async def test_update_task_no_elicit_on_other_status(mcp_client, seed_task):
 
     async def fake_elicit(self, message, **kwargs):
         elicit_results.append(message)
-        return AcceptedElicitation(data=True)
+        return AcceptedElicitation(data="yes")
 
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("update_task", {"task_id": task.id, "status": "in_progress"})
@@ -118,7 +118,7 @@ async def test_save_meeting_summary_elicits_on_task_links(mcp_client, seed_task)
 
     async def fake_elicit(self, message, **kwargs):
         elicit_results.append(message)
-        return AcceptedElicitation(data=True)
+        return AcceptedElicitation(data="yes")
 
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("save_meeting_summary", {
@@ -147,7 +147,7 @@ async def test_save_meeting_summary_no_elicit_without_task_ids(mcp_client):
 
     async def fake_elicit(self, message, **kwargs):
         elicit_results.append(message)
-        return AcceptedElicitation(data=True)
+        return AcceptedElicitation(data="yes")
 
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("save_meeting_summary", {
@@ -159,8 +159,8 @@ async def test_save_meeting_summary_no_elicit_without_task_ids(mcp_client):
     assert len(elicit_results) == 0
 
 
-async def test_save_note_elicits_mental_model_for_investigation(mcp_client, seed_task):
-    """save_note elicits a mental model prompt when note_type is investigation and none provided."""
+async def test_save_note_no_elicit_for_investigation_without_mental_model(mcp_client, seed_task):
+    """save_note does not elicit when note_type is investigation and no mental_model provided."""
     task = await seed_task(name="Investigate caching issue")
 
     r = await mcp_client.call_tool("session_start", {})
@@ -180,8 +180,7 @@ async def test_save_note_elicits_mental_model_for_investigation(mcp_client, seed
         })
 
     assert not r.is_error, r
-    assert len(elicit_results) == 1
-    assert "mental model" in elicit_results[0].lower() or "summarise" in elicit_results[0].lower()
+    assert len(elicit_results) == 0
 
 
 async def test_save_note_no_elicit_when_mental_model_provided(mcp_client, seed_task):
@@ -209,8 +208,8 @@ async def test_save_note_no_elicit_when_mental_model_provided(mcp_client, seed_t
     assert len(elicit_results) == 0
 
 
-async def test_save_note_elicits_mental_model_for_decision(mcp_client, seed_task):
-    """save_note elicits a mental model prompt when note_type is decision and none provided."""
+async def test_save_note_no_elicit_for_decision_without_mental_model(mcp_client, seed_task):
+    """save_note does not elicit when note_type is decision and no mental_model provided."""
     task = await seed_task(name="Decide on caching strategy")
 
     r = await mcp_client.call_tool("session_start", {})
@@ -230,8 +229,8 @@ async def test_save_note_elicits_mental_model_for_decision(mcp_client, seed_task
         })
 
     assert not r.is_error, r
-    assert len(elicit_results) == 1
-    assert r.structured_content["mental_model_saved"] is True
+    assert len(elicit_results) == 0
+    assert r.structured_content["mental_model_saved"] is False
 
 
 async def test_save_meeting_summary_cancellation_skips_task_links(mcp_client, seed_task):
