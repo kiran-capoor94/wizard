@@ -220,6 +220,7 @@ class PriorSessionSummary(BaseModel):
     summary: str
     closed_at: UTCDateTime
     task_ids: list[int] = Field(default_factory=list)
+    raw_session_state: str | None = None
 
 
 class SessionStartResponse(BaseModel):
