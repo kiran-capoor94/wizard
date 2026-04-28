@@ -105,6 +105,9 @@ class ModesSettings(BaseModel):
     allowed: list[str] = Field(default_factory=list)
 
 
+WIZARD_MODES: list[str] = ["architect", "ideation", "product-owner"]
+
+
 class Settings(BaseSettings):
     model_config = {"extra": "ignore"}
 

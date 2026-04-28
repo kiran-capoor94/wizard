@@ -14,7 +14,15 @@ from wizard.config import settings
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_TABLES = {"task", "note", "meeting", "wizardsession", "toolcall", "task_state"}
+REQUIRED_TABLES = {
+    "task",
+    "note",
+    "meeting",
+    "wizardsession",
+    "toolcall",
+    "task_state",
+    "pseudonym_map",
+}
 
 
 def db_is_healthy(db_path: Path) -> bool:

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from fastmcp.client import Client
+from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine
 
 from wizard.repositories import (
@@ -35,6 +36,24 @@ def db_session(db_engine):
     """Per-test DB session. The engine is also per-test so no rollback tricks needed."""
     with Session(db_engine) as session:
         yield session
+
+
+@pytest.fixture
+def pseudonym_engine():
+    """In-memory SQLite engine with pseudonym_map table for pseudonymisation tests."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    with engine.connect() as conn:
+        conn.execute(text(
+            "CREATE TABLE pseudonym_map ("
+            "id INTEGER PRIMARY KEY, "
+            "original_hash TEXT NOT NULL UNIQUE, "
+            "entity_type TEXT NOT NULL, "
+            "fake_value TEXT NOT NULL, "
+            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+        conn.commit()
+    return engine
 
 
 # ---------------------------------------------------------------------------
