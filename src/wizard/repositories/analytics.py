@@ -3,7 +3,7 @@
 import datetime
 import logging
 
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, func, select
 
 from ..models import Note, NoteType, Task, TaskState, ToolCall, WizardSession
 
@@ -66,50 +66,55 @@ class AnalyticsRepository:
             "pending_synthesis": pending_synthesis,
         }
 
-    def get_note_stats(
-        self, db: Session, start: datetime.date, end: datetime.date
-    ) -> dict:
+    def get_note_stats(self, db: Session, start: datetime.date, end: datetime.date) -> dict:
         start_dt = datetime.datetime.combine(start, datetime.time.min)
         end_dt = datetime.datetime.combine(end, datetime.time.max)
 
-        notes = db.exec(
-            select(Note).where(
-                Note.created_at >= start_dt,
-                Note.created_at <= end_dt,
-            )
+        type_counts = db.exec(
+            select(Note.note_type, func.count().label("cnt"))
+            .where(Note.created_at >= start_dt, Note.created_at <= end_dt)
+            .group_by(Note.note_type)
         ).all()
 
-        total = len(notes)
+        total = 0
         by_type: dict[str, int] = {}
         session_summaries = 0
-        unclassified = 0
-        superseded = 0
-        mental_models = 0
         manual_notes = 0
-
-        for note in notes:
-            type_name = (
-                note.note_type.value
-                if hasattr(note.note_type, "value")
-                else str(note.note_type)
-            )
-            by_type[type_name] = by_type.get(type_name, 0) + 1
-
-            if note.note_type == NoteType.SESSION_SUMMARY:
-                session_summaries += 1
+        for note_type, cnt in type_counts:
+            type_name = note_type.value if hasattr(note_type, "value") else str(note_type)
+            by_type[type_name] = cnt
+            total += cnt
+            if note_type == NoteType.SESSION_SUMMARY:
+                session_summaries += cnt
             else:
-                manual_notes += 1
-                if note.mental_model:
-                    mental_models += 1
+                manual_notes += cnt
 
-            status = getattr(note, "status", "active")
-            if status == "unclassified":
-                unclassified += 1
-            elif status == "superseded":
-                superseded += 1
+        mental_models = db.exec(
+            select(func.count()).select_from(Note).where(
+                Note.created_at >= start_dt,
+                Note.created_at <= end_dt,
+                Note.note_type != NoteType.SESSION_SUMMARY,
+                Note.mental_model.is_not(None),  # type: ignore[union-attr]
+            )
+        ).one()
+
+        unclassified = db.exec(
+            select(func.count()).select_from(Note).where(
+                Note.created_at >= start_dt,
+                Note.created_at <= end_dt,
+                Note.status == "unclassified",
+            )
+        ).one()
+
+        superseded = db.exec(
+            select(func.count()).select_from(Note).where(
+                Note.created_at >= start_dt,
+                Note.created_at <= end_dt,
+                Note.status == "superseded",
+            )
+        ).one()
 
         coverage = round(mental_models / manual_notes, 2) if manual_notes > 0 else 0.0
-
         return {
             "total": total,
             "manual_notes": manual_notes,
@@ -121,32 +126,28 @@ class AnalyticsRepository:
             "superseded": superseded,
         }
 
-    def get_task_stats(
-        self, db: Session, start: datetime.date, end: datetime.date
-    ) -> dict:
+    def get_task_stats(self, db: Session, start: datetime.date, end: datetime.date) -> dict:
         start_dt = datetime.datetime.combine(start, datetime.time.min)
         end_dt = datetime.datetime.combine(end, datetime.time.max)
 
-        notes = db.exec(
-            select(Note).where(
+        task_note_rows = db.exec(
+            select(Note.task_id, func.count().label("cnt"))
+            .where(
                 Note.created_at >= start_dt,
                 Note.created_at <= end_dt,
+                Note.task_id.is_not(None),  # type: ignore[union-attr]
             )
+            .group_by(Note.task_id)
         ).all()
 
-        task_note_counts: dict[int, int] = {}
-        for note in notes:
-            if note.task_id is not None:
-                task_note_counts[note.task_id] = task_note_counts.get(note.task_id, 0) + 1
-
-        worked = len(task_note_counts)
-        total_notes = sum(task_note_counts.values())
+        worked = len(task_note_rows)
+        total_notes = sum(cnt for _, cnt in task_note_rows)
         avg_notes = round(total_notes / worked, 1) if worked > 0 else 0.0
 
         stale = db.exec(
             select(TaskState)
             .join(Task, TaskState.task_id == Task.id)
-            .where(TaskState.stale_days > 3, Task.status.in_(["todo", "in_progress"]))
+            .where(TaskState.stale_days > 3, col(Task.status).in_(["todo", "in_progress"]))
         ).all()
 
         return {
