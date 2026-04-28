@@ -96,13 +96,16 @@ class SynthesisSettings(BaseModel):
 class SentrySettings(BaseModel):
     dsn: str = ""
     enabled: bool = False
-    traces_sample_rate: float = 0.1
-    profiles_sample_rate: float = 0.1
+    traces_sample_rate: float = 1.0
+    profiles_sample_rate: float = 1.0
 
 
 class ModesSettings(BaseModel):
     default: str | None = None
     allowed: list[str] = Field(default_factory=list)
+
+
+WIZARD_MODES: list[str] = ["architect", "ideation", "product-owner"]
 
 
 class Settings(BaseSettings):

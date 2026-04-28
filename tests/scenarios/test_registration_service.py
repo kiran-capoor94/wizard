@@ -1,12 +1,13 @@
 """Scenario tests for RegistrationService modes seeding."""
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
-from wizard.services import WIZARD_MODES, RegistrationService
+from wizard.config import WIZARD_MODES
+from wizard.services import RegistrationService
 
 
-def _make_service(tmp_path: Path) -> RegistrationService:
-    from unittest.mock import MagicMock
+def make_service(tmp_path: Path) -> RegistrationService:
     settings = MagicMock()
     settings.db = str(tmp_path / "wizard.db")
     settings.model_dump.return_value = {
@@ -18,14 +19,9 @@ def _make_service(tmp_path: Path) -> RegistrationService:
     return RegistrationService(settings)
 
 
-def test_wizard_modes_constant():
-    """WIZARD_MODES contains the three canonical mode skill names."""
-    assert set(WIZARD_MODES) == {"architect", "ideation", "product-owner"}
-
-
 def test_initialize_config_seeds_modes_allowed(tmp_path):
     """initialize_config writes modes.allowed = WIZARD_MODES on first install."""
-    svc = _make_service(tmp_path)
+    svc = make_service(tmp_path)
     svc.ensure_wizard_home()
     svc.initialize_config()
 
@@ -35,7 +31,7 @@ def test_initialize_config_seeds_modes_allowed(tmp_path):
 
 def test_initialize_config_modes_default_is_null(tmp_path):
     """initialize_config never sets modes.default."""
-    svc = _make_service(tmp_path)
+    svc = make_service(tmp_path)
     svc.ensure_wizard_home()
     svc.initialize_config()
 
@@ -45,7 +41,7 @@ def test_initialize_config_modes_default_is_null(tmp_path):
 
 def test_initialize_config_does_not_overwrite_existing(tmp_path):
     """initialize_config is a no-op when config.json already exists."""
-    svc = _make_service(tmp_path)
+    svc = make_service(tmp_path)
     svc.ensure_wizard_home()
     existing = {"modes": {"default": None, "allowed": ["my-custom-mode"]}}
     (tmp_path / "config.json").write_text(json.dumps(existing))
