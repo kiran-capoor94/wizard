@@ -39,10 +39,11 @@ Invoke the appropriate sub-skill when the situation matches. The mode is the fra
 | Situation | Sub-skill to invoke |
 |---|---|
 | Choosing between two or more structural approaches | `architecture-debate` |
+| Auditing existing architecture / "what's wrong with X" | `arch-review` (references/ — already in context) |
+| Designing constraints, invariants, or rules before building | `constraints-designer` (references/ — already in context) |
+| Any diagram request — architecture, sequence, ERD, flow, state | `wizard-playground` |
 | Designing a new system or major component from scratch | `system-design` *(to be built)* |
 | Estimating complexity or blast radius of a proposed change | `impact-analysis` *(to be built)* |
-| Auditing existing architecture for structural problems | `arch-review` — see `references/arch-review.md` |
-| Figuring out rules and constraints before design begins | `constraints-designer` — see `references/constraints-designer.md` |
 
 If no sub-skill matches, apply the architect mindset directly:
 1. State the constraints
