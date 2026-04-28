@@ -21,7 +21,7 @@ from ..deps import (
     get_task_state_repo,
 )
 from ..mcp_instance import mcp
-from ..mid_session import MID_SESSION_TASKS, cancel_mid_session_synthesis
+from ..mid_session import cancel_mid_session_synthesis, register_mid_session_task
 from ..models import Note, NoteType, WizardSession
 from ..repositories import (
     MeetingRepository,
@@ -172,7 +172,7 @@ async def session_start(
                 wizard_session_id=response.session_id,
             )
         )
-        MID_SESSION_TASKS[agent_session_id] = mid_task
+        await register_mid_session_task(agent_session_id, mid_task)
 
     return response
 
