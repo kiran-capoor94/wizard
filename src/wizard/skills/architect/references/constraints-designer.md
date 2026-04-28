@@ -1,6 +1,8 @@
 # constraints-designer
 
-**Purpose:** Use when the user asks "what are the rules here?", "let's figure out constraints first", or when starting a new component/system design. Unnamed invariants get re-debated every session. An invariant that exists in someone's head but not in a document will be violated in code within three sprints.
+**Purpose:** Use when the user asks "what are the rules here?", "let's figure out constraints first", or when starting a new component/system design. Unnamed invariants get re-debated every session.
+
+An invariant that exists in someone's head but not in a document will be violated in code within three sprints.
 
 ---
 
@@ -11,6 +13,8 @@ Complete both steps in order. Do not proceed to schema or implementation until S
 ### Step 1 — Elicit Constraints (one question at a time)
 
 Ask exactly one question at a time in the order below. Wait for the answer before asking the next question. Do not batch questions.
+
+Ask the question, then stop. Wait for the user's answer before proceeding to the next category.
 
 **Order:**
 
@@ -56,7 +60,8 @@ Always produce exactly this structure:
 | SingleActivePlan | A subscription must always have exactly one active plan | Double-billing, incorrect feature access |
 
 ### Open Questions
-[Constraints that could not be determined — name them so they are not assumed away]
+- Replication latency tolerance (not specified — assumed acceptable for now)
+- Whether historical billing records are immutable (assumed yes, not confirmed)
 ```
 
 ---
