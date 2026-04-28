@@ -1,10 +1,155 @@
+import hashlib
 import logging
 import re
+from collections.abc import Callable
 
 import phonenumbers
+import sqlalchemy as sa
+from faker import Faker
 from pydantic import BaseModel
+from sqlalchemy.engine import Engine
+
+from .database import engine as _wizard_engine
 
 logger = logging.getLogger(__name__)
+
+
+_HONORIFICS = r"(?:Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Dame|Rev)\.?"
+
+_BLOCKLIST: frozenset[str] = frozenset([
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    "Claude", "Notion", "Jira", "Slack", "GitHub", "Aurora", "Postgres",
+    "PostgreSQL", "Python", "Django", "FastAPI", "SQLite", "Redis", "AWS",
+    "Azure", "Google", "Apple", "Microsoft", "Anthropic", "OpenAI",
+    "Linear", "Confluence", "Atlassian", "Obsidian", "Krisp", "Zoom",
+    "Teams", "Figma", "Vercel", "Heroku", "Docker", "Kubernetes",
+    "The", "This", "That", "These", "Those", "Here", "There",
+    "Today", "Tomorrow", "Yesterday", "Now", "Then",
+    "Task", "Note", "Meeting", "Session", "Issue", "Bug",
+    "Project", "Sprint", "Release", "Version", "Phase",
+    "True", "False", "None", "Error", "Warning", "Info",
+    "Wizard", "Code",
+])
+
+_TITLE_WORD = r"[A-Z][a-z]+'?[a-z]*|[A-Z][a-z]+"
+_CONTEXT_TRIGGERS = (
+    r"(?:meeting with|spoke with|called by|call with|speak with|"
+    r"assigned to|owned by|reported by|raised by|contact)\s+"
+)
+
+
+class HeuristicNameFinder:
+    """Detects likely person names via honorifics and context triggers.
+
+    Returns (start, end, text) spans — non-overlapping, position order.
+    """
+
+    _HONORIFIC_RE = re.compile(
+        rf"\b({_HONORIFICS})\s+({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
+    )
+    _CONTEXT_RE = re.compile(
+        rf"(?i:{_CONTEXT_TRIGGERS})({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
+    )
+
+    def __init__(self, allowlist_patterns: list[re.Pattern[str]]):
+        self._allowlist = allowlist_patterns
+
+    def find_spans(self, text: str) -> list[tuple[int, int, str]]:
+        raw: list[tuple[int, int, str]] = []
+        raw.extend(self._honorific_spans(text))
+        raw.extend(self._context_spans(text))
+        return self._deduplicate(raw)
+
+    def _honorific_spans(self, text: str) -> list[tuple[int, int, str]]:
+        spans = []
+        for m in self._HONORIFIC_RE.finditer(text):
+            parts = [g for g in m.groups()[1:] if g]  # skip the honorific itself
+            if any(p in _BLOCKLIST for p in parts):
+                continue
+            matched = m.group(0)
+            if self._is_allowlisted(matched):
+                continue
+            spans.append((m.start(), m.end(), matched))
+        return spans
+
+    def _context_spans(self, text: str) -> list[tuple[int, int, str]]:
+        spans = []
+        for m in self._CONTEXT_RE.finditer(text):
+            groups = [g for g in m.groups() if g]
+            if not groups:
+                continue
+            if any(p in _BLOCKLIST for p in groups):
+                continue
+            name = " ".join(groups)
+            name_start = m.start(1)
+            name_end = m.end(2) if m.group(2) else m.end(1)
+            if self._is_allowlisted(name):
+                continue
+            spans.append((name_start, name_end, name))
+        return spans
+
+    def _is_allowlisted(self, text: str) -> bool:
+        return any(p.search(text) for p in self._allowlist)
+
+    @staticmethod
+    def _deduplicate(spans: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
+        spans.sort(key=lambda s: (s[0], -(s[1] - s[0])))
+        result: list[tuple[int, int, str]] = []
+        last_end = -1
+        for start, end, text in spans:
+            if start >= last_end:
+                result.append((start, end, text))
+                last_end = end
+        return result
+
+
+class PseudonymStore:
+    """Persistent PII-to-fake-value mapping backed by the pseudonym_map SQLite table.
+
+    Thread-safe: INSERT OR IGNORE + re-read handles concurrent writers.
+    Falls back to an opaque stub on any DB error — scrubbing never raises.
+    """
+
+    def __init__(self, engine: Engine | None = None):
+        self._engine = engine if engine is not None else _wizard_engine
+
+    def get_or_create(self, original: str, entity_type: str, generator: Callable[[], str]) -> str:
+        key = f"{entity_type}:{original.strip().lower()}"
+        original_hash = hashlib.sha256(key.encode()).hexdigest()
+        try:
+            with self._engine.connect() as conn:
+                existing = conn.execute(
+                    sa.text(
+                        "SELECT fake_value FROM pseudonym_map WHERE original_hash = :h"
+                    ),
+                    {"h": original_hash},
+                ).first()
+                if existing:
+                    return existing[0]
+                fake_value = generator()
+                conn.execute(
+                    sa.text(
+                        "INSERT OR IGNORE INTO pseudonym_map "
+                        "(original_hash, entity_type, fake_value) "
+                        "VALUES (:h, :et, :fv)"
+                    ),
+                    {"h": original_hash, "et": entity_type, "fv": fake_value},
+                )
+                conn.commit()
+                result = conn.execute(
+                    sa.text(
+                        "SELECT fake_value FROM pseudonym_map WHERE original_hash = :h"
+                    ),
+                    {"h": original_hash},
+                ).first()
+                return result[0] if result else fake_value
+        except Exception as e:
+            logger.warning(
+                "PseudonymStore: DB error for %r, falling back to stub: %s", original, e
+            )
+            return "[PERSON_?]"
 
 
 class ScrubResult(BaseModel):
@@ -26,13 +171,21 @@ class SecurityService:
         ("SECRET", r"(Bearer\s[A-Za-z0-9\-._~+/]+=*|sk-[A-Za-z0-9]{20,})", "SECRET"),
     ]
 
-    def __init__(self, allowlist: list[str] | None = None, enabled: bool = True):
+    def __init__(
+        self,
+        allowlist: list[str] | None = None,
+        enabled: bool = True,
+        store: "PseudonymStore | None" = None,
+    ):
         self._allowlist = allowlist or []
         try:
             self._allowlist_patterns = [re.compile(p) for p in self._allowlist]
         except re.error as e:
             raise ValueError(f"Invalid allowlist regex: {e}") from e
         self._enabled = enabled
+        self._store = store
+        self._name_finder = HeuristicNameFinder(allowlist_patterns=self._allowlist_patterns)
+        self._faker = Faker() if store is not None else None
 
     def scrub(self, content: str | None) -> ScrubResult:
         if content is None:
@@ -70,6 +223,9 @@ class SecurityService:
             clean, original_to_stub, counters, regions=["GB", "US", "AU", "DE", "FR"]
         )
 
+        # 4. Name detection + pseudonymisation
+        clean = self._scrub_names(clean, original_to_stub, counters)
+
         if original_to_stub:
             logger.info(
                 "PII scrubbed: %d substitution(s) across patterns",
@@ -80,6 +236,28 @@ class SecurityService:
             original_to_stub=original_to_stub,
             was_modified=clean != content,
         )
+
+    def _scrub_names(
+        self,
+        text: str,
+        original_to_stub: dict[str, str],
+        counters: dict[str, int],
+    ) -> str:
+        name_spans = self._name_finder.find_spans(text)
+        replacements: list[tuple[str, str]] = []
+        for _, _, matched in name_spans:
+            if matched in original_to_stub:
+                continue
+            if self._store is not None and self._faker is not None:
+                fake = self._store.get_or_create(matched, "PERSON", self._faker.name)
+            else:
+                counters["PERSON"] = counters.get("PERSON", 0) + 1
+                fake = f"[PERSON_{counters['PERSON']}]"
+            original_to_stub[matched] = fake
+            replacements.append((matched, fake))
+        for original, fake in sorted(replacements, key=lambda x: len(x[0]), reverse=True):
+            text = text.replace(original, fake)
+        return text
 
     def _scrub_phones(
         self,

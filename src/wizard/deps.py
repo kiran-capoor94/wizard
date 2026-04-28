@@ -16,7 +16,7 @@ from .repositories import (
     TaskRepository,
     TaskStateRepository,
 )
-from .security import SecurityService
+from .security import PseudonymStore, SecurityService
 from .services import SessionCloser
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ def get_security() -> SecurityService:
     return SecurityService(
         allowlist=settings.scrubbing.allowlist,
         enabled=settings.scrubbing.enabled,
+        store=PseudonymStore(),
     )
 
 

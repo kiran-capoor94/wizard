@@ -12,6 +12,7 @@ import sentry_sdk
 from sqlmodel import Session, or_, select
 
 from . import agent_registration
+from .config import WIZARD_MODES
 from .database import get_session
 from .mid_session import cancel_mid_session_synthesis
 from .models import Note, NoteType, WizardSession
@@ -38,8 +39,8 @@ class RegistrationService:
     def initialize_config(self) -> str:
         config_path = self.WIZARD_HOME / "config.json"
         if not config_path.exists():
-            # Use model_dump to get dict from Pydantic model
             config_data = self._settings.model_dump(exclude={"name", "version", "db", "sentry"})
+            config_data["modes"]["allowed"] = sorted(WIZARD_MODES)
             config_path.write_text(json.dumps(config_data, indent=2))
             return f"Created default config at {config_path}"
         return f"Config already exists at {config_path}"
@@ -51,15 +52,29 @@ class RegistrationService:
             return f"Created allowlist file at {allowlist_path}"
         return f"Allowlist already exists at {allowlist_path}"
 
-    def refresh_skills(self) -> str:
+    def refresh_skills(self, source_override: Path | None = None) -> str:
         dest = self.WIZARD_HOME / "skills"
-        source = Path(__file__).resolve().parent / "skills"
+        source = source_override or Path(__file__).resolve().parent / "skills"
         if source.exists():
             if dest.exists():
                 shutil.rmtree(dest)
             shutil.copytree(source, dest)
+            self._merge_wizard_modes()
             return f"Installed skills to {dest}"
         return "No skills found in package — skipping skill install"
+
+    def _merge_wizard_modes(self) -> None:
+        config_path = self.WIZARD_HOME / "config.json"
+        if not config_path.exists():
+            return
+        try:
+            config = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            return
+        modes = config.setdefault("modes", {})
+        existing = set(modes.get("allowed", []))
+        modes["allowed"] = sorted(existing | set(WIZARD_MODES))
+        config_path.write_text(json.dumps(config, indent=2))
 
     def register_agents(self, agent_ids: list[str]) -> list[dict]:
         results = []
