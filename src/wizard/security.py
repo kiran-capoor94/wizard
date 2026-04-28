@@ -7,6 +7,110 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
+_HONORIFICS = r"(?:Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Dame|Rev)\.?"
+
+_BLOCKLIST: frozenset[str] = frozenset([
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    "Claude", "Notion", "Jira", "Slack", "GitHub", "Aurora", "Postgres",
+    "PostgreSQL", "Python", "Django", "FastAPI", "SQLite", "Redis", "AWS",
+    "Azure", "Google", "Apple", "Microsoft", "Anthropic", "OpenAI",
+    "Linear", "Confluence", "Atlassian", "Obsidian", "Krisp", "Zoom",
+    "Teams", "Figma", "Vercel", "Heroku", "Docker", "Kubernetes",
+    "The", "This", "That", "These", "Those", "Here", "There",
+    "Today", "Tomorrow", "Yesterday", "Now", "Then",
+    "Task", "Note", "Meeting", "Session", "Issue", "Bug",
+    "Project", "Sprint", "Release", "Version", "Phase",
+    "True", "False", "None", "Error", "Warning", "Info",
+    "Wizard", "Code",
+])
+
+_TITLE_WORD = r"[A-Z][a-z]+'?[a-z]*|[A-Z][a-z]+"
+_CONTEXT_TRIGGERS = (
+    r"(?:meeting with|spoke with|called by|call with|speak with|"
+    r"from|assigned to|owned by|reported by|raised by|contact)\s+"
+)
+
+
+class HeuristicNameFinder:
+    """Detects likely person names via honorifics, title-case pairs, and context triggers.
+
+    Returns (start, end, text) spans — non-overlapping, position order.
+    """
+
+    _HONORIFIC_RE = re.compile(
+        rf"\b({_HONORIFICS})\s+({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
+    )
+    _TITLE_PAIR_RE = re.compile(
+        rf"\b({_TITLE_WORD})\s+({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
+    )
+    _CONTEXT_RE = re.compile(
+        rf"(?i){_CONTEXT_TRIGGERS}({_TITLE_WORD})(?:\s+({_TITLE_WORD}))?"
+    )
+
+    def __init__(self, allowlist_patterns: list[re.Pattern[str]]):
+        self._allowlist = allowlist_patterns
+
+    def find_spans(self, text: str) -> list[tuple[int, int, str]]:
+        raw: list[tuple[int, int, str]] = []
+        raw.extend(self._honorific_spans(text))
+        raw.extend(self._title_pair_spans(text))
+        raw.extend(self._context_spans(text))
+        return self._deduplicate(raw)
+
+    def _honorific_spans(self, text: str) -> list[tuple[int, int, str]]:
+        spans = []
+        for m in self._HONORIFIC_RE.finditer(text):
+            matched = m.group(0)
+            if self._is_allowlisted(matched):
+                continue
+            spans.append((m.start(), m.end(), matched))
+        return spans
+
+    def _title_pair_spans(self, text: str) -> list[tuple[int, int, str]]:
+        spans = []
+        for m in self._TITLE_PAIR_RE.finditer(text):
+            parts = [g for g in m.groups() if g]
+            if any(p in _BLOCKLIST for p in parts):
+                continue
+            matched = m.group(0)
+            if self._is_allowlisted(matched):
+                continue
+            spans.append((m.start(), m.end(), matched))
+        return spans
+
+    def _context_spans(self, text: str) -> list[tuple[int, int, str]]:
+        spans = []
+        for m in self._CONTEXT_RE.finditer(text):
+            groups = [g for g in m.groups() if g]
+            if not groups:
+                continue
+            if any(p in _BLOCKLIST for p in groups):
+                continue
+            name = " ".join(groups)
+            name_start = m.start() + text[m.start():].index(groups[0])
+            name_end = name_start + len(name)
+            if self._is_allowlisted(name):
+                continue
+            spans.append((name_start, name_end, name))
+        return spans
+
+    def _is_allowlisted(self, text: str) -> bool:
+        return any(p.search(text) for p in self._allowlist)
+
+    @staticmethod
+    def _deduplicate(spans: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
+        spans.sort(key=lambda s: (s[0], -(s[1] - s[0])))
+        result: list[tuple[int, int, str]] = []
+        last_end = -1
+        for start, end, text in spans:
+            if start >= last_end:
+                result.append((start, end, text))
+                last_end = end
+        return result
+
+
 class ScrubResult(BaseModel):
     clean: str
     original_to_stub: dict[str, str]
