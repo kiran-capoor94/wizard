@@ -58,6 +58,23 @@ from .session_helpers import (
 logger = logging.getLogger(__name__)
 
 
+def _scrub_and_log(sec: SecurityService, content: str, field_name: str) -> str:
+    """Scrub content and log if PII was detected.
+
+    Args:
+        sec: SecurityService instance
+        content: The content to scrub
+        field_name: Name of the field being scrubbed (for logging)
+
+    Returns:
+        Cleaned content
+    """
+    scrub_result = sec.scrub(content)
+    if scrub_result.was_modified:
+        logger.info("PII scrubbed from %s", field_name)
+    return scrub_result.clean
+
+
 def _apply_default_mode(session: WizardSession) -> None:
     """Apply default mode to session if not already set and allowed."""
     if (
@@ -204,12 +221,15 @@ async def session_end(
             if agent_id:
                 cancel_mid_session_synthesis(agent_id)
 
+            # Scrub and log PII detection in session state fields
             state = SessionState(
-                intent=sec.scrub(intent).clean,
+                intent=_scrub_and_log(sec, intent, "session intent"),
                 working_set=working_set,
-                state_delta=sec.scrub(state_delta).clean,
-                open_loops=[sec.scrub(loop).clean for loop in open_loops],
-                next_actions=[sec.scrub(action).clean for action in next_actions],
+                state_delta=_scrub_and_log(sec, state_delta, "state_delta"),
+                open_loops=[_scrub_and_log(sec, loop, "open_loop") for loop in open_loops],
+                next_actions=[
+                    _scrub_and_log(sec, action, "next_action") for action in next_actions
+                ],
                 closure_status=closure_status,
                 tool_registry=tool_registry,
             )
@@ -220,7 +240,7 @@ async def session_end(
             except (ValueError, TypeError) as e:
                 logger.warning("session_end: failed to serialise session_state: %s", e)
 
-            clean_summary = sec.scrub(summary).clean
+            clean_summary = _scrub_and_log(sec, summary, "session summary")
             session.closed_by = "user"
             session.summary = clean_summary
             db.add(session)

@@ -23,6 +23,23 @@ from .formatting import try_notify
 logger = logging.getLogger(__name__)
 
 
+def _scrub_and_log(sec: SecurityService, content: str, field_name: str) -> str:
+    """Scrub content and log if PII was detected.
+
+    Args:
+        sec: SecurityService instance
+        content: The content to scrub
+        field_name: Name of the field being scrubbed (for logging)
+
+    Returns:
+        Cleaned content
+    """
+    scrub_result = sec.scrub(content)
+    if scrub_result.was_modified:
+        logger.info("PII scrubbed from %s", field_name)
+    return scrub_result.clean
+
+
 async def get_meeting(
     meeting_id: int,
     meetings_repo: MeetingRepository = Depends(get_meeting_repo),
@@ -114,7 +131,7 @@ async def save_meeting_summary(
                 logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
 
         # Phase 3: write summary and note.
-        clean_summary = sec.scrub(summary).clean
+        clean_summary = _scrub_and_log(sec, summary, "meeting summary")
         note = Note(
             note_type=NoteType.DOCS,
             content=clean_summary,
@@ -167,8 +184,8 @@ async def ingest_meeting(
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
     logger.info("ingest_meeting source_id=%s", source_id)
-    clean_title = sec.scrub(title).clean
-    clean_content = sec.scrub(content).clean
+    clean_title = _scrub_and_log(sec, title, "meeting title")
+    clean_content = _scrub_and_log(sec, content, "meeting content")
     await try_notify(ctx.report_progress(1, 2))
     with get_session() as db:
 
