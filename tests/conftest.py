@@ -82,6 +82,7 @@ _GET_SESSION_TARGETS = [
     "wizard.tools.session_tools.get_session",
     "wizard.tools.session_helpers.get_session",
     "wizard.tools.task_tools.get_session",
+    "wizard.tools.note_tools.get_session",
     "wizard.tools.meeting_tools.get_session",
     "wizard.services.get_session",
     "wizard.middleware.get_session",

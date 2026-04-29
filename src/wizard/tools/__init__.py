@@ -1,15 +1,9 @@
 from .meeting_tools import get_meeting, ingest_meeting, save_meeting_summary
 from .mode_tools import get_modes, set_mode
+from .note_tools import rewind_task, what_am_i_missing
 from .query_tools import get_session, get_sessions, get_task, get_tasks
 from .session_tools import resume_session, session_end, session_start
-from .task_tools import (
-    create_task,
-    rewind_task,
-    save_note,
-    task_start,
-    update_task,
-    what_am_i_missing,
-)
+from .task_tools import create_task, save_note, task_start, update_task
 from .triage_tools import what_should_i_work_on
 
 __all__ = [
