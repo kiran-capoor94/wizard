@@ -23,21 +23,35 @@ from .formatting import try_notify
 logger = logging.getLogger(__name__)
 
 
-def _scrub_and_log(sec: SecurityService, content: str, field_name: str) -> str:
-    """Scrub content and log if PII was detected.
+async def _elicit_task_link_confirmation(
+    ctx: Context, task_ids: list[int], task_names: list[str]
+) -> list[int] | None:
+    """Elicit user confirmation to link tasks to meeting summary.
 
-    Args:
-        sec: SecurityService instance
-        content: The content to scrub
-        field_name: Name of the field being scrubbed (for logging)
-
-    Returns:
-        Cleaned content
+    Returns task_ids if confirmed, None if cancelled or elicitation unavailable.
     """
-    scrub_result = sec.scrub(content)
-    if scrub_result.was_modified:
-        logger.info("PII scrubbed from %s", field_name)
-    return scrub_result.clean
+    if not task_ids:
+        return task_ids
+
+    names_str = (
+        ", ".join(repr(n) for n in task_names)
+        if task_names
+        else ", ".join(str(i) for i in task_ids)
+    )
+    try:
+        result = await ctx.elicit(
+            f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
+            response_type={"yes": {"title": "Yes"}, "no": {"title": "No"}},
+        )
+        if not (isinstance(result, AcceptedElicitation) and result.data == "yes"):
+            return None
+    except Exception as e:
+        logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
+        return None
+
+    return task_ids
+
+
 
 
 async def get_meeting(
@@ -98,6 +112,14 @@ async def save_meeting_summary(
 ) -> SaveMeetingSummaryResponse:
     """Scrubs and persists the LLM-generated meeting summary."""
     logger.info("save_meeting_summary meeting_id=%d", meeting_id)
+
+    def _scrub_and_log(content: str, field_name: str) -> str:
+        """Scrub content and log if PII was detected."""
+        scrub_result = sec.scrub(content)
+        if scrub_result.was_modified:
+            logger.info("PII scrubbed from %s", field_name)
+        return scrub_result.clean
+
     try:
         # Phase 1: fetch data needed for elicitation, then close DB.
         session_id: int | None = await ctx.get_state("current_session_id")
@@ -114,24 +136,10 @@ async def save_meeting_summary(
                 task_names = t_repo.get_names_by_ids(db, task_ids)
 
         # Phase 2: elicit outside DB context so connection is not held open.
-        if task_ids:
-            names_str = (
-                ", ".join(repr(n) for n in task_names)
-                if task_names
-                else ", ".join(str(i) for i in task_ids)
-            )
-            try:
-                result = await ctx.elicit(
-                    f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
-                    response_type={"yes": {"title": "Yes"}, "no": {"title": "No"}},
-                )
-                if not (isinstance(result, AcceptedElicitation) and result.data == "yes"):
-                    task_ids = None
-            except Exception as e:
-                logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
+        task_ids = await _elicit_task_link_confirmation(ctx, task_ids or [], task_names)
 
         # Phase 3: write summary and note.
-        clean_summary = _scrub_and_log(sec, summary, "meeting summary")
+        clean_summary = _scrub_and_log(summary, "meeting summary")
         note = Note(
             note_type=NoteType.DOCS,
             content=clean_summary,
@@ -184,8 +192,16 @@ async def ingest_meeting(
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
     logger.info("ingest_meeting source_id=%s", source_id)
-    clean_title = _scrub_and_log(sec, title, "meeting title")
-    clean_content = _scrub_and_log(sec, content, "meeting content")
+
+    def _scrub_and_log(content: str, field_name: str) -> str:
+        """Scrub content and log if PII was detected."""
+        scrub_result = sec.scrub(content)
+        if scrub_result.was_modified:
+            logger.info("PII scrubbed from %s", field_name)
+        return scrub_result.clean
+
+    clean_title = _scrub_and_log(title, "meeting title")
+    clean_content = _scrub_and_log(content, "meeting content")
     await try_notify(ctx.report_progress(1, 2))
     with get_session() as db:
 
