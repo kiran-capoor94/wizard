@@ -38,6 +38,23 @@ _VALID_STATUSES = {s.value for s in TaskStatus}
 logger = logging.getLogger(__name__)
 
 
+def _scrub_and_log(sec: SecurityService, content: str, field_name: str) -> str:
+    """Scrub content and log if PII was detected.
+
+    Args:
+        sec: SecurityService instance
+        content: The content to scrub
+        field_name: Name of the field being scrubbed (for logging)
+
+    Returns:
+        Cleaned content
+    """
+    scrub_result = sec.scrub(content)
+    if scrub_result.was_modified:
+        logger.info("PII scrubbed from %s", field_name)
+    return scrub_result.clean
+
+
 _KEY_NOTES_CAP = 5  # max notes returned by task_start
 
 
@@ -161,9 +178,9 @@ async def save_note(
         # Phase 3: validate and write.
         if len(content) > 100_000:
             raise ToolError("Content exceeds 100k character limit")
-        clean = sec.scrub(content).clean
+        clean = _scrub_and_log(sec, content, "note content")
         if mental_model is not None:
-            mental_model = sec.scrub(mental_model).clean
+            mental_model = _scrub_and_log(sec, mental_model, "mental_model")
         note = Note(
             note_type=note_type,
             content=clean,
