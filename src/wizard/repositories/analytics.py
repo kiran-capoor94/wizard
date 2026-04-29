@@ -3,6 +3,7 @@
 import datetime
 import logging
 
+from sqlalchemy import case
 from sqlmodel import Session, col, func, select
 
 from ..models import Note, NoteType, Task, TaskState, ToolCall, WizardSession
@@ -16,43 +17,63 @@ class AnalyticsRepository:
     ) -> dict:
         start_dt = datetime.datetime.combine(start, datetime.time.min)
         end_dt = datetime.datetime.combine(end, datetime.time.max)
+        window = (WizardSession.created_at >= start_dt, WizardSession.created_at <= end_dt)
 
-        sessions = db.exec(
-            select(WizardSession).where(
-                WizardSession.created_at >= start_dt,
-                WizardSession.created_at <= end_dt,
-            )
+        # Aggregate counts in the DB — no full-table scan in Python.
+        closed_by_rows = db.exec(
+            select(WizardSession.closed_by, func.count().label("cnt"))
+            .where(*window)
+            .group_by(WizardSession.closed_by)
         ).all()
-
-        session_count = len(sessions)
-        abandoned_count = sum(1 for s in sessions if s.closed_by == "auto")
+        counts_by_closed: dict[str | None, int] = {cb: cnt for cb, cnt in closed_by_rows}
+        session_count = sum(counts_by_closed.values())
+        abandoned_count = counts_by_closed.get("auto", 0)
         abandoned_rate = round(abandoned_count / session_count, 2) if session_count else 0.0
 
-        durations: list[float] = []
-        for s in sessions:
-            if s.closed_by in ("user", "hook"):
-                delta = (s.updated_at - s.created_at).total_seconds() / 60
-                durations.append(delta)
-            elif s.closed_by == "auto" and s.last_active_at is not None:
-                delta = (s.last_active_at - s.created_at).total_seconds() / 60
-                durations.append(delta)
-            # open sessions (closed_by is None) excluded from average
+        # Duration: user/hook sessions use updated_at; auto sessions use last_active_at.
+        # Open sessions (closed_by IS NULL) are excluded. JULIANDAY diff × 1440 = minutes.
+        closed_at_expr = case(
+            (col(WizardSession.closed_by).in_(["user", "hook"]), WizardSession.updated_at),
+            (
+                WizardSession.closed_by == "auto",
+                WizardSession.last_active_at,
+            ),
+        )
+        avg_duration_row = db.exec(
+            select(
+                func.avg(
+                    (func.julianday(closed_at_expr) - func.julianday(WizardSession.created_at))
+                    * 1440
+                )
+            ).where(
+                *window,
+                col(WizardSession.closed_by).in_(["user", "hook", "auto"]),
+                closed_at_expr.is_not(None),
+            )
+        ).one()
+        avg_duration = round(avg_duration_row or 0.0, 1)
 
-        avg_duration = round(sum(durations) / len(durations), 1) if durations else 0.0
-
-        tool_calls = db.exec(
-            select(ToolCall).where(
+        total_tool_calls = db.exec(
+            select(func.count()).select_from(ToolCall).where(
                 ToolCall.called_at >= start_dt,
                 ToolCall.called_at <= end_dt,
             )
-        ).all()
-        total_tool_calls = len(tool_calls)
+        ).one()
 
+        synthesis_status_rows = db.exec(
+            select(WizardSession.id, WizardSession.synthesis_status, WizardSession.closed_by)
+            .where(*window)
+            .where(
+                col(WizardSession.synthesis_status).in_(["partial_failure", "pending"])
+            )
+        ).all()
         synthesis_failure_ids = [
-            s.id for s in sessions if s.synthesis_status == "partial_failure" and s.id is not None
+            sid for sid, status, _ in synthesis_status_rows
+            if status == "partial_failure" and sid is not None
         ]
         pending_synthesis = sum(
-            1 for s in sessions if s.synthesis_status == "pending" and s.closed_by is not None
+            1 for _, status, closed_by in synthesis_status_rows
+            if status == "pending" and closed_by is not None
         )
 
         return {

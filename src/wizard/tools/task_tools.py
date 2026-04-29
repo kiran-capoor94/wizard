@@ -287,11 +287,17 @@ async def create_task(
     if status not in _VALID_STATUSES:
         raise ValueError(f"Invalid status {status!r}. Valid values: {sorted(_VALID_STATUSES)}")
 
+    # Scrub name once; audit if PII was detected.
+    _name_scrub = sec.scrub(name)
+    if _name_scrub.was_modified:
+        logger.info("PII scrubbed from create_task name")
+    clean_name = _name_scrub.clean
+
     # Phase 1: source_id upsert — no elicitation needed; one DB context.
     if source_id:
         with get_session() as db:
             existing = t_repo.upsert_by_source_id(
-                db, source_id, sec.scrub(name).clean, priority, source_url
+                db, source_id, clean_name, priority, source_url
             )
             if existing and existing.id is not None:
                 return CreateTaskResponse(task_id=existing.id, already_existed=True)
@@ -303,7 +309,6 @@ async def create_task(
         blocked_by = await check_duplicate_name(ctx, name, existing_names)
 
     # Phase 3: create or return existing — single transaction eliminates TOCTOU window.
-    clean_name = sec.scrub(name).clean
     task_status = TaskStatus(status)
     with get_session() as db:
         if blocked_by is not None:

@@ -22,7 +22,10 @@ async def elicit_mental_model(ctx: Context, sec: SecurityService) -> str | None:
             response_type=str,
         )
         if isinstance(result, AcceptedElicitation) and result.data:
-            return sec.scrub(result.data).clean
+            scrub_result = sec.scrub(result.data)
+            if scrub_result.was_modified:
+                logger.info("PII scrubbed from mental_model elicitation")
+            return scrub_result.clean
     except Exception as e:
         logger.debug("ctx.elicit unavailable for mental_model: %s", e)
     return None
@@ -99,7 +102,10 @@ def apply_task_fields(
         task.due_date = due_date_dt
         updated.append("due_date")
     if name is not None:
-        task.name = sec.scrub(name).clean
+        scrub_result = sec.scrub(name)
+        if scrub_result.was_modified:
+            logger.info("PII scrubbed from task name")
+        task.name = scrub_result.clean
         updated.append("name")
     if source_url is not None:
         task.source_url = source_url
