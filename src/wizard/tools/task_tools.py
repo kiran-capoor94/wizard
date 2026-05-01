@@ -68,26 +68,47 @@ def _select_key_notes(notes_desc: list) -> list:
     """Select the most informative notes for task_start context.
 
     Priority (hard-ordered, total capped at _KEY_NOTES_CAP):
+    0. All failure notes — what didn't work is load-bearing context.
     1. All decision notes — resolved choices are always load-bearing.
-    2. Notes with mental_models — explicit understanding captures; already
-       distilled into rolling_summary but useful as anchors.
+    2. Notes with mental_models — explicit understanding captures.
     3. Fill remaining slots with most recent notes not already selected.
 
-    Returns notes sorted oldest-first for readability.
+    Returns notes in priority order (oldest-first within each tier for readability).
     """
     selected = []
     seen: set[int] = set()
 
-    for n in notes_desc:
-        if n.note_type == NoteType.DECISION and n.id is not None and n.id not in seen:
+    # Tier 0: failure notes (oldest-first within tier)
+    failure_notes = [
+        n for n in notes_desc
+        if n.note_type == NoteType.FAILURE and n.id is not None
+    ]
+    for n in sorted(failure_notes, key=lambda x: x.created_at):
+        if n.id not in seen:
             selected.append(n)
             seen.add(n.id)
 
-    for n in notes_desc:
-        if n.mental_model is not None and n.id is not None and n.id not in seen:
+    # Tier 1: decision notes (oldest-first within tier)
+    decision_notes = [
+        n for n in notes_desc
+        if n.note_type == NoteType.DECISION and n.id is not None
+    ]
+    for n in sorted(decision_notes, key=lambda x: x.created_at):
+        if n.id not in seen:
             selected.append(n)
             seen.add(n.id)
 
+    # Tier 2: notes with mental models (oldest-first within tier)
+    mental_model_notes = [
+        n for n in notes_desc
+        if n.mental_model is not None and n.id is not None
+    ]
+    for n in sorted(mental_model_notes, key=lambda x: x.created_at):
+        if n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+    # Tier 3: fill remaining slots with most recent notes (newest-first)
     for n in notes_desc:
         if len(selected) >= _KEY_NOTES_CAP:
             break
@@ -95,7 +116,7 @@ def _select_key_notes(notes_desc: list) -> list:
             selected.append(n)
             seen.add(n.id)
 
-    return sorted(selected, key=lambda x: x.created_at)
+    return selected
 
 
 async def task_start(
