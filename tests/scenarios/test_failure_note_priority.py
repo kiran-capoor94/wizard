@@ -1,4 +1,4 @@
-"""Scenario: failure notes surface before decisions in task_start."""
+"""Scenario: failure note type is accepted and persisted by save_note."""
 
 
 async def test_failure_note_type_accepted(mcp_client, seed_task):
