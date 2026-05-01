@@ -15,12 +15,10 @@ from wizard.database import get_session
 from wizard.repositories.analytics import AnalyticsRepository
 from wizard.repositories.note import NoteRepository
 from wizard.repositories.session import SessionRepository
-from wizard.repositories.task import TaskRepository
 
 _analytics_repo = AnalyticsRepository()
 _note_repo = NoteRepository()
 _session_repo = SessionRepository()
-_task_repo = TaskRepository()
 
 _NOTE_WINDOW_DAYS = 7
 _TOOL_WINDOW_DAYS = 30
@@ -82,7 +80,7 @@ def _render_recent_notes(data: dict) -> None:
 
 
 def _render_synthesis_health(data: dict) -> None:
-    st.subheader("Synthesis Health (last 10 sessions)")
+    st.subheader(f"Synthesis Health (last {_RECENT_SESSIONS_LIMIT} sessions)")
     sessions = data["recent_sessions"]
     if not sessions:
         st.info("No sessions found.")
@@ -105,7 +103,7 @@ def _render_memory_utilisation(data: dict) -> None:
     total = len(recent_notes)
     avg_length = round(sum(len(n.content or "") for n in recent_notes) / total, 1) if total else 0.0
     col1, col2, col3 = st.columns(3)
-    col1.metric("Notes (7d)", total)
+    col1.metric(f"Notes ({_NOTE_WINDOW_DAYS}d)", total)
     col2.metric("Avg Length", f"{avg_length} chars")
     col3.metric("Cap", f"{_NOTE_CONTENT_CAP} chars")
     task_counts: dict[int, int] = {}
