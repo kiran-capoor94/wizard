@@ -221,6 +221,60 @@ class AnalyticsRepository:
 
         return round(compounding_count / len(task_start_calls), 2)
 
+    def get_note_velocity(
+        self, db: Session, start: datetime.date, end: datetime.date
+    ) -> dict[str, int]:
+        """Return {iso_date: note_count} for each day in [start, end]."""
+        start_dt = datetime.datetime.combine(start, datetime.time.min)
+        end_dt = datetime.datetime.combine(end, datetime.time.max)
+        rows = db.exec(
+            select(
+                func.date(Note.created_at).label("day"),
+                func.count().label("cnt"),
+            )
+            .where(Note.created_at >= start_dt, Note.created_at <= end_dt)
+            .group_by(func.date(Note.created_at))
+        ).all()
+        result = {str(row[0]): row[1] for row in rows}
+        current = start
+        while current <= end:
+            result.setdefault(current.isoformat(), 0)
+            current += datetime.timedelta(days=1)
+        return result
+
+    def get_session_velocity(
+        self, db: Session, start: datetime.date, end: datetime.date
+    ) -> dict[str, float]:
+        """Return {iso_date: avg_duration_minutes} for each day in [start, end]."""
+        start_dt = datetime.datetime.combine(start, datetime.time.min)
+        end_dt = datetime.datetime.combine(end, datetime.time.max)
+        closed_at_expr = case(
+            (col(WizardSession.closed_by).in_(["user", "hook"]), WizardSession.updated_at),
+            (WizardSession.closed_by == "auto", WizardSession.last_active_at),
+        )
+        rows = db.exec(
+            select(
+                func.date(WizardSession.created_at).label("day"),
+                func.avg(
+                    (func.julianday(closed_at_expr) - func.julianday(WizardSession.created_at))
+                    * 1440
+                ).label("avg_min"),
+            )
+            .where(
+                WizardSession.created_at >= start_dt,
+                WizardSession.created_at <= end_dt,
+                col(WizardSession.closed_by).in_(["user", "hook", "auto"]),
+                closed_at_expr.is_not(None),
+            )
+            .group_by(func.date(WizardSession.created_at))
+        ).all()
+        result: dict[str, float] = {str(row[0]): round(row[1] or 0.0, 1) for row in rows}
+        current = start
+        while current <= end:
+            result.setdefault(current.isoformat(), 0.0)
+            current += datetime.timedelta(days=1)
+        return result
+
     def get_tool_call_frequency(self, db: Session, days: int) -> dict[str, int]:
         """Return {tool_name: call_count} for the last `days` days."""
         cutoff = datetime.datetime.combine(
