@@ -256,6 +256,7 @@ class TaskStartResponse(BaseModel):
 class SaveNoteResponse(BaseModel):
     note_id: int
     mental_model_saved: bool
+    was_duplicate: bool = False
 
 
 class UpdateTaskResponse(BaseModel):
