@@ -209,26 +209,25 @@ async def ingest_meeting(
     clean_content = _scrub_and_log(content, "meeting content")
     await try_notify(ctx.report_progress(1, 2))
     with get_session() as db:
-
-        meeting: Meeting | None = None
-        already_existed = False
         if source_id:
-            meeting = meetings_repo.get_by_source_id(db, source_id)
-        if meeting:
-            already_existed = True
-            meeting.title = clean_title
-            meeting.content = clean_content
-            meetings_repo.save(db, meeting)
-        else:
-            meeting = Meeting(
-                title=clean_title,
-                content=clean_content,
-                source_id=source_id,
-                source_type=source_type,
-                source_url=source_url,
-                category=category,
-            )
-            meetings_repo.save(db, meeting)
+            existing = meetings_repo.get_by_source_id(db, source_id)
+            if existing is not None:
+                await try_notify(ctx.report_progress(2, 2))
+                await try_notify(ctx.info(f"Meeting {existing.id} ingested (existed=True)."))
+                return IngestMeetingResponse(
+                    meeting_id=existing.id,
+                    already_existed=True,
+                )
+
+        meeting = Meeting(
+            title=clean_title,
+            content=clean_content,
+            source_id=source_id,
+            source_type=source_type,
+            source_url=source_url,
+            category=category,
+        )
+        meetings_repo.save(db, meeting)
 
         if meeting.id is None:
             raise ToolError(
@@ -236,10 +235,10 @@ async def ingest_meeting(
             )
 
         await try_notify(ctx.report_progress(2, 2))
-        await try_notify(ctx.info(f"Meeting {meeting.id} ingested (existed={already_existed})."))
+        await try_notify(ctx.info(f"Meeting {meeting.id} ingested (existed=False)."))
         return IngestMeetingResponse(
             meeting_id=meeting.id,
-            already_existed=already_existed,
+            already_existed=False,
         )
 
 
