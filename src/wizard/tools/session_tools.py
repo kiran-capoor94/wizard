@@ -78,6 +78,23 @@ def _apply_default_mode(session: WizardSession) -> None:
         session.active_mode = settings.modes.default
 
 
+async def _detect_skill_candidate(ctx: Context, summary: str, intent: str) -> str | None:
+    prompt = (
+        "Review this session summary and intent. Did this session demonstrate a reusable "
+        "problem-solving pattern worth turning into a skill?\n\n"
+        f"Intent: {intent}\n"
+        f"Summary: {summary}\n\n"
+        "If yes, describe the pattern in 2-3 sentences covering: what the pattern is, "
+        "when to apply it, and the key steps. "
+        "If no reusable pattern is present, return exactly: null"
+    )
+    result = await ctx.sample(prompt)
+    text = result.text.strip()
+    if not text or text.lower() == "null":
+        return None
+    return text
+
+
 async def session_start(
     ctx: Context,
     agent_session_id: str | None = None,
@@ -185,6 +202,116 @@ async def session_start(
     return response
 
 
+def _scrub_session_state(
+    sec: SecurityService,
+    intent: str,
+    working_set: list[int],
+    state_delta: str,
+    open_loops: list[str],
+    next_actions: list[str],
+    closure_status: Literal["clean", "interrupted", "blocked"],
+    tool_registry: str | None,
+) -> tuple[SessionState, str]:
+    """Scrub PII from session state fields and return state + clean intent."""
+
+    def scrub(content: str, field_name: str) -> str:
+        result = sec.scrub(content)
+        if result.was_modified:
+            logger.info("PII scrubbed from %s", field_name)
+        return result.clean
+
+    state = SessionState(
+        intent=scrub(intent, "session intent"),
+        working_set=working_set,
+        state_delta=scrub(state_delta, "state_delta"),
+        open_loops=[scrub(loop, "open_loop") for loop in open_loops],
+        next_actions=[scrub(action, "next_action") for action in next_actions],
+        closure_status=closure_status,
+        tool_registry=tool_registry,
+    )
+    return state, state.intent
+
+
+async def _persist_session_end(
+    ctx: Context,
+    session_id: int,
+    summary: str,
+    intent: str,
+    working_set: list[int],
+    state_delta: str,
+    open_loops: list[str],
+    next_actions: list[str],
+    closure_status: Literal["clean", "interrupted", "blocked"],
+    tool_registry: str | None,
+    sec: SecurityService,
+    n_repo: NoteRepository,
+) -> SessionEndResponse:
+    """Write session close state and summary note to the DB; return response."""
+    state, clean_intent = _scrub_session_state(
+        sec, intent, working_set, state_delta, open_loops, next_actions,
+        closure_status, tool_registry,
+    )
+
+    def scrub(content: str, field_name: str) -> str:
+        result = sec.scrub(content)
+        if result.was_modified:
+            logger.info("PII scrubbed from %s", field_name)
+        return result.clean
+
+    with get_session() as db:
+        session = db.get(WizardSession, session_id)
+        if session is None:
+            await ctx.error(f"Session {session_id} not found")
+            raise ToolError(f"Session {session_id} not found")
+
+        agent_id = session.agent_session_id
+        if agent_id:
+            cancel_mid_session_synthesis(agent_id)
+
+        session_state_saved = False
+        try:
+            session.session_state = state.model_dump_json()
+            session_state_saved = True
+        except (ValueError, TypeError) as e:
+            logger.warning("session_end: failed to serialise session_state: %s", e)
+
+        clean_summary = scrub(summary, "session summary")
+        session.closed_by = "user"
+        session.summary = clean_summary
+        db.add(session)
+        db.flush()
+        db.refresh(session)
+        if session.id is None:
+            raise ToolError("Internal error: session was not assigned an id after flush")
+
+        note = Note(
+            note_type=NoteType.SESSION_SUMMARY,
+            content=clean_summary,
+            session_id=session.id,
+            artifact_id=session.artifact_id,
+            artifact_type="session",
+        )
+        saved = n_repo.save(db, note)
+        if saved.id is None:
+            raise ToolError("Internal error: note was not assigned an id after flush")
+
+        await ctx.delete_state("current_session_id")
+        await try_notify(ctx.info(
+            f"Session {session.id} closed. Status: {closure_status}. "
+            f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
+        ))
+
+        return SessionEndResponse(
+            note_id=saved.id,
+            session_state_saved=session_state_saved,
+            closure_status=closure_status,
+            open_loops_count=len(open_loops),
+            next_actions_count=len(next_actions),
+            intent=clean_intent,
+            skill_instructions=load_skill_post(SKILL_SESSION_END),
+        )
+
+
 async def session_end(
     ctx: Context,
     session_id: int,
@@ -201,90 +328,25 @@ async def session_end(
 ) -> SessionEndResponse:
     """Persists session summary + SessionState to WizardSession."""
     logger.info("session_end session_id=%d", session_id)
-
-    def _scrub_and_log(content: str, field_name: str) -> str:
-        """Scrub content and log if PII was detected."""
-        scrub_result = sec.scrub(content)
-        if scrub_result.was_modified:
-            logger.info("PII scrubbed from %s", field_name)
-        return scrub_result.clean
-
     try:
-        with get_session() as db:
-            session = db.get(WizardSession, session_id)
-            if session is None:
-                await ctx.error(f"Session {session_id} not found")
-                raise ToolError(f"Session {session_id} not found")
-
-            agent_id = session.agent_session_id
-            if agent_id:
-                cancel_mid_session_synthesis(agent_id)
-
-            # Scrub and log PII detection in session state fields
-            state = SessionState(
-                intent=_scrub_and_log(intent, "session intent"),
-                working_set=working_set,
-                state_delta=_scrub_and_log(state_delta, "state_delta"),
-                open_loops=[_scrub_and_log(loop, "open_loop") for loop in open_loops],
-                next_actions=[
-                    _scrub_and_log(action, "next_action") for action in next_actions
-                ],
-                closure_status=closure_status,
-                tool_registry=tool_registry,
-            )
-            session_state_saved = False
-            try:
-                session.session_state = state.model_dump_json()
-                session_state_saved = True
-            except (ValueError, TypeError) as e:
-                logger.warning("session_end: failed to serialise session_state: %s", e)
-
-            clean_summary = _scrub_and_log(summary, "session summary")
-            session.closed_by = "user"
-            session.summary = clean_summary
-            db.add(session)
-            db.flush()
-            db.refresh(session)
-            if session.id is None:
-                raise ToolError(
-                    "Internal error: session was not assigned an id after flush"
-                )
-
-            note = Note(
-                note_type=NoteType.SESSION_SUMMARY,
-                content=clean_summary,
-                session_id=session.id,
-                artifact_id=session.artifact_id,
-                artifact_type="session",
-            )
-            saved = n_repo.save(db, note)
-            if saved.id is None:
-                raise ToolError(
-                    "Internal error: note was not assigned an id after flush"
-                )
-
-            await ctx.delete_state("current_session_id")
-            await try_notify(ctx.info(
-                f"Session {session.id} closed. Status: {closure_status}. "
-                f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
-            ))
-
-            return SessionEndResponse(
-                note_id=saved.id,
-                session_state_saved=session_state_saved,
-                closure_status=closure_status,
-                open_loops_count=len(open_loops),
-                next_actions_count=len(next_actions),
-                intent=intent,
-                skill_instructions=load_skill_post(SKILL_SESSION_END),
-            )
+        response = await _persist_session_end(
+            ctx, session_id, summary, intent, working_set, state_delta,
+            open_loops, next_actions, closure_status, tool_registry, sec, n_repo,
+        )
     except ValueError as e:
         logger.warning("session_end failed: %s", e)
         raise ToolError(str(e)) from e
     except Exception as e:
-        # Capture unexpected exceptions in Sentry
         sentry_sdk.capture_exception(e)
         raise
+
+    if working_set:
+        try:
+            response.skill_candidate = await _detect_skill_candidate(ctx, summary, intent)
+        except Exception as e:
+            logger.warning("session_end: skill candidate detection failed: %s", e)
+
+    return response
 
 
 def _deserialise_session_state(

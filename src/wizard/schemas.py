@@ -301,6 +301,7 @@ class SessionEndResponse(BaseModel):
     next_actions_count: int = 0
     intent: str | None = None
     skill_instructions: str | None = None
+    skill_candidate: str | None = None
 
 
 class IngestMeetingResponse(BaseModel):
