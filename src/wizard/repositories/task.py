@@ -313,13 +313,14 @@ class TaskRepository:
                 continue
             ts = task_states.get(tid)
             latest = latest_notes.get(tid)
+            nbt = notes_by_type.get(tid, {})
             results.append(TaskIndexEntry(
                 id=tid,
                 name=task.name,
                 status=task.status,
                 priority=task.priority,
-                note_count=ts.note_count if ts else 0,
-                notes_by_type=notes_by_type.get(tid, {}),
+                note_count=sum(nbt.values()),
+                notes_by_type=nbt,
                 last_note_hint=latest.content[:80] if latest else None,
                 last_worked_at=ts.last_note_at if ts else None,
                 stale_days=ts.stale_days if ts else 0,
