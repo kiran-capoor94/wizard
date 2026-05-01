@@ -102,7 +102,9 @@ class SentrySettings(BaseModel):
 
 class ModesSettings(BaseModel):
     default: str | None = None
-    allowed: list[str] = Field(default_factory=list)
+    allowed: list[str] = Field(
+        default_factory=lambda: ["architect", "ideation", "product-owner", "caveman"]
+    )
 
 
 class WizardPaths(BaseModel):
@@ -115,7 +117,7 @@ class WizardPaths(BaseModel):
     sessions_dir: Path = Field(default_factory=lambda: Path.home() / ".wizard" / "sessions")
 
 
-WIZARD_MODES: list[str] = ["architect", "ideation", "product-owner"]
+WIZARD_MODES: list[str] = ["architect", "ideation", "product-owner", "caveman"]
 
 
 class Settings(BaseSettings):
