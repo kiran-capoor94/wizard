@@ -223,7 +223,7 @@ wizard.db
 memory/
 
 # Local-only planning docs (agent workspaces)
-docs/
+docs/superpowers/
 .opencode/
 .worktrees/
 .serena/
