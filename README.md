@@ -113,6 +113,7 @@ wizard configure knowledge-store         # optional Notion/Obsidian write-back
 wizard configure synthesis               # manage LLM backends
 wizard doctor [--all]                    # health check
 wizard analytics [--day|--week]          # session/task/note usage stats
+wizard dashboard                         # launch Streamlit health dashboard (5 panels)
 wizard update                            # upgrade install, migrate DB, re-register
 wizard uninstall [--yes]                 # clean removal
 wizard capture --close                   # (called by hooks) synthesise transcript
@@ -136,7 +137,7 @@ Notes accumulate per task across sessions. Every time you revisit a task, prior 
 
 **Transcript synthesis**
 
-Synthesis runs outside the MCP server at hook time — no round-trip cost, no dependency on the agent being active. Raw transcript content is persisted to the DB at capture time, so re-synthesis remains possible even after the agent deletes the file.
+Synthesis runs outside the MCP server at hook time — no round-trip cost, no dependency on the agent being active. Raw transcript content is persisted to the DB at capture time, so re-synthesis remains possible even after the agent deletes the file. Extracted note types: `investigation`, `decision`, `docs`, `learnings`, and `failure` (failed approaches, dead ends, incorrect assumptions).
 
 **Work triage**
 
@@ -165,7 +166,7 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 
 ## MCP Tools
 
-19 tools exposed via the [Model Context Protocol](https://modelcontextprotocol.io/). You don't call these manually — your agent uses them automatically.
+20 tools exposed via the [Model Context Protocol](https://modelcontextprotocol.io/). You don't call these manually — your agent uses them automatically.
 
 | Tool                    | Description                                                                      |
 | ----------------------- | -------------------------------------------------------------------------------- |
@@ -176,18 +177,19 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 | `create_task`           | Create a new task, optionally linked to a meeting                                |
 | `update_task`           | Update any task field                                                            |
 | `rewind_task`           | Full note timeline for a task, oldest to newest                                  |
-| `save_note`             | Scrub PII and persist investigation/decision/learning notes                      |
+| `save_note`             | Scrub PII, deduplicate by content hash, compress if >1000 chars, and persist    |
 | `what_am_i_missing`     | 7-point diagnostic — surfaces stale context, missing decisions, etc.             |
 | `what_should_i_work_on` | Scored recommendation with mode (focus / quick-wins / unblock) and time budget   |
 | `get_modes`             | List available modes and the active mode for the current session                 |
 | `set_mode`              | Activate or clear a working mode (e.g. architect, ideation, product-owner)       |
 | `get_meeting`           | Retrieve transcript and linked open tasks                                        |
 | `save_meeting_summary`  | Store meeting summary and create linked note                                     |
-| `ingest_meeting`        | Accept raw meeting data (e.g. from Krisp), scrub and store                       |
+| `ingest_meeting`        | Accept raw meeting data (e.g. from Krisp), scrub and store (idempotent)          |
 | `get_tasks`             | Paginated task list with optional status and source filters                      |
 | `get_task`              | Full task detail with note timeline and task state                               |
 | `get_sessions`          | Paginated session history                                                        |
 | `get_session`           | Single session detail with state and prior notes                                 |
+| `search`                | Full-text search across notes, sessions, meetings, and tasks (FTS5, BM25 ranked) |
 
 ## MCP Resources
 
@@ -203,7 +205,7 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 
 ## Skills
 
-14 FastMCP skills installed to `~/.wizard/skills/` during setup. Skills guide agent behaviour for common workflows.
+17 FastMCP skills installed to `~/.wizard/skills/` during setup. Skills guide agent behaviour for common workflows.
 
 | Skill                   | When it fires                                               |
 | ----------------------- | ----------------------------------------------------------- |
@@ -218,9 +220,12 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 | `code-review`           | Reviewing code changes with prior wizard context            |
 | `architecture-debate`   | Choosing between design approaches before implementing      |
 | `wizard-playground`     | Any diagram request — architecture, sequence, ERD, flow, state machine |
+| `rulecheck`             | Scan codebase for guideline violations and orchestrate a fix PR |
+| `caveman`               | Switch to compressed, low-token output style                |
 | `architect`             | Activated via `set_mode` — principal-level systems thinking with sub-skills for arch review, constraints design, and diagramming |
 | `ideation`              | Activated via `set_mode` — divergent creative exploration with elicitation and ranked recommendations |
 | `product-owner`         | Activated via `set_mode` — ruthless user-value focus        |
+| `socratic-mentor`       | Activated via `set_mode` — Socratic questioning to deepen understanding |
 
 **Mode sub-skills** are loaded automatically as supporting context when a mode is active. `architect` mode ships with two: `arch-review` (structured architecture audit with blast-radius scoring) and `constraints-designer` (elicitation protocol for constraints and named invariants). They also appear in the mode's trigger table so the agent invokes them at the right moment.
 
@@ -249,10 +254,10 @@ graph TD
 **Layers:**
 
 - **MCP Layer** — FastMCP server with tools (write path), resources (read path), and skills (agent guidance). `ToolLoggingMiddleware` logs every invocation with a Sentry span. `SessionStateMiddleware` snapshots session state and sets the Sentry user on each tool call.
-- **Repositories** — Query layer over SQLModel/SQLite. `TaskRepository`, `NoteRepository`, `MeetingRepository`, `SessionRepository`, `TaskStateRepository`.
-- **Synthesis** — Runs at hook time, outside the MCP server. `OllamaAdapter` for local Ollama backends; LiteLLM for cloud. Backends tried in priority order; first healthy wins.
+- **Repositories** — Query layer over SQLModel/SQLite. `TaskRepository`, `NoteRepository`, `MeetingRepository`, `SessionRepository`, `TaskStateRepository`, `SearchRepository` (FTS5 fan-out), `AnalyticsRepository` (tool call frequency, session stats).
+- **Synthesis** — Runs at hook time, outside the MCP server. `OllamaAdapter` for local Ollama backends; LiteLLM for cloud. Backends tried in priority order; first healthy wins. Extracts `investigation`, `decision`, `docs`, `learnings`, and `failure` note types from transcripts.
 - **Artifact identity** — Every task, meeting, and session carries a UUID `artifact_id`. Notes anchor to a single entity. Enables synthesis deduplication and note lifecycle tracking (`active` / `superseded` / `unclassified`).
-- **Security** — PII scrubbed before storage, not on read. Regex patterns with allowlist.
+- **Security** — PII scrubbed before storage, not on read. Regex patterns with allowlist. `HeuristicNameFinder` detects names via honorifics and context triggers; `PseudonymStore` replaces them with stable fake names backed by the `pseudonym_map` table.
 - **Knowledge Store** — Optional write-back to Notion or Obsidian. Not required for core functionality.
 
 **Why SQLite?** Local-first, zero infrastructure, ships with Python. Wizard is a personal tool.
@@ -318,32 +323,37 @@ uv run alembic upgrade head    # run pending migrations (dev only)
 
 ```text
 server.py                    # FastMCP server entry point (dev, stdio transport)
+apm.yml                      # single-command agent setup (all agents, hooks, skills)
 src/wizard/
   cli/
-    main.py                  # Typer CLI (setup, configure, doctor, analytics, update, uninstall)
+    main.py                  # Typer CLI (setup, configure, doctor, analytics, dashboard, update, uninstall)
     serve.py                 # wizard-server entry point (installed MCP binary)
     capture.py               # wizard capture — transcript synthesis trigger (called by hooks)
     configure.py             # configure knowledge-store + synthesis backends subcommands
     doctor.py                # 8-point health checks
     analytics.py             # session/note/task analytics
+    dashboard.py             # Streamlit health dashboard (5 panels: session, notes, synthesis, memory, tool freq)
   mcp_instance.py            # FastMCP app factory + ToolLoggingMiddleware
   skills.py                  # skill loader (reads ~/.wizard/skills/)
   tools/                     # MCP tools (split by domain)
     session_tools.py         # session_start, session_end, resume_session
     session_helpers.py       # build_prior_summaries, find_previous_session_id, mid-session synthesis loop
-    task_tools.py            # task_start, save_note, update_task, create_task, rewind_task, what_am_i_missing
+    task_tools.py            # task_start, save_note, update_task, create_task
+    note_tools.py            # rewind_task, what_am_i_missing
     task_fields.py           # apply_task_fields + elicitation helpers (mental model, done confirm, duplicate check)
     formatting.py            # task_contexts_to_json — session response serialisation
     mode_tools.py            # get_modes, set_mode — working mode activation
     triage_tools.py          # what_should_i_work_on
     meeting_tools.py         # get_meeting, save_meeting_summary, ingest_meeting
-    query_tools.py           # get_tasks, get_task, get_sessions, get_session
+    query_tools.py           # get_tasks, get_task, get_sessions, get_session, search
   repositories/              # query layer (package)
-    task.py
-    note.py
-    meeting.py
-    session.py
-    task_state.py
+    task.py                  # TaskRepository
+    note.py                  # NoteRepository
+    meeting.py               # MeetingRepository
+    session.py               # SessionRepository
+    task_state.py            # TaskStateRepository
+    search.py                # SearchRepository — FTS5 fan-out across all entity types
+    analytics.py             # AnalyticsRepository — tool call frequency, session/note stats
   resources.py               # 5 MCP read-only resources
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware (Sentry spans) + SessionStateMiddleware (snapshot + user tag)
@@ -353,7 +363,7 @@ src/wizard/
   models.py                  # SQLModel entities
   schemas.py                 # Pydantic response schemas
   services.py                # SessionCloser
-  security.py                # PII scrubbing
+  security.py                # PII scrubbing (SecurityService, HeuristicNameFinder, PseudonymStore)
   config.py                  # Pydantic settings + BackendConfig
   database.py                # SQLite connection management
   deps.py                    # FastMCP Depends() providers
@@ -365,6 +375,8 @@ src/wizard/
     architect/               # Mode skill + references/ sub-skills (arch-review, constraints-designer)
     ideation/                # Mode skill
     product-owner/           # Mode skill
+    caveman/                 # Compressed output skill
+    rulecheck/               # Guideline violation scanner + fix PR orchestrator
     wizard-playground/       # Mermaid diagram workbench (invocable skill, not a mode)
 hooks/
   session-end.sh             # SessionEnd hook — transcript synthesis trigger

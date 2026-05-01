@@ -336,8 +336,9 @@ def dashboard() -> None:
     dashboard_path = str(
         importlib.resources.files("wizard").joinpath("cli").joinpath("dashboard.py")
     )
+    streamlit_bin = Path(sys.executable).parent / "streamlit"
     result = subprocess.run(
-        ["streamlit", "run", dashboard_path],
+        [str(streamlit_bin), "run", dashboard_path],
         check=False,
     )
     if result.returncode != 0:
