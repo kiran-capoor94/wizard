@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from typing import Annotated
 
@@ -156,6 +157,83 @@ async def task_start(
         raise
 
 
+async def compress_note_content(ctx: Context, content: str) -> str:
+    """Compress content to under 1000 chars via LLM, preserving technical specifics."""
+    result = await ctx.sample(
+        f"Compress the following note to under 1000 characters. "
+        f"Preserve all file paths, function names, line numbers, error messages, "
+        f"decisions, and technical specifics exactly. Remove filler words and "
+        f"redundant phrasing only. Return only the compressed note, no preamble.\n\n"
+        f"{content}"
+    )
+    return result.text.strip()
+
+
+async def _prepare_note_fields(
+    ctx: Context,
+    sec: SecurityService,
+    content: str,
+    mental_model: str | None,
+) -> tuple[str, str | None, str]:
+    """Compress (if needed), scrub PII, and hash content. Returns (clean, mental_model, hash)."""
+    if len(content) > 1000:
+        content = await compress_note_content(ctx, content)
+    if mental_model is not None and len(mental_model) > 1000:
+        mental_model = await compress_note_content(ctx, mental_model)
+    scrub_result = sec.scrub(content)
+    if scrub_result.was_modified:
+        logger.info("PII scrubbed from note content")
+    clean = scrub_result.clean
+    if mental_model is not None:
+        mm_scrub = sec.scrub(mental_model)
+        if mm_scrub.was_modified:
+            logger.info("PII scrubbed from mental_model")
+        mental_model = mm_scrub.clean
+    content_hash = hashlib.sha256(clean.encode()).hexdigest()
+    return clean, mental_model, content_hash
+
+
+def _persist_note(
+    n_repo: NoteRepository,
+    t_state_repo: TaskStateRepository,
+    note_type: NoteType,
+    clean: str,
+    mental_model: str | None,
+    task_db_id: int,
+    session_id: int | None,
+    task_artifact_id: str | None,
+    content_hash: str,
+) -> SaveNoteResponse:
+    """Dedup-check then write note. Returns SaveNoteResponse."""
+    with get_session() as db:
+        existing = n_repo.get_by_content_hash(db, task_db_id, content_hash)
+        if existing is not None and existing.id is not None:
+            return SaveNoteResponse(
+                note_id=existing.id,
+                mental_model_saved=existing.mental_model is not None,
+                was_duplicate=True,
+            )
+        note = Note(
+            note_type=note_type,
+            content=clean,
+            mental_model=mental_model,
+            task_id=task_db_id,
+            session_id=session_id,
+            artifact_id=task_artifact_id,
+            artifact_type="task",
+            synthesis_content_hash=content_hash,
+        )
+        saved = n_repo.save(db, note)
+        if saved.id is None:
+            raise ToolError("Internal error: note was not assigned an id after flush")
+        t_state_repo.on_note_saved(db, task_db_id, note_type, saved.created_at)
+        return SaveNoteResponse(
+            note_id=saved.id,
+            mental_model_saved=saved.mental_model is not None,
+            was_duplicate=False,
+        )
+
+
 async def save_note(
     ctx: Context,
     task_id: int,
@@ -172,16 +250,8 @@ async def save_note(
     Types: investigation|decision|docs|learnings|session_summary|failure.
     """
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
-
-    def _scrub_and_log(content: str, field_name: str) -> str:
-        """Scrub content and log if PII was detected."""
-        scrub_result = sec.scrub(content)
-        if scrub_result.was_modified:
-            logger.info("PII scrubbed from %s", field_name)
-        return scrub_result.clean
-
     try:
-        # Phase 1: fetch data needed for elicitation prompt, then close DB.
+        # Phase 1: fetch task metadata, then close DB.
         session_id: int | None = await ctx.get_state("current_session_id")
         with get_session() as db:
             task = t_repo.get_by_id(db, task_id)
@@ -190,35 +260,22 @@ async def save_note(
                 raise ToolError("Internal error: task has no id")
             task_db_id: int = task.id
 
-        # Phase 3: validate and write.
+        # Phase 2: validate size limit.
         if len(content) > 100_000:
             raise ToolError("Content exceeds 100k character limit")
-        clean = _scrub_and_log(content, "note content")
-        if mental_model is not None:
-            mental_model = _scrub_and_log(mental_model, "mental_model")
-        note = Note(
-            note_type=note_type,
-            content=clean,
-            mental_model=mental_model,
-            task_id=task_db_id,
-            session_id=session_id,
-            artifact_id=task_artifact_id,
-            artifact_type="task",
+
+        # Phase 3: compress, scrub, dedup, and write.
+        clean, mental_model, content_hash = await _prepare_note_fields(
+            ctx, sec, content, mental_model
         )
-        with get_session() as db:
-            saved = n_repo.save(db, note)
-            if saved.id is None:
-                raise ToolError("Internal error: note was not assigned an id after flush")
-            t_state_repo.on_note_saved(db, task_db_id, note_type, saved.created_at)
-            note_id = saved.id
-            mental_model_saved = saved.mental_model is not None
+        result = _persist_note(
+            n_repo, t_state_repo, note_type, clean, mental_model,
+            task_db_id, session_id, task_artifact_id, content_hash,
+        )
         await try_notify(ctx.report_progress(1, 2))
         await try_notify(ctx.report_progress(2, 2))
-        await try_notify(ctx.info(f"Note {note_id} saved ({note_type.value})."))
-        return SaveNoteResponse(
-            note_id=note_id,
-            mental_model_saved=mental_model_saved,
-        )
+        await try_notify(ctx.info(f"Note {result.note_id} saved ({note_type.value})."))
+        return result
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
