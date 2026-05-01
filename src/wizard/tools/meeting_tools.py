@@ -5,6 +5,7 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
+from pydantic import BaseModel
 
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo
@@ -21,6 +22,10 @@ from ..skills import SKILL_MEETING, load_skill_post
 from .formatting import try_notify
 
 logger = logging.getLogger(__name__)
+
+
+class _ConfirmLink(BaseModel):
+    confirmed: bool
 
 
 async def _elicit_task_link_confirmation(
@@ -41,9 +46,9 @@ async def _elicit_task_link_confirmation(
     try:
         result = await ctx.elicit(
             f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
-            response_type={"yes": {"title": "Yes"}, "no": {"title": "No"}},
+            response_type=_ConfirmLink,
         )
-        if not (isinstance(result, AcceptedElicitation) and result.data == "yes"):
+        if not (isinstance(result, AcceptedElicitation) and result.data.confirmed is True):
             return None
     except Exception as e:
         logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
