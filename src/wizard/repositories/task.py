@@ -3,7 +3,7 @@ import logging
 from sqlmodel import Session, case, col, func, select
 
 from ..models import Note, Task, TaskPriority, TaskState, TaskStatus
-from ..schemas import TaskContext
+from ..schemas import TaskContext, TaskIndexEntry
 
 logger = logging.getLogger(__name__)
 
@@ -258,3 +258,99 @@ class TaskRepository:
             if n.task_id is not None and n.task_id not in latest:
                 latest[n.task_id] = n
         return latest
+
+    def _batch_load_notes_by_type(
+        self,
+        db: Session,
+        task_ids: list[int],
+    ) -> dict[int, dict[str, int]]:
+        """Return {task_id: {note_type_str: count}} for active notes on given tasks."""
+        if not task_ids:
+            return {}
+        rows = db.execute(
+            select(Note.task_id, Note.note_type, func.count())
+            .where(col(Note.task_id).in_(task_ids))
+            .where(Note.status == "active")
+            .group_by(Note.task_id, Note.note_type)
+        ).all()
+        result: dict[int, dict[str, int]] = {}
+        for task_id, note_type, count in rows:
+            if task_id is not None:
+                result.setdefault(task_id, {})[note_type] = count
+        return result
+
+    def _query_task_index(
+        self,
+        db: Session,
+        *where,
+        limit: int | None = None,
+    ) -> list[TaskIndexEntry]:
+        """Build compact TaskIndexEntry list for session_start index."""
+        last_worked = self._latest_note_subquery()
+        stmt = (
+            select(Task, last_worked)
+            .where(*where)
+            .order_by(_PRIORITY_ORDER, func.coalesce(last_worked, 0).desc())
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = db.execute(stmt).all()  # type: ignore
+        if not rows:
+            return []
+
+        tasks: list[Task] = [row[0] for row in rows]
+        task_ids = [t.id for t in tasks if t.id is not None]
+
+        task_states: dict[int, TaskState] = {}
+        if task_ids:
+            for ts in db.exec(
+                select(TaskState).where(col(TaskState.task_id).in_(task_ids))
+            ).all():
+                task_states[ts.task_id] = ts
+
+        latest_notes = self._batch_load_latest_notes(db, tasks)
+        notes_by_type = self._batch_load_notes_by_type(db, task_ids)
+
+        results: list[TaskIndexEntry] = []
+        for task in tasks:
+            tid = task.id
+            if tid is None:
+                continue
+            ts = task_states.get(tid)
+            latest = latest_notes.get(tid)
+            results.append(TaskIndexEntry(
+                id=tid,
+                name=task.name,
+                status=task.status,
+                priority=task.priority,
+                note_count=ts.note_count if ts else 0,
+                notes_by_type=notes_by_type.get(tid, {}),
+                last_note_hint=latest.content[:80] if latest else None,
+                last_worked_at=ts.last_note_at if ts else None,
+                stale_days=ts.stale_days if ts else 0,
+            ))
+        return results
+
+    def get_open_task_index(
+        self,
+        db: Session,
+        limit: int | None = None,
+    ) -> list[TaskIndexEntry]:
+        """Compact index of open tasks for session_start."""
+        return self._query_task_index(
+            db,
+            col(Task.status).in_(  # pyright: ignore[reportAttributeAccessIssue]
+                [TaskStatus.TODO, TaskStatus.IN_PROGRESS]
+            ),
+            limit=limit,
+        )
+
+    def get_blocked_task_index(
+        self,
+        db: Session,
+        limit: int | None = None,
+    ) -> list[TaskIndexEntry]:
+        """Compact index of blocked tasks for session_start."""
+        return self._query_task_index(
+            db, Task.status == TaskStatus.BLOCKED, limit=limit
+        )
