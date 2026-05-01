@@ -14,6 +14,18 @@ class NoteRepository:
         db.refresh(note)
         return note
 
+    def get_by_content_hash(
+        self, db: Session, task_id: int, content_hash: str
+    ) -> "Note | None":
+        stmt = (
+            select(Note)
+            .where(Note.task_id == task_id)
+            .where(Note.synthesis_content_hash == content_hash)
+            .where(Note.status == "active")
+            .limit(1)
+        )
+        return db.exec(stmt).first()
+
     def get_for_task(
         self,
         db: Session,
