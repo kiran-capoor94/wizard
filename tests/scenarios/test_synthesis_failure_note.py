@@ -8,14 +8,16 @@ from unittest.mock import patch
 import pytest
 from sqlmodel import select
 
+from wizard.config import settings
+from wizard.llm_adapters import parse_notes
 from wizard.models import Note, NoteType, Task, WizardSession
 from wizard.synthesis import Synthesiser
-from wizard.transcript import TranscriptReader
+from wizard.synthesis_prompt import format_prompt
+from wizard.transcript import TranscriptEntry, TranscriptReader
 
 
 @pytest.fixture
 def synthesiser(security, note_repo):
-    from wizard.config import settings
     return Synthesiser(
         reader=TranscriptReader(),
         note_repo=note_repo,
@@ -60,8 +62,7 @@ class TestFailureNoteExtraction:
             "mental_model": None,
         }])
 
-        from wizard.llm_adapters import _parse_notes
-        with patch("wizard.synthesis.llm_complete", return_value=_parse_notes(fake_response)):
+        with patch("wizard.synthesis.llm_complete", return_value=parse_notes(fake_response)):
             synthesiser.synthesise_path(db_session, ws, Path(transcript_path))
 
         notes = db_session.exec(select(Note).where(Note.session_id == ws.id)).all()
@@ -70,9 +71,6 @@ class TestFailureNoteExtraction:
 
     def test_failure_instruction_present_in_prompt(self):
         """format_prompt contains a dedicated failure instruction — not just JSON hint."""
-        from wizard.synthesis_prompt import format_prompt
-        from wizard.transcript import TranscriptEntry
-
         entries = [TranscriptEntry(role="assistant", content="did some work")]
         prompt = format_prompt(entries, task_table="")
 
