@@ -44,7 +44,7 @@ def _make_task_state(
 
 class TestTaskIndexScoring:
     def test_in_progress_with_decisions_ranks_above_stale_todo(self, db_session, repo):
-        """in_progress + decision_count=1 scores 45 pts; todo + stale_days=5 scores 0 pts."""
+        """in_progress + stale_days=0 scores 70 pts (stale_days +40, IN_PROGRESS +30); todo + stale_days=5 scores 0 pts."""
         stale_todo = _make_task(db_session, "Stale todo task", TaskStatus.TODO)
         _make_task_state(db_session, stale_todo, stale_days=5)
 
@@ -68,3 +68,34 @@ class TestTaskIndexScoring:
         ids = [e.id for e in index]
 
         assert ids.index(recent.id) < ids.index(older.id)
+
+    def test_note_count_and_decision_signals_add_points(self, db_session, repo):
+        """note_count >= 3 (+15) and decision note present (+15) add to score."""
+        from wizard.models import Note, NoteType
+
+        plain = _make_task(db_session, "Task with no notes", TaskStatus.TODO)
+        _make_task_state(db_session, plain, stale_days=1)
+
+        rich = _make_task(db_session, "Task with notes and decision", TaskStatus.TODO)
+        _make_task_state(db_session, rich, stale_days=1)
+
+        # Seed 3 notes including 1 decision to trigger both +15 bonuses
+        for i in range(2):
+            note = Note(
+                note_type=NoteType.INVESTIGATION,
+                content=f"Investigation note {i}",
+                task_id=rich.id,
+            )
+            db_session.add(note)
+        decision = Note(
+            note_type=NoteType.DECISION,
+            content="Decided to use adapter pattern",
+            task_id=rich.id,
+        )
+        db_session.add(decision)
+        db_session.flush()
+
+        index = repo.get_open_task_index(db_session)
+        ids = [e.id for e in index]
+
+        assert ids.index(rich.id) < ids.index(plain.id)
