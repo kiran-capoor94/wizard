@@ -223,11 +223,23 @@ class PriorSessionSummary(BaseModel):
     raw_session_state: str | None = None
 
 
+class TaskIndexEntry(BaseModel):
+    id: int
+    name: str
+    status: TaskStatus
+    priority: TaskPriority
+    note_count: int
+    notes_by_type: dict[str, int]
+    last_note_hint: str | None
+    last_worked_at: UTCDateTime | None
+    stale_days: int
+
+
 class SessionStartResponse(BaseModel):
     session_id: int
     continued_from_id: int | None = None
-    open_tasks: str = ""  # JSON array of TaskContext objects
-    blocked_tasks: str = ""  # JSON array of TaskContext objects
+    open_tasks: list[TaskIndexEntry] = Field(default_factory=list)
+    blocked_tasks: list[TaskIndexEntry] = Field(default_factory=list)
     unsummarised_meetings: list[MeetingContext]
     wizard_context: dict | None = None
     skill_instructions: str | None = None
