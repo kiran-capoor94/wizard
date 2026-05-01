@@ -41,5 +41,16 @@ class TestNoteGetRecent:
         db_session.add(superseded)
         db_session.flush()
 
+        active = Note(
+            note_type=NoteType.DECISION,
+            content="active note",
+            created_at=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1),
+            status="active",
+        )
+        db_session.add(active)
+        db_session.flush()
+
         results = repo.get_recent(db_session, days=7)
-        assert all(n.status == "active" for n in results)
+        content_set = {n.content for n in results}
+        assert "active note" in content_set
+        assert "superseded note" not in content_set
