@@ -243,7 +243,7 @@ class TaskStartResponse(BaseModel):
     task: TaskContext
     compounding: bool  # True if prior notes exist for this task
     notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
-    prior_notes: list[NoteDetail]  # 3 most recent notes, oldest first
+    prior_notes: list[NoteDetail]  # up to 5: failure > decision > mental_model > recent
     total_notes: int = 0  # total note count including older notes not returned
     older_notes_available: bool = (
         False  # True if note_count > 3; use rewind_task for full history
