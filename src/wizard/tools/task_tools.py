@@ -84,9 +84,9 @@ def _select_key_notes(notes_desc: list) -> list:
     0. All failure notes — what didn't work is load-bearing context.
     1. All decision notes — resolved choices are always load-bearing.
     2. Notes with mental_models — explicit understanding captures.
-    3. Fill remaining slots with most recent notes not already selected.
+    3. Fill remaining slots with most recent notes (newest-first).
 
-    Returns notes in priority order (oldest-first within each tier for readability).
+    Returns notes in priority order (oldest-first within tiers 0-2, newest-first for tier 3).
     """
     selected = []
     seen: set[int] = set()
@@ -113,11 +113,12 @@ def _select_key_notes(notes_desc: list) -> list:
     _add_tier_notes(selected, seen, mental_model_notes)
 
     # Tier 3: fill remaining slots with most recent notes (newest-first)
-    remaining = [
-        n for n in notes_desc
-        if n.id is not None and n.id not in seen
-    ]
-    _add_tier_notes(selected, seen, remaining)
+    for n in notes_desc:
+        if len(selected) >= _KEY_NOTES_CAP:
+            break
+        if n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
 
     return selected
 
