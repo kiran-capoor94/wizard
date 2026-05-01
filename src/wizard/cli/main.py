@@ -1,5 +1,6 @@
 import datetime
 import importlib.metadata as importlib_metadata
+import importlib.resources
 import json
 import logging
 import os
@@ -327,6 +328,20 @@ def analytics(
         },
         start, end,
     )
+
+
+@app.command()
+def dashboard() -> None:
+    """Launch the Streamlit health dashboard."""
+    dashboard_path = str(
+        importlib.resources.files("wizard").joinpath("cli").joinpath("dashboard.py")
+    )
+    result = subprocess.run(
+        ["streamlit", "run", dashboard_path],
+        check=False,
+    )
+    if result.returncode != 0:
+        raise typer.Exit(result.returncode)
 
 
 @app.command()
