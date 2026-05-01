@@ -2805,7 +2805,7 @@ wheels = [
 
 [[package]]
 name = "wizard"
-version = "2.2.4"
+version = "2.2.7"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

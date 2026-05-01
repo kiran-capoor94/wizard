@@ -51,6 +51,18 @@ match `TranscriptReader._PARSERS`: `claude-code`, `codex`, `gemini`,
 `last-prompt`). The reader skips noise types and normalises
 `tool_use`/`tool_result` blocks into `TranscriptEntry` objects.
 
+**Note types extracted by synthesis:**
+
+| Type            | What it captures                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------------------- |
+| `investigation` | Findings, observations, discovered behaviour                                                         |
+| `decision`      | Choices made, rationale, trade-offs considered                                                        |
+| `docs`          | How something works — protocol, API contract, architectural fact                                      |
+| `learnings`     | Surprises, things that differed from expectation, updated mental models                               |
+| `failure`       | Failed approaches, dead ends, incorrect assumptions, approaches that were tried and rejected          |
+
+`failure` notes are surfaced by `task_start` ahead of other note types so the agent knows what not to retry. They are also included in synthesis deduplication by content hash.
+
 **Task matching:** `Synthesiser` always sets `task_id=None` on notes.
 Wizard owns task matching — the LLM is not shown the task list.
 
