@@ -220,3 +220,14 @@ class AnalyticsRepository:
                 compounding_count += 1
 
         return round(compounding_count / len(task_start_calls), 2)
+
+    def get_tool_call_frequency(self, db: Session, days: int) -> dict[str, int]:
+        """Return {tool_name: call_count} for the last `days` days."""
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        rows = db.exec(
+            select(ToolCall.tool_name, func.count().label("cnt"))
+            .where(ToolCall.called_at >= cutoff)
+            .group_by(ToolCall.tool_name)
+            .order_by(func.count().desc())
+        ).all()
+        return {tool_name: cnt for tool_name, cnt in rows}

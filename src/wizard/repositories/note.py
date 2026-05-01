@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from sqlmodel import Session, col, func, select
@@ -116,6 +117,17 @@ class NoteRepository:
             .where(Note.synthesis_content_hash.is_not(None))  # type: ignore[union-attr]
         )
         return set(db.exec(stmt).all())
+
+    def get_recent(self, db: Session, days: int) -> list[Note]:
+        """Return active notes created in the last `days` days, newest first."""
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        stmt = (
+            select(Note)
+            .where(Note.created_at >= cutoff)
+            .where(Note.status == "active")
+            .order_by(col(Note.created_at).desc())
+        )
+        return list(db.exec(stmt).all())
 
     def count_for_sessions(self, db: Session, session_ids: list[int]) -> dict[int, int]:
         """Batch-count notes per session. Returns {session_id: count}."""
