@@ -12,6 +12,7 @@ from .database import get_session as _get_db_session_impl
 from .repositories import (
     MeetingRepository,
     NoteRepository,
+    SearchRepository,
     SessionRepository,
     TaskRepository,
     TaskStateRepository,
@@ -59,6 +60,10 @@ def get_task_state_repo() -> TaskStateRepository:
 
 def get_session_repo() -> SessionRepository:
     return SessionRepository()
+
+
+def get_search_repo() -> SearchRepository:
+    return SearchRepository()
 
 
 def get_session_closer() -> SessionCloser:
