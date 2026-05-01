@@ -63,6 +63,19 @@ logger = logging.getLogger(__name__)
 _KEY_NOTES_CAP = 5  # max notes returned by task_start
 
 
+def _add_tier_notes(
+    selected: list,
+    seen: set[int],
+    notes: list,
+) -> None:
+    """Add notes from a tier until cap is reached. Modifies selected and seen in place."""
+    for n in sorted(notes, key=lambda x: x.created_at):
+        if len(selected) >= _KEY_NOTES_CAP:
+            break
+        if n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
 
 def _select_key_notes(notes_desc: list) -> list:
     """Select the most informative notes for task_start context.
@@ -83,38 +96,28 @@ def _select_key_notes(notes_desc: list) -> list:
         n for n in notes_desc
         if n.note_type == NoteType.FAILURE and n.id is not None
     ]
-    for n in sorted(failure_notes, key=lambda x: x.created_at):
-        if n.id not in seen:
-            selected.append(n)
-            seen.add(n.id)
+    _add_tier_notes(selected, seen, failure_notes)
 
     # Tier 1: decision notes (oldest-first within tier)
     decision_notes = [
         n for n in notes_desc
         if n.note_type == NoteType.DECISION and n.id is not None
     ]
-    for n in sorted(decision_notes, key=lambda x: x.created_at):
-        if n.id not in seen:
-            selected.append(n)
-            seen.add(n.id)
+    _add_tier_notes(selected, seen, decision_notes)
 
     # Tier 2: notes with mental models (oldest-first within tier)
     mental_model_notes = [
         n for n in notes_desc
         if n.mental_model is not None and n.id is not None
     ]
-    for n in sorted(mental_model_notes, key=lambda x: x.created_at):
-        if n.id not in seen:
-            selected.append(n)
-            seen.add(n.id)
+    _add_tier_notes(selected, seen, mental_model_notes)
 
     # Tier 3: fill remaining slots with most recent notes (newest-first)
-    for n in notes_desc:
-        if len(selected) >= _KEY_NOTES_CAP:
-            break
-        if n.id is not None and n.id not in seen:
-            selected.append(n)
-            seen.add(n.id)
+    remaining = [
+        n for n in notes_desc
+        if n.id is not None and n.id not in seen
+    ]
+    _add_tier_notes(selected, seen, remaining)
 
     return selected
 
