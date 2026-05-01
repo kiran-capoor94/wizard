@@ -1,9 +1,11 @@
 import logging
+from typing import Annotated
 
 import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
+from pydantic import BeforeValidator
 
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
@@ -33,12 +35,29 @@ from .task_fields import (
     elicit_done_confirmation,
 )
 
-_VALID_STATUSES = {s.value for s in TaskStatus}
+_STATUS_ALIASES: dict[str, str] = {
+    "completed": "done",
+    "complete": "done",
+    "finish": "done",
+    "finished": "done",
+    "open": "todo",
+    "pending": "todo",
+    "wip": "in_progress",
+    "doing": "in_progress",
+    "inactive": "archived",
+}
+
+
+def _normalize_status(v: object) -> object:
+    if isinstance(v, str):
+        return _STATUS_ALIASES.get(v.lower(), v)
+    return v
+
+
+NullableTaskStatus = Annotated[TaskStatus | None, BeforeValidator(_normalize_status)]
+TaskStatusWithDefault = Annotated[TaskStatus, BeforeValidator(_normalize_status)]
 
 logger = logging.getLogger(__name__)
-
-
-
 
 _KEY_NOTES_CAP = 5  # max notes returned by task_start
 
@@ -148,7 +167,10 @@ async def save_note(
     n_repo: NoteRepository = Depends(get_note_repo),
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
 ) -> SaveNoteResponse:
-    """Scrub and persist a note. Types: investigation|decision|docs|learnings|session_summary."""
+    """Scrub and persist a note.
+
+    Types: investigation|decision|docs|learnings|session_summary|failure.
+    """
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
 
     def _scrub_and_log(content: str, field_name: str) -> str:
@@ -208,7 +230,7 @@ async def save_note(
 async def update_task(
     ctx: Context,
     task_id: int,
-    status: TaskStatus | None = None,
+    status: NullableTaskStatus = None,
     priority: TaskPriority | None = None,
     due_date: str | None = None,
     name: str | None = None,
@@ -274,7 +296,7 @@ async def create_task(
     source_id: str | None = None,
     source_type: str | None = None,
     source_url: str | None = None,
-    status: str = "todo",
+    status: TaskStatusWithDefault = TaskStatus.TODO,
     meeting_id: int | None = None,
     t_repo: TaskRepository = Depends(get_task_repo),
     sec: SecurityService = Depends(get_security),
@@ -283,9 +305,6 @@ async def create_task(
 ) -> CreateTaskResponse:
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
-
-    if status not in _VALID_STATUSES:
-        raise ValueError(f"Invalid status {status!r}. Valid values: {sorted(_VALID_STATUSES)}")
 
     # Scrub name once; audit if PII was detected.
     _name_scrub = sec.scrub(name)
@@ -309,7 +328,6 @@ async def create_task(
         blocked_by = await check_duplicate_name(ctx, name, existing_names)
 
     # Phase 3: create or return existing — single transaction eliminates TOCTOU window.
-    task_status = TaskStatus(status)
     with get_session() as db:
         if blocked_by is not None:
             # Re-fetch inside this transaction: if task was renamed/deleted since
@@ -321,7 +339,7 @@ async def create_task(
             name=clean_name,
             priority=priority,
             category=category,
-            status=task_status,
+            status=status,
             source_id=source_id,
             source_type=source_type,
             source_url=source_url,
