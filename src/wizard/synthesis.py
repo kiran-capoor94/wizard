@@ -38,6 +38,7 @@ NOTE_TYPE_MAP: dict[str, NoteType] = {
     "decision": NoteType.DECISION,
     "docs": NoteType.DOCS,
     "learnings": NoteType.LEARNINGS,
+    "failure": NoteType.FAILURE,
 }
 
 
