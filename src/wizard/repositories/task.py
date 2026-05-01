@@ -109,7 +109,10 @@ class TaskRepository:
     def get_open_task_contexts(
         self, db: Session, limit: int | None = None
     ) -> list[TaskContext]:
-        """Open tasks (TODO / IN_PROGRESS) sorted by priority then last-worked desc."""
+        """Open tasks for resources.py (OpenTasksResource).
+
+        Use get_open_task_index for session_start.
+        """
         return self._query_task_contexts(
             db,
             col(Task.status).in_(
@@ -121,7 +124,10 @@ class TaskRepository:
     def get_blocked_task_contexts(
         self, db: Session, limit: int | None = None
     ) -> list[TaskContext]:
-        """Blocked tasks sorted by priority then last-worked desc."""
+        """Blocked tasks for resources.py (BlockedTasksResource).
+
+        Use get_blocked_task_index for session_start.
+        """
         return self._query_task_contexts(
             db, Task.status == TaskStatus.BLOCKED, limit=limit
         )
