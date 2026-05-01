@@ -223,7 +223,9 @@ class AnalyticsRepository:
 
     def get_tool_call_frequency(self, db: Session, days: int) -> dict[str, int]:
         """Return {tool_name: call_count} for the last `days` days."""
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        cutoff = datetime.datetime.combine(
+            datetime.date.today() - datetime.timedelta(days=days), datetime.time.min
+        )
         rows = db.exec(
             select(ToolCall.tool_name, func.count().label("cnt"))
             .where(ToolCall.called_at >= cutoff)

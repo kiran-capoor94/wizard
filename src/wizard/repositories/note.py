@@ -120,7 +120,9 @@ class NoteRepository:
 
     def get_recent(self, db: Session, days: int) -> list[Note]:
         """Return active notes created in the last `days` days, newest first."""
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        cutoff = datetime.datetime.combine(
+            datetime.date.today() - datetime.timedelta(days=days), datetime.time.min
+        )
         stmt = (
             select(Note)
             .where(Note.created_at >= cutoff)
