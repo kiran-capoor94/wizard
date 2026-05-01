@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from wizard.llm_adapters import _parse_notes
+from wizard.llm_adapters import parse_notes
 from wizard.models import Task, WizardSession
 from wizard.repositories.note import NoteRepository
 from wizard.schemas import SynthesisNote
@@ -200,7 +200,7 @@ def test_parse_notes_coerces_task_id_list_to_none():
     raw = json.dumps([
         {"note_type": "decision", "content": "Updated tasks.", "task_id": [177, 178, 131]}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None
 
@@ -210,7 +210,7 @@ def test_parse_notes_coerces_empty_task_id_list_to_none():
     raw = json.dumps([
         {"note_type": "investigation", "content": "Some finding.", "task_id": []}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None
 
@@ -220,7 +220,7 @@ def test_parse_notes_coerces_task_id_string_to_int():
     raw = json.dumps([
         {"note_type": "decision", "content": "Made a call.", "task_id": "177"}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id == 177
 
@@ -230,7 +230,7 @@ def test_parse_notes_coerces_task_id_float_to_int():
     raw = json.dumps([
         {"note_type": "decision", "content": "Made a call.", "task_id": 177.0}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id == 177
 
@@ -240,7 +240,7 @@ def test_parse_notes_normalises_note_type_case():
     raw = json.dumps([
         {"note_type": "Investigation", "content": "Some finding.", "task_id": None}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].note_type == "investigation"
 
@@ -250,7 +250,7 @@ def test_parse_notes_maps_note_type_synonym():
     raw = json.dumps([
         {"note_type": "finding", "content": "Some finding.", "task_id": None}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].note_type == "investigation"
 
@@ -260,7 +260,7 @@ def test_parse_notes_coerces_null_content():
     raw = json.dumps([
         {"note_type": "investigation", "content": None, "task_id": None}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].content == ""
 
@@ -275,7 +275,7 @@ def test_parse_notes_coerces_mental_model_list():
             "mental_model": ["point one", "point two"],
         }
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].mental_model == "point one\npoint two"
 
@@ -285,7 +285,7 @@ def test_parse_notes_coerces_task_id_non_numeric_string_to_none():
     raw = json.dumps([
         {"note_type": "decision", "content": "Made a call.", "task_id": "abc"}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None
 
@@ -295,7 +295,7 @@ def test_parse_notes_coerces_non_string_content():
     raw = json.dumps([
         {"note_type": "investigation", "content": 42, "task_id": None}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].content == "42"
 
@@ -305,6 +305,6 @@ def test_parse_notes_coerces_zero_task_id_to_none():
     raw = json.dumps([
         {"note_type": "decision", "content": "Made a call.", "task_id": 0}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None
