@@ -80,16 +80,8 @@ def _load_dashboard_data() -> dict:
             }
             for tc in blocked_tasks
         ]
-        note_velocity: dict[str, int] = {}
-        for i in range(_NOTE_WINDOW_DAYS):
-            day = today - datetime.timedelta(days=i)
-            stats = _analytics.get_note_stats(db, day, day)
-            note_velocity[day.isoformat()] = stats["total"]
-        session_velocity: dict[str, float] = {}
-        for i in range(_NOTE_WINDOW_DAYS):
-            day = today - datetime.timedelta(days=i)
-            stats = _analytics.get_session_stats(db, day, day)
-            session_velocity[day.isoformat()] = stats["avg_duration_minutes"]
+        note_velocity = _analytics.get_note_velocity(db, week_ago, today)
+        session_velocity = _analytics.get_session_velocity(db, week_ago, today)
     return {
         "open_task_count": open_task_count,
         "sessions_today": sessions_today,
@@ -203,8 +195,8 @@ def _render_week_tab(data: dict) -> None:
 def _row_style(row: pd.Series) -> list[str]:
     if row["Stale Days"] >= _STALE_THRESHOLD:
         return ["background-color: #4a1c1c"] * len(row)
-    last_touched = row.get("Last Touched", "")
-    if last_touched and str(last_touched).startswith(str(datetime.date.today())):
+    raw = row.get("_last_worked_raw")
+    if raw is not None and raw == datetime.date.today():
         return ["background-color: #1c3a1c"] * len(row)
     return [""] * len(row)
 
@@ -223,11 +215,16 @@ def _render_tasks_tab(data: dict) -> None:
                 "Last Touched": (
                     t["last_worked_at"].strftime("%Y-%m-%d") if t["last_worked_at"] else "—"
                 ),
+                "_last_worked_raw": (
+                    t["last_worked_at"].date() if t["last_worked_at"] else None
+                ),
             }
             for t in tasks
         ])
         df = df.sort_values("Stale Days", ascending=False)
-        styled = df.style.apply(_row_style, axis=1)
+        styled = df.style.apply(_row_style, axis=1).hide(
+            axis="columns", subset=["_last_worked_raw"]
+        )
         st.dataframe(styled, use_container_width=True, hide_index=True)
     else:
         st.success("No open tasks.")
