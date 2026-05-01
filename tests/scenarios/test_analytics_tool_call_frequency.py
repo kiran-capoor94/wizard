@@ -15,8 +15,8 @@ class TestGetToolCallFrequency:
         db_session.flush()
 
         result = repo.get_tool_call_frequency(db_session, days=30)
-        assert result["task_start"] >= 2
-        assert result["save_note"] >= 1
+        assert result["task_start"] == 2
+        assert result["save_note"] == 1
 
     def test_excludes_calls_outside_window(self, db_session):
         repo = AnalyticsRepository()
