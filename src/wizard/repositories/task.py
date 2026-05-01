@@ -180,7 +180,7 @@ class TaskRepository:
             .order_by(_PRIORITY_ORDER)
             .limit(limit)
         )
-        return [(row[0], row[1]) for row in db.execute(stmt).all()]  # type: ignore
+        return [(row[0], row[1]) for row in db.execute(stmt).all()]  # type: ignore[call-overload]
 
     def _load_task_scaffolding(
         self, db: Session, *where, limit: int | None = None
@@ -194,7 +194,7 @@ class TaskRepository:
         )
         if limit is not None:
             stmt = stmt.limit(limit)
-        rows = db.execute(stmt).all()  # type: ignore
+        rows = db.execute(stmt).all()  # type: ignore[call-overload]
         if not rows:
             return [], {}, {}
 

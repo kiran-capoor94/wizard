@@ -43,7 +43,7 @@ async def rewind_task(
 
         timeline = [
             TimelineEntry(
-                note_id=n.id,  # type: ignore[arg-type]  # id is not None: filtered above
+                note_id=n.id,  # type: ignore[arg-type]  # SQLModel id is Optional; filtered above
                 created_at=n.created_at,
                 note_type=n.note_type,
                 preview=n.content[:200],

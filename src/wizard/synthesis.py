@@ -294,7 +294,8 @@ class Synthesiser:
             "Synthesiser: LLM call failed after retry, raising for failure marker: %s",
             last_exc,
         )
-        raise last_exc  # type: ignore[misc]
+        assert last_exc is not None  # loop always runs; last_exc set on every non-return iteration
+        raise last_exc
 
     def _synthesise_in_chunks(
         self, filtered: list[TranscriptEntry], task_table: str
