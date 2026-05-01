@@ -33,15 +33,35 @@ def _load_dashboard_data() -> dict:
         st.stop()
     with get_session() as db:
         latest_session_id = _session_repo.get_most_recent_id(db)
-        latest_session = (
+        raw_session = (
             _session_repo.get(db, latest_session_id) if latest_session_id else None
         )
-        recent_sessions = _session_repo.list_paginated(db, limit=_RECENT_SESSIONS_LIMIT)
-        recent_notes = _note_repo.get_recent(db, days=_NOTE_WINDOW_DAYS)
+        latest_session = (
+            {
+                "id": raw_session.id,
+                "closed_by": raw_session.closed_by,
+                "synthesis_status": raw_session.synthesis_status,
+                "created_at": raw_session.created_at,
+            }
+            if raw_session is not None
+            else None
+        )
+        recent_sessions = [
+            {
+                "id": s.id,
+                "created_at": s.created_at,
+                "closed_by": s.closed_by,
+                "synthesis_status": s.synthesis_status,
+            }
+            for s in _session_repo.list_paginated(db, limit=_RECENT_SESSIONS_LIMIT)
+        ]
+        raw_notes = _note_repo.get_recent(db, days=_NOTE_WINDOW_DAYS)
         by_type: dict[str, int] = {}
-        for n in recent_notes:
+        recent_notes = []
+        for n in raw_notes:
             key = n.note_type.value if hasattr(n.note_type, "value") else str(n.note_type)
             by_type[key] = by_type.get(key, 0) + 1
+            recent_notes.append({"task_id": n.task_id, "content": n.content or ""})
         note_stats = {"by_type": by_type}
         tool_freq = _analytics_repo.get_tool_call_frequency(db, days=_TOOL_WINDOW_DAYS)
     return {
@@ -60,10 +80,10 @@ def _render_active_session(data: dict) -> None:
         st.info("No sessions found.")
         return
     col1, col2, col3 = st.columns(3)
-    col1.metric("Session ID", session.id)
-    col2.metric("Status", session.closed_by or "open")
-    col3.metric("Synthesis", session.synthesis_status or "pending")
-    st.caption(f"Started: {session.created_at.strftime('%Y-%m-%d %H:%M')}")
+    col1.metric("Session ID", session["id"])
+    col2.metric("Status", session["closed_by"] or "open")
+    col3.metric("Synthesis", session["synthesis_status"] or "pending")
+    st.caption(f"Started: {session['created_at'].strftime('%Y-%m-%d %H:%M')}")
 
 
 def _render_recent_notes(data: dict) -> None:
@@ -87,10 +107,10 @@ def _render_synthesis_health(data: dict) -> None:
         return
     rows = [
         {
-            "ID": s.id,
-            "Started": s.created_at.strftime("%Y-%m-%d %H:%M"),
-            "Closed By": s.closed_by or "open",
-            "Synthesis": s.synthesis_status or "pending",
+            "ID": s["id"],
+            "Started": s["created_at"].strftime("%Y-%m-%d %H:%M"),
+            "Closed By": s["closed_by"] or "open",
+            "Synthesis": s["synthesis_status"] or "pending",
         }
         for s in sessions
     ]
@@ -101,15 +121,15 @@ def _render_memory_utilisation(data: dict) -> None:
     st.subheader("Memory Utilisation")
     recent_notes = data["recent_notes"]
     total = len(recent_notes)
-    avg_length = round(sum(len(n.content or "") for n in recent_notes) / total, 1) if total else 0.0
+    avg_length = round(sum(len(n["content"]) for n in recent_notes) / total, 1) if total else 0.0
     col1, col2, col3 = st.columns(3)
     col1.metric(f"Notes ({_NOTE_WINDOW_DAYS}d)", total)
     col2.metric("Avg Length", f"{avg_length} chars")
     col3.metric("Cap", f"{_NOTE_CONTENT_CAP} chars")
     task_counts: dict[int, int] = {}
     for note in recent_notes:
-        if note.task_id is not None:
-            task_counts[note.task_id] = task_counts.get(note.task_id, 0) + 1
+        if note["task_id"] is not None:
+            task_counts[note["task_id"]] = task_counts.get(note["task_id"], 0) + 1
     top = sorted(task_counts.items(), key=lambda x: x[1], reverse=True)[:_TOP_TASKS_LIMIT]
     if top:
         top_df = pd.DataFrame(top, columns=["Task ID", "Note Count"]).set_index("Task ID")
