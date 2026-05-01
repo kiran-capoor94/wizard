@@ -1,0 +1,22 @@
+name: wizard
+version: 4.0.0
+description: Harness for personal coding agent — session lifecycle, bounded memory, decision capture
+author: kiran-capoor94
+license: MIT
+target: claude
+
+dependencies:
+  apm:
+    - kiran-capoor94/wizard/skills/session-start
+    - kiran-capoor94/wizard/skills/session-end
+    - kiran-capoor94/wizard/skills/task-start
+    - kiran-capoor94/wizard/skills/meeting
+    - kiran-capoor94/wizard/skills/architect
+    - kiran-capoor94/wizard/skills/ideation
+    - kiran-capoor94/wizard/skills/product-owner
+    - kiran-capoor94/wizard/skills/wizard-playground
+    - kiran-capoor94/wizard/skills/caveman
+  mcp:
+    - name: wizard
+      transport: stdio
+      command: wizard-server
