@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from sqlmodel import Session, case, col, func, select
@@ -12,6 +13,19 @@ _PRIORITY_ORDER = case(
     (col(Task.priority) == TaskPriority.MEDIUM, 1),
     else_=2,
 )
+
+
+def _score_open_task(entry: TaskIndexEntry) -> int:
+    score = 0
+    if entry.stale_days == 0:
+        score += 40
+    if entry.status == TaskStatus.IN_PROGRESS:
+        score += 30
+    if entry.notes_by_type.get("decision", 0) > 0:
+        score += 15
+    if entry.note_count >= 3:
+        score += 15
+    return score
 
 
 class TaskRepository:
@@ -333,13 +347,18 @@ class TaskRepository:
         limit: int | None = None,
     ) -> list[TaskIndexEntry]:
         """Compact index of open tasks for session_start."""
-        return self._query_task_index(
+        entries = self._query_task_index(
             db,
             col(Task.status).in_(  # pyright: ignore[reportAttributeAccessIssue]
                 [TaskStatus.TODO, TaskStatus.IN_PROGRESS]
             ),
             limit=limit,
         )
+        entries.sort(
+            key=lambda e: (_score_open_task(e), e.last_worked_at or datetime.datetime.min),
+            reverse=True,
+        )
+        return entries
 
     def get_blocked_task_index(
         self,
@@ -347,6 +366,8 @@ class TaskRepository:
         limit: int | None = None,
     ) -> list[TaskIndexEntry]:
         """Compact index of blocked tasks for session_start."""
-        return self._query_task_index(
+        entries = self._query_task_index(
             db, Task.status == TaskStatus.BLOCKED, limit=limit
         )
+        entries.sort(key=lambda e: e.stale_days, reverse=True)
+        return entries
