@@ -17,28 +17,29 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     conn = op.get_bind()
 
-    # FTS5 virtual tables — content-based (auto-synced via triggers)
+    # FTS5 virtual tables — content-based (rowid = entity id).
+    # Only index columns that exist in the base table; rowid serves as entity ID.
     conn.execute(sa.text(
         "CREATE VIRTUAL TABLE IF NOT EXISTS note_fts USING fts5("
-        "content, note_type UNINDEXED, task_id UNINDEXED, note_id UNINDEXED,"
+        "content, note_type UNINDEXED,"
         "content='note', content_rowid='id'"
         ")"
     ))
     conn.execute(sa.text(
         "CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5("
-        "summary, session_id UNINDEXED,"
+        "summary,"
         "content='wizardsession', content_rowid='id'"
         ")"
     ))
     conn.execute(sa.text(
         "CREATE VIRTUAL TABLE IF NOT EXISTS meeting_fts USING fts5("
-        "content, title UNINDEXED, meeting_id UNINDEXED,"
+        "content, title UNINDEXED,"
         "content='meeting', content_rowid='id'"
         ")"
     ))
     conn.execute(sa.text(
         "CREATE VIRTUAL TABLE IF NOT EXISTS task_fts USING fts5("
-        "name, task_id UNINDEXED,"
+        "name,"
         "content='task', content_rowid='id'"
         ")"
     ))
@@ -46,95 +47,95 @@ def upgrade() -> None:
     # Triggers to keep note_fts in sync
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS note_fts_ai AFTER INSERT ON note BEGIN "
-        "INSERT INTO note_fts(rowid, content, note_type, task_id, note_id) "
-        "VALUES (new.id, new.content, new.note_type, new.task_id, new.id); END"
+        "INSERT INTO note_fts(rowid, content, note_type) "
+        "VALUES (new.id, new.content, new.note_type); END"
     ))
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS note_fts_ad AFTER DELETE ON note BEGIN "
-        "INSERT INTO note_fts(note_fts, rowid, content, note_type, task_id, note_id) "
-        "VALUES ('delete', old.id, old.content, old.note_type, old.task_id, old.id); END"
+        "INSERT INTO note_fts(note_fts, rowid, content, note_type) "
+        "VALUES ('delete', old.id, old.content, old.note_type); END"
     ))
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS note_fts_au AFTER UPDATE ON note BEGIN "
-        "INSERT INTO note_fts(note_fts, rowid, content, note_type, task_id, note_id) "
-        "VALUES ('delete', old.id, old.content, old.note_type, old.task_id, old.id);"
-        "INSERT INTO note_fts(rowid, content, note_type, task_id, note_id) "
-        "VALUES (new.id, new.content, new.note_type, new.task_id, new.id); END"
+        "INSERT INTO note_fts(note_fts, rowid, content, note_type) "
+        "VALUES ('delete', old.id, old.content, old.note_type);"
+        "INSERT INTO note_fts(rowid, content, note_type) "
+        "VALUES (new.id, new.content, new.note_type); END"
     ))
 
     # Triggers to keep session_fts in sync
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS session_fts_ai AFTER INSERT ON wizardsession BEGIN "
-        "INSERT INTO session_fts(rowid, summary, session_id) "
-        "VALUES (new.id, new.summary, new.id); END"
+        "INSERT INTO session_fts(rowid, summary) "
+        "VALUES (new.id, new.summary); END"
     ))
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS session_fts_ad AFTER DELETE ON wizardsession BEGIN "
-        "INSERT INTO session_fts(session_fts, rowid, summary, session_id) "
-        "VALUES ('delete', old.id, old.summary, old.id); END"
+        "INSERT INTO session_fts(session_fts, rowid, summary) "
+        "VALUES ('delete', old.id, old.summary); END"
     ))
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS session_fts_au AFTER UPDATE ON wizardsession BEGIN "
-        "INSERT INTO session_fts(session_fts, rowid, summary, session_id) "
-        "VALUES ('delete', old.id, old.summary, old.id);"
-        "INSERT INTO session_fts(rowid, summary, session_id) "
-        "VALUES (new.id, new.summary, new.id); END"
+        "INSERT INTO session_fts(session_fts, rowid, summary) "
+        "VALUES ('delete', old.id, old.summary);"
+        "INSERT INTO session_fts(rowid, summary) "
+        "VALUES (new.id, new.summary); END"
     ))
 
     # Triggers to keep meeting_fts in sync
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS meeting_fts_ai AFTER INSERT ON meeting BEGIN "
-        "INSERT INTO meeting_fts(rowid, content, title, meeting_id) "
-        "VALUES (new.id, new.content, new.title, new.id); END"
+        "INSERT INTO meeting_fts(rowid, content, title) "
+        "VALUES (new.id, new.content, new.title); END"
     ))
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS meeting_fts_ad AFTER DELETE ON meeting BEGIN "
-        "INSERT INTO meeting_fts(meeting_fts, rowid, content, title, meeting_id) "
-        "VALUES ('delete', old.id, old.content, old.title, old.id); END"
+        "INSERT INTO meeting_fts(meeting_fts, rowid, content, title) "
+        "VALUES ('delete', old.id, old.content, old.title); END"
     ))
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS meeting_fts_au AFTER UPDATE ON meeting BEGIN "
-        "INSERT INTO meeting_fts(meeting_fts, rowid, content, title, meeting_id) "
-        "VALUES ('delete', old.id, old.content, old.title, old.id);"
-        "INSERT INTO meeting_fts(rowid, content, title, meeting_id) "
-        "VALUES (new.id, new.content, new.title, new.id); END"
+        "INSERT INTO meeting_fts(meeting_fts, rowid, content, title) "
+        "VALUES ('delete', old.id, old.content, old.title);"
+        "INSERT INTO meeting_fts(rowid, content, title) "
+        "VALUES (new.id, new.content, new.title); END"
     ))
 
     # Triggers to keep task_fts in sync
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS task_fts_ai AFTER INSERT ON task BEGIN "
-        "INSERT INTO task_fts(rowid, name, task_id) "
-        "VALUES (new.id, new.name, new.id); END"
+        "INSERT INTO task_fts(rowid, name) "
+        "VALUES (new.id, new.name); END"
     ))
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS task_fts_ad AFTER DELETE ON task BEGIN "
-        "INSERT INTO task_fts(task_fts, rowid, name, task_id) "
-        "VALUES ('delete', old.id, old.name, old.id); END"
+        "INSERT INTO task_fts(task_fts, rowid, name) "
+        "VALUES ('delete', old.id, old.name); END"
     ))
     conn.execute(sa.text(
         "CREATE TRIGGER IF NOT EXISTS task_fts_au AFTER UPDATE ON task BEGIN "
-        "INSERT INTO task_fts(task_fts, rowid, name, task_id) "
-        "VALUES ('delete', old.id, old.name, old.id);"
-        "INSERT INTO task_fts(rowid, name, task_id) "
-        "VALUES (new.id, new.name, new.id); END"
+        "INSERT INTO task_fts(task_fts, rowid, name) "
+        "VALUES ('delete', old.id, old.name);"
+        "INSERT INTO task_fts(rowid, name) "
+        "VALUES (new.id, new.name); END"
     ))
 
     # Backfill existing rows
     conn.execute(sa.text(
-        "INSERT INTO note_fts(rowid, content, note_type, task_id, note_id) "
-        "SELECT id, content, note_type, task_id, id FROM note WHERE content IS NOT NULL"
+        "INSERT INTO note_fts(rowid, content, note_type) "
+        "SELECT id, content, note_type FROM note WHERE content IS NOT NULL"
     ))
     conn.execute(sa.text(
-        "INSERT INTO session_fts(rowid, summary, session_id) "
-        "SELECT id, summary, id FROM wizardsession WHERE summary IS NOT NULL"
+        "INSERT INTO session_fts(rowid, summary) "
+        "SELECT id, summary FROM wizardsession WHERE summary IS NOT NULL"
     ))
     conn.execute(sa.text(
-        "INSERT INTO meeting_fts(rowid, content, title, meeting_id) "
-        "SELECT id, content, title, id FROM meeting WHERE content IS NOT NULL"
+        "INSERT INTO meeting_fts(rowid, content, title) "
+        "SELECT id, content, title FROM meeting WHERE content IS NOT NULL"
     ))
     conn.execute(sa.text(
-        "INSERT INTO task_fts(rowid, name, task_id) "
-        "SELECT id, name, id FROM task WHERE name IS NOT NULL"
+        "INSERT INTO task_fts(rowid, name) "
+        "SELECT id, name FROM task WHERE name IS NOT NULL"
     ))
 
 
