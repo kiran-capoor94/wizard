@@ -41,7 +41,8 @@ Twelve rules that keep the codebase maintainable for a solo engineer:
 11. **No C901, ever** - never suppress or ignore the complexity of a codebase
     file/function/class etc.
 12. **No mechanical LLM calls** — never use `ctx.sample()` for formatting,
-    slug generation, or existence checks. LLM calls are for reasoning only.
+    slug generation, or existence checks. LLM calls are for reasoning and
+    content compression only.
 
 ## Running Tests
 

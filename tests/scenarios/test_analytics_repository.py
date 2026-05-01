@@ -39,29 +39,31 @@ def _make_note(db, task_id, session_id, note_type=NoteType.INVESTIGATION, mental
     return n
 
 
-def test_get_note_stats_counts_by_type(db_session):
-    today = datetime.date.today()
-    s = _make_session(db_session)
-    t = _make_task(db_session)
-    _make_note(db_session, t.id, s.id, NoteType.INVESTIGATION)
-    _make_note(db_session, t.id, s.id, NoteType.DECISION)
-    _make_note(db_session, t.id, s.id, NoteType.DECISION)
+class TestNoteStats:
+    def test_counts_by_type(self, db_session):
+        today = datetime.date.today()
+        s = _make_session(db_session)
+        t = _make_task(db_session)
+        _make_note(db_session, t.id, s.id, NoteType.INVESTIGATION)
+        _make_note(db_session, t.id, s.id, NoteType.DECISION)
+        _make_note(db_session, t.id, s.id, NoteType.DECISION)
 
-    stats = AnalyticsRepository().get_note_stats(db_session, today, today)
-    assert stats["by_type"]["investigation"] == 1
-    assert stats["by_type"]["decision"] == 2
-    assert stats["total"] == 3
+        stats = AnalyticsRepository().get_note_stats(db_session, today, today)
+        assert stats["by_type"]["investigation"] == 1
+        assert stats["by_type"]["decision"] == 2
+        assert stats["total"] == 3
 
 
-def test_get_task_stats_worked(db_session):
-    today = datetime.date.today()
-    s = _make_session(db_session)
-    t1 = _make_task(db_session, "t1")
-    t2 = _make_task(db_session, "t2")
-    _make_note(db_session, t1.id, s.id)
-    _make_note(db_session, t1.id, s.id)
-    _make_note(db_session, t2.id, s.id)
+class TestTaskStats:
+    def test_worked_and_avg_notes(self, db_session):
+        today = datetime.date.today()
+        s = _make_session(db_session)
+        t1 = _make_task(db_session, "t1")
+        t2 = _make_task(db_session, "t2")
+        _make_note(db_session, t1.id, s.id)
+        _make_note(db_session, t1.id, s.id)
+        _make_note(db_session, t2.id, s.id)
 
-    stats = AnalyticsRepository().get_task_stats(db_session, today, today)
-    assert stats["worked"] == 2
-    assert stats["avg_notes_per_task"] == 1.5
+        stats = AnalyticsRepository().get_task_stats(db_session, today, today)
+        assert stats["worked"] == 2
+        assert stats["avg_notes_per_task"] == 1.5
