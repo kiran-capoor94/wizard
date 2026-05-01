@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastmcp import FastMCP
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
@@ -28,10 +26,7 @@ mcp = FastMCP(
 # The package ships skill sources in src/wizard/skills/ but the MCP server
 # reads from the installed location so users can customise without touching
 # the package.
-_installed_skills = Path.home() / ".wizard" / "skills"
-_package_skills = Path(__file__).resolve().parent / "skills"
-
-_roots = [p for p in [_installed_skills, _package_skills] if p.exists()]
+_roots = [p for p in [settings.paths.installed_skills, settings.paths.package_skills] if p.exists()]
 if _roots:
     mcp.add_provider(SkillsDirectoryProvider(roots=_roots))
 

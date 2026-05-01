@@ -127,7 +127,7 @@ def user_elicitation() -> list[Message]:
     ]
 
 
-def architecture_debate(task_id: int) -> list[Message]:
+def architecture_debate(task_id: int | None = None) -> list[Message]:
     """Facilitate a design or architecture decision with full wizard context.
 
     Use when choosing between approaches, the engineer says "should we do X or Y",
@@ -139,11 +139,12 @@ def architecture_debate(task_id: int) -> list[Message]:
         "Load task context with task_start, present 2-3 options with trade-offs, "
         "get the engineer's decision, then save it as a decision note."
     )
+    task_context = f" for task {task_id}" if task_id is not None else ""
     return [
         Message(
             role="user",
             content=(
-                f"You are facilitating an architecture decision for task {task_id}. "
+                f"You are facilitating an architecture decision{task_context}. "
                 "Follow the skill instructions below.\n\n"
                 f"{skill_content}"
             ),
@@ -151,7 +152,7 @@ def architecture_debate(task_id: int) -> list[Message]:
     ]
 
 
-def code_review(task_id: int) -> list[Message]:
+def code_review(task_id: int | None = None) -> list[Message]:
     """Context-aware code review using wizard's investigation and decision history.
 
     Use when reviewing code changes, PRs, or diffs — especially when prior wizard
@@ -163,11 +164,12 @@ def code_review(task_id: int) -> list[Message]:
         "Load task context with task_start, review changes against prior decisions, "
         "check for invariant violations, then save findings as an investigation note."
     )
+    task_context = f" for task {task_id}" if task_id is not None else ""
     return [
         Message(
             role="user",
             content=(
-                f"You are performing a context-aware code review for task {task_id}. "
+                f"You are performing a context-aware code review{task_context}. "
                 "Follow the skill instructions below.\n\n"
                 f"{skill_content}"
             ),

@@ -2,6 +2,9 @@
 
 from unittest.mock import patch
 
+import wizard.config as wc
+from wizard.config import WizardPaths
+
 
 async def test_session_lifecycle(mcp_client, seed_task):
     task = await seed_task(name="Fix auth bug")
@@ -13,8 +16,8 @@ async def test_session_lifecycle(mcp_client, seed_task):
     session_id = d["session_id"]
     assert session_id is not None
     assert d["source"] == "startup"
-    assert isinstance(d["open_tasks"], str)
-    assert d["open_tasks"].startswith("[")
+    assert isinstance(d["open_tasks"], list)
+    assert len(d["open_tasks"]) >= 1
 
     # 2. task_start
     r = await mcp_client.call_tool("task_start", {"task_id": task.id})
@@ -69,7 +72,8 @@ async def test_session_start_writes_wizard_id_to_keyed_dir(mcp_client, tmp_path)
     (sessions_dir / uuid).mkdir(parents=True)
     (sessions_dir / uuid / "source").write_text("startup")
 
-    with patch("wizard.tools.session_tools.SESSIONS_DIR", sessions_dir):
+    patched_paths = WizardPaths(sessions_dir=sessions_dir)
+    with patch.object(wc.settings, "paths", patched_paths):
         r = await mcp_client.call_tool("session_start", {"agent_session_id": uuid})
 
     assert not r.is_error, r

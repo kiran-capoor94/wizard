@@ -2,6 +2,7 @@
 
 from .meeting import MeetingRepository
 from .note import NoteRepository, build_rolling_summary
+from .search import SearchRepository
 from .session import SessionRepository, find_latest_session_with_notes
 from .task import TaskRepository
 from .task_state import TaskStateRepository
@@ -9,6 +10,7 @@ from .task_state import TaskStateRepository
 __all__ = [
     "MeetingRepository",
     "NoteRepository",
+    "SearchRepository",
     "SessionRepository",
     "TaskRepository",
     "TaskStateRepository",

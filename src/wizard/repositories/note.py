@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from sqlmodel import Session, col, func, select
@@ -13,6 +14,19 @@ class NoteRepository:
         db.flush()
         db.refresh(note)
         return note
+
+    def get_by_content_hash(
+        self, db: Session, task_id: int, content_hash: str
+    ) -> Note | None:
+        """Return the first active note on task_id matching content_hash, or None."""
+        stmt = (
+            select(Note)
+            .where(Note.task_id == task_id)
+            .where(Note.synthesis_content_hash == content_hash)
+            .where(Note.status == "active")
+            .limit(1)
+        )
+        return db.exec(stmt).first()
 
     def get_for_task(
         self,
@@ -104,6 +118,19 @@ class NoteRepository:
         )
         return set(db.exec(stmt).all())
 
+    def get_recent(self, db: Session, days: int) -> list[Note]:
+        """Return active notes created in the last `days` days, newest first."""
+        cutoff = datetime.datetime.combine(
+            datetime.date.today() - datetime.timedelta(days=days), datetime.time.min
+        )
+        stmt = (
+            select(Note)
+            .where(Note.created_at >= cutoff)
+            .where(Note.status == "active")
+            .order_by(col(Note.created_at).desc())
+        )
+        return list(db.exec(stmt).all())
+
     def count_for_sessions(self, db: Session, session_ids: list[int]) -> dict[int, int]:
         """Batch-count notes per session. Returns {session_id: count}."""
         if not session_ids:
@@ -132,28 +159,3 @@ def build_rolling_summary(notes: list[Note]) -> str | None:
     return "\n".join(entries) if entries else None
 
 
-def detect_drift(
-    old_ids: set[int],
-    new_ids: set[int],
-    entity_id: int,
-    artifact_id: str,
-) -> dict | None:
-    """Compare legacy FK path vs artifact_id path note sets.
-
-    Temporary migration utility for Phase 2 shadow-read comparison (artifact identity v3).
-    Will be removed after Phase 3 cutover is complete.
-
-    Returns None if both paths return identical note ID sets.
-    Returns a dict with drift details if they differ — caller should log
-    and halt Phase 3 cutover until resolved.
-    """
-    missing_from_new = old_ids - new_ids
-    missing_from_old = new_ids - old_ids
-    if not missing_from_new and not missing_from_old:
-        return None
-    return {
-        "entity_id": entity_id,
-        "artifact_id": artifact_id,
-        "missing_from_new": missing_from_new,
-        "missing_from_old": missing_from_old,
-    }

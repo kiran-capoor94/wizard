@@ -101,10 +101,18 @@ def format_prompt(filtered: list[TranscriptEntry], task_table: str = "") -> str:
         lines.append("\ntask_id must always be null — no task list available.")
 
     lines.append(
-        "\nCRITICAL: Respond ONLY with a valid JSON array of objects. "
+        "\nNote type definitions:"
+        "\n- investigation: findings, observations, what was discovered"
+        "\n- decision: what was decided and why (architectural, technical, or process)"
+        "\n- docs: how something works — reference material for future sessions"
+        "\n- learnings: non-obvious patterns discovered that apply broadly"
+        "\n- failure: what was attempted and didn't work. Include: what was tried, "
+        "why it failed, and what the failure revealed. Store even partial failures — "
+        "these are as valuable as successes."
+        "\n\nCRITICAL: Respond ONLY with a valid JSON array of objects. "
         "DO NOT include any text outside the JSON array. "
         "Format: "
-        '[{"note_type": "investigation"|"decision"|"docs"|"learnings", '
+        '[{"note_type": "investigation"|"decision"|"docs"|"learnings"|"failure", '
         '"content": "string", "task_id": integer|null, "mental_model": "string"}]'
     )
     return "\n".join(lines)

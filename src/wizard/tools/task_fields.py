@@ -6,11 +6,20 @@ import logging
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
+from pydantic import BaseModel
 
 from ..models import Task, TaskPriority, TaskStatus
 from ..security import SecurityService
 
 logger = logging.getLogger(__name__)
+
+
+class _ConfirmDone(BaseModel):
+    confirmed: bool
+
+
+class _ConfirmCreate(BaseModel):
+    create_anyway: bool
 
 
 async def elicit_mental_model(ctx: Context, sec: SecurityService) -> str | None:
@@ -22,7 +31,10 @@ async def elicit_mental_model(ctx: Context, sec: SecurityService) -> str | None:
             response_type=str,
         )
         if isinstance(result, AcceptedElicitation) and result.data:
-            return sec.scrub(result.data).clean
+            scrub_result = sec.scrub(result.data)
+            if scrub_result.was_modified:
+                logger.info("PII scrubbed from mental_model elicitation")
+            return scrub_result.clean
     except Exception as e:
         logger.debug("ctx.elicit unavailable for mental_model: %s", e)
     return None
@@ -33,9 +45,9 @@ async def elicit_done_confirmation(ctx: Context, task_name: str) -> bool:
     try:
         result = await ctx.elicit(
             f"Mark {task_name!r} as done? This closes the task.",
-            response_type={"yes": {"title": "Yes"}, "no": {"title": "No"}},
+            response_type=_ConfirmDone,
         )
-        return isinstance(result, AcceptedElicitation) and result.data == "yes"
+        return isinstance(result, AcceptedElicitation) and result.data.confirmed is True
     except Exception as e:
         logger.debug("ctx.elicit unavailable for done confirmation: %s", e)
         return True  # default: proceed if elicitation unavailable
@@ -59,9 +71,10 @@ async def check_duplicate_name(ctx: Context, name: str, existing_names: list[str
     try:
         elicit_result = await ctx.elicit(
             f"A task named {matching!r} already exists. Create anyway?",
-            response_type={"yes": {"title": "Yes, create"}, "no": {"title": "No, use existing"}},
+            response_type=_ConfirmCreate,
         )
-        if isinstance(elicit_result, AcceptedElicitation) and elicit_result.data == "yes":
+        accepted = isinstance(elicit_result, AcceptedElicitation)
+        if accepted and elicit_result.data.create_anyway is True:
             return None  # proceed with creation
         return matching  # use existing task
     except Exception as e:
@@ -87,7 +100,7 @@ def apply_task_fields(
     if priority is not None:
         task.priority = priority
         updated.append("priority")
-    if due_date is not None:
+    if due_date:
         try:
             due_date_dt = datetime.datetime.fromisoformat(
                 due_date.replace("Z", "+00:00")
@@ -99,7 +112,10 @@ def apply_task_fields(
         task.due_date = due_date_dt
         updated.append("due_date")
     if name is not None:
-        task.name = sec.scrub(name).clean
+        scrub_result = sec.scrub(name)
+        if scrub_result.was_modified:
+            logger.info("PII scrubbed from task name")
+        task.name = scrub_result.clean
         updated.append("name")
     if source_url is not None:
         task.source_url = source_url

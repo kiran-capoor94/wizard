@@ -9,13 +9,14 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from pydantic import ValidationError
 from sqlmodel import Session
 
 from ..config import settings
 from ..database import get_session
 from ..models import WizardSession
 from ..repositories import NoteRepository, SessionRepository, TaskRepository
-from ..schemas import PriorSessionSummary
+from ..schemas import PriorSessionSummary, SessionState
 from ..security import SecurityService
 from ..synthesis import Synthesiser
 from ..transcript import TranscriptReader, find_transcript, read_new_lines
@@ -112,7 +113,21 @@ def build_prior_summaries(
     db: Session, current_session_id: int
 ) -> list[PriorSessionSummary]:
     """Return the 3 most recent closed sessions with summaries for prior-context surfacing."""
-    return SessionRepository().get_prior_summaries(db, current_session_id)
+    summaries = SessionRepository().get_prior_summaries(db, current_session_id)
+    result = []
+    for s in summaries:
+        task_ids: list[int] = []
+        if s.raw_session_state:
+            try:
+                state_obj = SessionState.model_validate_json(s.raw_session_state)
+                task_ids = state_obj.working_set
+            except (ValueError, ValidationError) as e:
+                logger.warning(
+                    "build_prior_summaries: corrupt session_state sid=%s: %s",
+                    s.session_id, e,
+                )
+        result.append(s.model_copy(update={"task_ids": task_ids}))
+    return result
 
 
 def find_previous_session_id() -> int | None:

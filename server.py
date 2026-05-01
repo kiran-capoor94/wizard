@@ -6,9 +6,11 @@ from pathlib import Path
 
 import sentry_sdk
 from pythonjsonlogger import json as jsonlogger
+from sentry_sdk.integrations.asyncio import AsyncioIntegration
 from sentry_sdk.integrations.litellm import LiteLLMIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.mcp import MCPIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
 import wizard.prompts  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.prompt decorators
 import wizard.resources  # noqa: F401  # pyright: ignore[reportUnusedImport] — registers @mcp.resource decorators
@@ -36,6 +38,8 @@ if hasattr(os, "chflags"):
 
 
 if __name__ == "__main__":
+    import atexit
+
     # Configure structured JSON logging
     log_handler = logging.StreamHandler()
     formatter = jsonlogger.JsonFormatter(
@@ -55,13 +59,21 @@ if __name__ == "__main__":
             release=f"wizard@{settings.version}",
             enable_logs=True,
             integrations=[
+                AsyncioIntegration(),
                 LiteLLMIntegration(),
                 MCPIntegration(),
+                SqlalchemyIntegration(),
                 LoggingIntegration(
                     level=None,  # Capture all logs as breadcrumbs
                     event_level=None,  # Don't send logs as events
                 ),
             ],
         )
+        atexit.register(sentry_sdk.flush, timeout=5)
 
-    mcp.run()
+    try:
+        mcp.run()
+    except BaseException as e:
+        sentry_sdk.capture_exception(e)
+        sentry_sdk.flush(timeout=5)
+        raise

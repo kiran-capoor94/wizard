@@ -3,7 +3,7 @@
 import uuid
 
 from wizard.models import Meeting, Note, NoteType, Task, WizardSession
-from wizard.repositories.note import NoteRepository, detect_drift
+from wizard.repositories.note import NoteRepository
 
 
 class TestNewEntitiesGetArtifactId:
@@ -222,51 +222,6 @@ class TestGetNotesByArtifactId:
         assert "abc123" in hashes
         assert None not in hashes
 
-
-class TestDriftDetection:
-    def test_no_drift_when_paths_agree(self, db_session):
-        task = Task(name="drift test")
-        db_session.add(task)
-        db_session.flush()
-        note = Note(
-            note_type=NoteType.INVESTIGATION,
-            content="finding",
-            task_id=task.id,
-            artifact_id=task.artifact_id,
-            artifact_type="task",
-        )
-        db_session.add(note)
-        db_session.flush()
-        repo = NoteRepository()
-        old_ids = {n.id for n in repo.get_for_task(db_session, task.id)}
-        new_ids = {n.id for n in repo.get_notes_by_artifact_id(db_session, task.artifact_id)}
-        result = detect_drift(old_ids, new_ids, task.id, task.artifact_id)
-        assert result is None
-
-    def test_drift_detected_when_artifact_id_misrouted(self, db_session):
-        task = Task(name="drift mismatch")
-        db_session.add(task)
-        db_session.flush()
-        wrong_aid = str(uuid.uuid4())
-        note = Note(
-            note_type=NoteType.INVESTIGATION,
-            content="misrouted",
-            task_id=task.id,
-            artifact_id=wrong_aid,  # wrong — doesn't match task.artifact_id
-            artifact_type="task",
-        )
-        db_session.add(note)
-        db_session.flush()
-        repo = NoteRepository()
-        old_ids = {n.id for n in repo.get_for_task(db_session, task.id)}
-        new_ids = {n.id for n in repo.get_notes_by_artifact_id(db_session, task.artifact_id)}
-        result = detect_drift(old_ids, new_ids, task.id, task.artifact_id)
-        assert result is not None
-        assert note.id in result["missing_from_new"]
-
-    def test_detect_drift_returns_none_for_empty_sets(self):
-        result = detect_drift(set(), set(), 999, str(uuid.uuid4()))
-        assert result is None
 
 
 class TestNoToonInTools:

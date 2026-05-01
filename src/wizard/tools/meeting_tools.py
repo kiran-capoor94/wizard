@@ -5,6 +5,7 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from fastmcp.server.elicitation import AcceptedElicitation
+from pydantic import BaseModel
 
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo
@@ -21,6 +22,41 @@ from ..skills import SKILL_MEETING, load_skill_post
 from .formatting import try_notify
 
 logger = logging.getLogger(__name__)
+
+
+class _ConfirmLink(BaseModel):
+    confirmed: bool
+
+
+async def _elicit_task_link_confirmation(
+    ctx: Context, task_ids: list[int], task_names: list[str]
+) -> list[int] | None:
+    """Elicit user confirmation to link tasks to meeting summary.
+
+    Returns task_ids if confirmed, None if cancelled or elicitation unavailable.
+    """
+    if not task_ids:
+        return task_ids
+
+    names_str = (
+        ", ".join(repr(n) for n in task_names)
+        if task_names
+        else ", ".join(str(i) for i in task_ids)
+    )
+    try:
+        result = await ctx.elicit(
+            f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
+            response_type=_ConfirmLink,
+        )
+        if not (isinstance(result, AcceptedElicitation) and result.data.confirmed is True):
+            return None
+    except Exception as e:
+        logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
+        return None
+
+    return task_ids
+
+
 
 
 async def get_meeting(
@@ -81,6 +117,14 @@ async def save_meeting_summary(
 ) -> SaveMeetingSummaryResponse:
     """Scrubs and persists the LLM-generated meeting summary."""
     logger.info("save_meeting_summary meeting_id=%d", meeting_id)
+
+    def _scrub_and_log(content: str, field_name: str) -> str:
+        """Scrub content and log if PII was detected."""
+        scrub_result = sec.scrub(content)
+        if scrub_result.was_modified:
+            logger.info("PII scrubbed from %s", field_name)
+        return scrub_result.clean
+
     try:
         # Phase 1: fetch data needed for elicitation, then close DB.
         session_id: int | None = await ctx.get_state("current_session_id")
@@ -97,24 +141,10 @@ async def save_meeting_summary(
                 task_names = t_repo.get_names_by_ids(db, task_ids)
 
         # Phase 2: elicit outside DB context so connection is not held open.
-        if task_ids:
-            names_str = (
-                ", ".join(repr(n) for n in task_names)
-                if task_names
-                else ", ".join(str(i) for i in task_ids)
-            )
-            try:
-                result = await ctx.elicit(
-                    f"Link {len(task_ids)} task(s) to this meeting summary? ({names_str})",
-                    response_type={"yes": {"title": "Yes"}, "no": {"title": "No"}},
-                )
-                if not (isinstance(result, AcceptedElicitation) and result.data == "yes"):
-                    task_ids = None
-            except Exception as e:
-                logger.debug("ctx.elicit unavailable for task link confirmation: %s", e)
+        task_ids = await _elicit_task_link_confirmation(ctx, task_ids or [], task_names)
 
         # Phase 3: write summary and note.
-        clean_summary = sec.scrub(summary).clean
+        clean_summary = _scrub_and_log(summary, "meeting summary")
         note = Note(
             note_type=NoteType.DOCS,
             content=clean_summary,
@@ -167,30 +197,37 @@ async def ingest_meeting(
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
     logger.info("ingest_meeting source_id=%s", source_id)
-    clean_title = sec.scrub(title).clean
-    clean_content = sec.scrub(content).clean
+
+    def _scrub_and_log(content: str, field_name: str) -> str:
+        """Scrub content and log if PII was detected."""
+        scrub_result = sec.scrub(content)
+        if scrub_result.was_modified:
+            logger.info("PII scrubbed from %s", field_name)
+        return scrub_result.clean
+
+    clean_title = _scrub_and_log(title, "meeting title")
+    clean_content = _scrub_and_log(content, "meeting content")
     await try_notify(ctx.report_progress(1, 2))
     with get_session() as db:
-
-        meeting: Meeting | None = None
-        already_existed = False
         if source_id:
-            meeting = meetings_repo.get_by_source_id(db, source_id)
-        if meeting:
-            already_existed = True
-            meeting.title = clean_title
-            meeting.content = clean_content
-            meetings_repo.save(db, meeting)
-        else:
-            meeting = Meeting(
-                title=clean_title,
-                content=clean_content,
-                source_id=source_id,
-                source_type=source_type,
-                source_url=source_url,
-                category=category,
-            )
-            meetings_repo.save(db, meeting)
+            existing = meetings_repo.get_by_source_id(db, source_id)
+            if existing is not None:
+                await try_notify(ctx.report_progress(2, 2))
+                await try_notify(ctx.info(f"Meeting {existing.id} ingested (existed=True)."))
+                return IngestMeetingResponse(
+                    meeting_id=existing.id,
+                    already_existed=True,
+                )
+
+        meeting = Meeting(
+            title=clean_title,
+            content=clean_content,
+            source_id=source_id,
+            source_type=source_type,
+            source_url=source_url,
+            category=category,
+        )
+        meetings_repo.save(db, meeting)
 
         if meeting.id is None:
             raise ToolError(
@@ -198,10 +235,10 @@ async def ingest_meeting(
             )
 
         await try_notify(ctx.report_progress(2, 2))
-        await try_notify(ctx.info(f"Meeting {meeting.id} ingested (existed={already_existed})."))
+        await try_notify(ctx.info(f"Meeting {meeting.id} ingested (existed=False)."))
         return IngestMeetingResponse(
             meeting_id=meeting.id,
-            already_existed=already_existed,
+            already_existed=False,
         )
 
 
