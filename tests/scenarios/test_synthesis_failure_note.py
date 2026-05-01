@@ -118,7 +118,7 @@ class TestCoerceNote:
 
     def test_note_type_mixed_case_normalised(self):
         raw = json.dumps([{
-            "note_type": "DECISION",
+            "note_type": " DECISION ",
             "content": "Picked option B.",
             "task_id": None,
         }])

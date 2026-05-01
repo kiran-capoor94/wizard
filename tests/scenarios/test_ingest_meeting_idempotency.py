@@ -60,12 +60,13 @@ class TestIngestMeetingIdempotency:
             select(Meeting).where(Meeting.source_id == "krisp-mutation-check")
         ).first()
         assert row is not None
-        assert "Original" in row.title
+        assert row.title == "Original Title"
 
     async def test_no_source_id_always_creates_new_row(self, mcp_client):
         args = {"title": "Stand-up", "content": "Quick sync."}
-        await mcp_client.call_tool("ingest_meeting", args)
+        r1 = await mcp_client.call_tool("ingest_meeting", args)
         r2 = await mcp_client.call_tool("ingest_meeting", args)
 
         assert not r2.is_error
         assert r2.structured_content["already_existed"] is False
+        assert r1.structured_content["meeting_id"] != r2.structured_content["meeting_id"]
