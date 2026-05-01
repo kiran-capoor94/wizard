@@ -159,28 +159,3 @@ def build_rolling_summary(notes: list[Note]) -> str | None:
     return "\n".join(entries) if entries else None
 
 
-def detect_drift(
-    old_ids: set[int],
-    new_ids: set[int],
-    entity_id: int,
-    artifact_id: str,
-) -> dict | None:
-    """Compare legacy FK path vs artifact_id path note sets.
-
-    Temporary migration utility for Phase 2 shadow-read comparison (artifact identity v3).
-    Will be removed after Phase 3 cutover is complete.
-
-    Returns None if both paths return identical note ID sets.
-    Returns a dict with drift details if they differ — caller should log
-    and halt Phase 3 cutover until resolved.
-    """
-    missing_from_new = old_ids - new_ids
-    missing_from_old = new_ids - old_ids
-    if not missing_from_new and not missing_from_old:
-        return None
-    return {
-        "entity_id": entity_id,
-        "artifact_id": artifact_id,
-        "missing_from_new": missing_from_new,
-        "missing_from_old": missing_from_old,
-    }
