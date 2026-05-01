@@ -425,3 +425,17 @@ class WorkRecommendationResponse(BaseModel):
     alternatives: list[TaskRecommendation]
     skipped_blocked: int
     message: str | None = None
+
+
+class SearchResult(BaseModel):
+    entity_type: Literal["note", "session", "meeting", "task"]
+    entity_id: int
+    title: str
+    snippet: str
+    created_at: datetime.datetime | None = None
+    task_id: int | None = None
+
+
+class SearchResponse(BaseModel):
+    results: list[SearchResult]
+    total: int
