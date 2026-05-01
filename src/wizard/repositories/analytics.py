@@ -183,26 +183,28 @@ class AnalyticsRepository:
         start_dt = datetime.datetime.combine(start, datetime.time.min)
         end_dt = datetime.datetime.combine(end, datetime.time.max)
 
-        sessions_in_window = db.exec(
-            select(WizardSession).where(
+        session_rows = db.exec(
+            select(WizardSession.id, WizardSession.created_at).where(
                 WizardSession.created_at >= start_dt,
                 WizardSession.created_at <= end_dt,
             )
         ).all()
 
-        task_start_calls = db.exec(
-            select(ToolCall).where(
+        task_start_rows = db.exec(
+            select(ToolCall.session_id).where(
                 ToolCall.tool_name == "task_start",
                 ToolCall.called_at >= start_dt,
                 ToolCall.called_at <= end_dt,
             )
         ).all()
 
-        if not task_start_calls:
+        if not task_start_rows:
             return 0.0
 
-        # Index sessions by id for O(1) lookup.
-        session_map = {s.id: s for s in sessions_in_window}
+        # Index session created_at by id for O(1) lookup.
+        session_created_at: dict[int, datetime.datetime] = {
+            sid: created_at for sid, created_at in session_rows if sid is not None
+        }
 
         # Single query: earliest note ever written. If any note predates a session's
         # start, prior context existed for that task_start — same answer for every
@@ -212,14 +214,14 @@ class AnalyticsRepository:
         ).first()
 
         compounding_count = 0
-        for tc in task_start_calls:
-            session = session_map.get(tc.session_id)
-            if session is None:
+        for session_id in task_start_rows:
+            created_at = session_created_at.get(session_id)
+            if created_at is None:
                 continue
-            if earliest_note_at is not None and earliest_note_at < session.created_at:
+            if earliest_note_at is not None and earliest_note_at < created_at:
                 compounding_count += 1
 
-        return round(compounding_count / len(task_start_calls), 2)
+        return round(compounding_count / len(task_start_rows), 2)
 
     def get_note_velocity(
         self, db: Session, start: datetime.date, end: datetime.date

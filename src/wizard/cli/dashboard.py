@@ -29,8 +29,7 @@ _STALE_THRESHOLD = 3
 
 def _load_dashboard_data() -> dict:
     if not Path(settings.db).exists() and settings.db != ":memory:":
-        st.error("Database not found. Run 'wizard setup' first.")
-        st.stop()
+        raise FileNotFoundError("Database not found. Run 'wizard setup' first.")
     today = datetime.date.today()
     week_ago = today - datetime.timedelta(days=_NOTE_WINDOW_DAYS)
     month_ago = today - datetime.timedelta(days=_TOOL_WINDOW_DAYS)
@@ -157,9 +156,9 @@ def _render_week_tab(data: dict) -> None:
     st.subheader("Note Velocity (last 7 days)")
     velocity = data["note_velocity"]
     if any(v > 0 for v in velocity.values()):
+        sorted_dates = sorted(velocity.keys())
         vel_df = pd.DataFrame(
-            {"Date": list(reversed(list(velocity.keys()))),
-             "Notes": list(reversed(list(velocity.values())))}
+            {"Date": sorted_dates, "Notes": [velocity[d] for d in sorted_dates]}
         ).set_index("Date")
         st.line_chart(vel_df)
     else:
@@ -168,9 +167,9 @@ def _render_week_tab(data: dict) -> None:
     st.subheader("Avg Session Duration (last 7 days, minutes)")
     sdur = data["session_velocity"]
     if any(v > 0 for v in sdur.values()):
+        sorted_sdur_dates = sorted(sdur.keys())
         sdur_df = pd.DataFrame(
-            {"Date": list(reversed(list(sdur.keys()))),
-             "Avg Duration (min)": list(reversed(list(sdur.values())))}
+            {"Date": sorted_sdur_dates, "Avg Duration (min)": [sdur[d] for d in sorted_sdur_dates]}
         ).set_index("Date")
         st.bar_chart(sdur_df)
     else:
@@ -215,6 +214,7 @@ def _render_tasks_tab(data: dict) -> None:
                 "Last Touched": (
                     t["last_worked_at"].strftime("%Y-%m-%d") if t["last_worked_at"] else "—"
                 ),
+                # hidden sentinel — used by _row_style for date comparison, not rendered
                 "_last_worked_raw": (
                     t["last_worked_at"].date() if t["last_worked_at"] else None
                 ),
@@ -302,7 +302,11 @@ def main() -> None:
     st.caption(
         f"Refreshed at {datetime.datetime.now().strftime('%H:%M:%S')} — auto-refresh every 60s"
     )
-    data = _load_dashboard_data()
+    try:
+        data = _load_dashboard_data()
+    except FileNotFoundError as exc:
+        st.error(str(exc))
+        st.stop()
     _render_kpi_strip(data)
     st.divider()
     today_tab, week_tab, tasks_tab, health_tab = st.tabs(
