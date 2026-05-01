@@ -89,7 +89,7 @@ def _coerce_note(n: dict) -> dict:
 
     content = n.get("content")
     if not isinstance(content, str):
-        n["content"] = str(content) if content is not None else ""
+        n["content"] = str(content or "")
 
     mental_model = n.get("mental_model")
     if isinstance(mental_model, list):
