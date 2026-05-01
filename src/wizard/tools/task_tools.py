@@ -182,7 +182,7 @@ async def task_start(
         raise
 
 
-async def compress_note_content(ctx: Context, content: str) -> str:
+async def _compress_note_content(ctx: Context, content: str) -> str:
     """Compress content to under 1000 chars via LLM, preserving technical specifics."""
     result = await ctx.sample(
         f"Compress the following note to under 1000 characters. "
@@ -203,9 +203,9 @@ async def _prepare_note_fields(
 ) -> tuple[str, str | None, str]:
     """Compress (if needed), scrub PII, and hash content. Returns (clean, mental_model, hash)."""
     if len(content) > 1000:
-        content = await compress_note_content(ctx, content)
+        content = await _compress_note_content(ctx, content)
     if mental_model is not None and len(mental_model) > 1000:
-        mental_model = await compress_note_content(ctx, mental_model)
+        mental_model = await _compress_note_content(ctx, mental_model)
     scrub_result = sec.scrub(content)
     if scrub_result.was_modified:
         logger.info("PII scrubbed from note content")
