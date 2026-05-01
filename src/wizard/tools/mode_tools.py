@@ -15,9 +15,6 @@ from ..schemas import GetModesResponse, ModeInfo, SetModeResponse
 
 logger = logging.getLogger(__name__)
 
-_INSTALLED_SKILLS = Path.home() / ".wizard" / "skills"
-_PACKAGE_SKILLS = Path(__file__).resolve().parent.parent / "skills"
-
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
 
 
@@ -33,7 +30,7 @@ def build_available_modes(
         return []
 
     if roots is None:
-        roots = [_INSTALLED_SKILLS, _PACKAGE_SKILLS]
+        roots = [settings.paths.installed_skills, settings.paths.package_skills]
 
     result: list[ModeInfo] = []
     for name in modes.allowed:

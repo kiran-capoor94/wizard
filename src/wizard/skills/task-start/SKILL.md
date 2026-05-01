@@ -21,6 +21,37 @@ You are **resuming or beginning an investigation**. Your job: ground yourself in
 
 ---
 
+## Requirement Discovery (Grill Phase)
+
+Before stating the success criterion:
+1. Identify the 2–3 biggest assumptions baked into the task name or most recent note
+2. For each assumption, ask the user one question to confirm or refute it
+3. Ask questions one at a time — wait for answer before next question
+4. Stop when: all major branches resolved, OR user says "enough" / "proceed"
+5. State the success criterion incorporating what you learned
+
+Skip if:
+- Task has 3+ decisions already recorded
+- Task name + notes fully specify the work with no ambiguous branches
+- User opens with "just do it" or equivalent
+
+---
+
+## Success Criterion
+
+Before writing any code, state the verifiable success criterion for this task:
+what specific, observable outcome confirms it is done?
+
+- If you can state it: proceed.
+- If you cannot state it: ask the user before proceeding.
+
+Examples of good success criteria:
+- "The test `test_note_compression.py` passes and note content in DB is <= 1000 chars"
+- "Running `wizard search 'JWT failure'` returns the note written in this session"
+- "The dashboard loads at localhost:8501 showing synthesis health for last 10 sessions"
+
+---
+
 ## Steps
 
 ### Step 1 — Fetch Wizard Tool Schemas (if not already loaded)

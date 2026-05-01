@@ -89,7 +89,7 @@ def _coerce_note(n: dict) -> dict:
 
     content = n.get("content")
     if not isinstance(content, str):
-        n["content"] = str(content) if content is not None else ""
+        n["content"] = "" if content is None else str(content)
 
     mental_model = n.get("mental_model")
     if isinstance(mental_model, list):
@@ -98,7 +98,7 @@ def _coerce_note(n: dict) -> dict:
     return n
 
 
-def _parse_notes(raw: str) -> list[SynthesisNote]:
+def parse_notes(raw: str) -> list[SynthesisNote]:
     """Parse LLM output into SynthesisNotes with JSON repair fallback.
 
     Strips thinking blocks first, then tries candidates from most-to-least
@@ -124,7 +124,8 @@ def _parse_notes(raw: str) -> list[SynthesisNote]:
                 parsed = json.loads(attempt)
                 if isinstance(parsed, dict):
                     parsed = [parsed]
-                return [SynthesisNote.model_validate(_coerce_note(n)) for n in parsed]
+                coerced = [_coerce_note(n) for n in parsed]
+                return [SynthesisNote.model_validate(c) for c in coerced if c.get("content")]
             except Exception as e:
                 last_err = e
 
@@ -140,7 +141,7 @@ class OllamaAdapter:
     """Native Ollama API client using /api/chat.
 
     Bypasses LiteLLM to call Ollama directly, which eliminates LiteLLM's
-    overhead. Uses instruction following + _parse_notes rather than
+    overhead. Uses instruction following + parse_notes rather than
     grammar-constrained format:'json' (grammar sampling can deadlock on small
     models). Passes think:false to suppress chain-of-thought on models like
     Qwen 3.5 that enable it by default.
@@ -156,7 +157,7 @@ class OllamaAdapter:
     def complete(self, messages: list[dict]) -> list[SynthesisNote]:
         """Call /api/chat and return validated SynthesisNotes.
 
-        Uses instruction following and _parse_notes for robust JSON extraction.
+        Uses instruction following and parse_notes for robust JSON extraction.
         ValidationError for schema mismatches propagates to the caller.
         """
         payload = {
@@ -168,7 +169,7 @@ class OllamaAdapter:
             "think": False,
             # No format:"json" — grammar-constrained sampling can deadlock on small
             # models (logits for valid JSON tokens all suppressed → empty response).
-            # _parse_notes handles free-form model output robustly instead.
+            # parse_notes handles free-form model output robustly instead.
             "options": self._options,
         }
         response = httpx.post(
@@ -182,7 +183,7 @@ class OllamaAdapter:
             raise ValueError(
                 "Ollama returned empty content — model may have failed to generate a response"
             )
-        return _parse_notes(content)
+        return parse_notes(content)
 
 
 def probe_backend_health(base_url: str | None) -> bool:
@@ -259,4 +260,4 @@ def complete(
         raw = getattr(response.choices[0], "text", "") or ""  # type: ignore[union-attr]
 
     logger.info("llm_adapters: synthesis complete (%d chars)", len(raw) if raw else 0)
-    return _parse_notes(raw or "")
+    return parse_notes(raw or "")

@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from wizard.llm_adapters import _parse_notes
+from wizard.config import settings
+from wizard.llm_adapters import parse_notes
 from wizard.models import Task, WizardSession
 from wizard.repositories.note import NoteRepository
 from wizard.schemas import SynthesisNote
@@ -18,7 +19,6 @@ from wizard.transcript import TranscriptReader
 
 @pytest.fixture
 def synthesiser(security, note_repo):
-    from wizard.config import settings
     return Synthesiser(
         reader=TranscriptReader(),
         note_repo=note_repo,
@@ -159,12 +159,48 @@ class TestSynthesisFailureHandling:
         assert ws.is_synthesised is True
 
 
+class TestFailureNoteTypeSynthesis:
+    """Phase 3: synthesis prompt includes failure type; LLM can produce failure notes."""
+
+    def test_format_prompt_includes_failure_note_type(self):
+        """format_prompt output must list 'failure' as a valid note_type."""
+        from wizard.synthesis_prompt import format_prompt
+
+        output = format_prompt([], task_table="")
+        assert '"failure"' in output
+
+    def test_synthesise_path_writes_failure_note(self, db_session, synthesiser):
+        """When LLM returns failure note_type, it is written as NoteType.FAILURE."""
+        from wizard.models import NoteType
+
+        ws = WizardSession(agent="claude-code")
+        db_session.add(ws)
+        db_session.flush()
+
+        tmp = _write_jsonl([{"type": "user", "content": "tried approach X"}])
+        try:
+            llm_response = [SynthesisNote(
+                task_id=None,
+                note_type="failure",
+                content="Tried inline cache invalidation — thundering herd on cache miss.",
+            )]
+            with patch("wizard.synthesis.llm_complete", return_value=llm_response):
+                synthesiser.synthesise_path(db_session, ws, Path(tmp), terminal=True)
+        finally:
+            os.unlink(tmp)
+
+        repo = NoteRepository()
+        notes = repo.get_notes_by_artifact_id(db_session, ws.artifact_id)
+        assert len(notes) == 1
+        assert notes[0].note_type == NoteType.FAILURE
+
+
 def test_parse_notes_coerces_task_id_list_to_none():
     """LLM returns task_id as a list (ambiguous multi-task note) — must drop to None."""
     raw = json.dumps([
         {"note_type": "decision", "content": "Updated tasks.", "task_id": [177, 178, 131]}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None
 
@@ -174,7 +210,7 @@ def test_parse_notes_coerces_empty_task_id_list_to_none():
     raw = json.dumps([
         {"note_type": "investigation", "content": "Some finding.", "task_id": []}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None
 
@@ -184,7 +220,7 @@ def test_parse_notes_coerces_task_id_string_to_int():
     raw = json.dumps([
         {"note_type": "decision", "content": "Made a call.", "task_id": "177"}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id == 177
 
@@ -194,7 +230,7 @@ def test_parse_notes_coerces_task_id_float_to_int():
     raw = json.dumps([
         {"note_type": "decision", "content": "Made a call.", "task_id": 177.0}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id == 177
 
@@ -204,7 +240,7 @@ def test_parse_notes_normalises_note_type_case():
     raw = json.dumps([
         {"note_type": "Investigation", "content": "Some finding.", "task_id": None}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].note_type == "investigation"
 
@@ -214,19 +250,18 @@ def test_parse_notes_maps_note_type_synonym():
     raw = json.dumps([
         {"note_type": "finding", "content": "Some finding.", "task_id": None}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].note_type == "investigation"
 
 
-def test_parse_notes_coerces_null_content():
-    """LLM returns null content — must coerce to empty string rather than fail."""
+def test_parse_notes_filters_null_content():
+    """LLM returns null content — note is filtered out rather than kept as empty string."""
     raw = json.dumps([
         {"note_type": "investigation", "content": None, "task_id": None}
     ])
-    notes = _parse_notes(raw)
-    assert len(notes) == 1
-    assert notes[0].content == ""
+    notes = parse_notes(raw)
+    assert len(notes) == 0
 
 
 def test_parse_notes_coerces_mental_model_list():
@@ -239,7 +274,7 @@ def test_parse_notes_coerces_mental_model_list():
             "mental_model": ["point one", "point two"],
         }
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].mental_model == "point one\npoint two"
 
@@ -249,7 +284,7 @@ def test_parse_notes_coerces_task_id_non_numeric_string_to_none():
     raw = json.dumps([
         {"note_type": "decision", "content": "Made a call.", "task_id": "abc"}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None
 
@@ -259,7 +294,7 @@ def test_parse_notes_coerces_non_string_content():
     raw = json.dumps([
         {"note_type": "investigation", "content": 42, "task_id": None}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].content == "42"
 
@@ -269,6 +304,6 @@ def test_parse_notes_coerces_zero_task_id_to_none():
     raw = json.dumps([
         {"note_type": "decision", "content": "Made a call.", "task_id": 0}
     ])
-    notes = _parse_notes(raw)
+    notes = parse_notes(raw)
     assert len(notes) == 1
     assert notes[0].task_id is None

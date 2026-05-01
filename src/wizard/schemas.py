@@ -220,13 +220,26 @@ class PriorSessionSummary(BaseModel):
     summary: str
     closed_at: UTCDateTime
     task_ids: list[int] = Field(default_factory=list)
+    raw_session_state: str | None = None
+
+
+class TaskIndexEntry(BaseModel):
+    id: int
+    name: str
+    status: TaskStatus
+    priority: TaskPriority
+    note_count: int
+    notes_by_type: dict[str, int]
+    last_note_hint: str | None
+    last_worked_at: UTCDateTime | None
+    stale_days: int
 
 
 class SessionStartResponse(BaseModel):
     session_id: int
     continued_from_id: int | None = None
-    open_tasks: str = ""  # JSON array of TaskContext objects
-    blocked_tasks: str = ""  # JSON array of TaskContext objects
+    open_tasks: list[TaskIndexEntry] = Field(default_factory=list)
+    blocked_tasks: list[TaskIndexEntry] = Field(default_factory=list)
     unsummarised_meetings: list[MeetingContext]
     wizard_context: dict | None = None
     skill_instructions: str | None = None
@@ -242,7 +255,7 @@ class TaskStartResponse(BaseModel):
     task: TaskContext
     compounding: bool  # True if prior notes exist for this task
     notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
-    prior_notes: list[NoteDetail]  # 3 most recent notes, oldest first
+    prior_notes: list[NoteDetail]  # up to 5: failure > decision > mental_model > recent
     total_notes: int = 0  # total note count including older notes not returned
     older_notes_available: bool = (
         False  # True if note_count > 3; use rewind_task for full history
@@ -255,6 +268,7 @@ class TaskStartResponse(BaseModel):
 class SaveNoteResponse(BaseModel):
     note_id: int
     mental_model_saved: bool
+    was_duplicate: bool = False
 
 
 class UpdateTaskResponse(BaseModel):
@@ -287,6 +301,7 @@ class SessionEndResponse(BaseModel):
     next_actions_count: int = 0
     intent: str | None = None
     skill_instructions: str | None = None
+    skill_candidate: str | None = None
 
 
 class IngestMeetingResponse(BaseModel):
@@ -411,3 +426,17 @@ class WorkRecommendationResponse(BaseModel):
     alternatives: list[TaskRecommendation]
     skipped_blocked: int
     message: str | None = None
+
+
+class SearchResult(BaseModel):
+    entity_type: Literal["note", "session", "meeting", "task"]
+    entity_id: int
+    title: str
+    snippet: str
+    created_at: datetime.datetime | None = None
+    task_id: int | None = None
+
+
+class SearchResponse(BaseModel):
+    results: list[SearchResult]
+    total: int

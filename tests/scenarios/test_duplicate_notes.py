@@ -1,4 +1,4 @@
-"""Scenario: saving the exact same note twice -- both should persist."""
+"""Scenario: saving the exact same note twice -- deduplication returns same note_id."""
 
 
 async def test_duplicate_notes(mcp_client, seed_task):
@@ -15,8 +15,11 @@ async def test_duplicate_notes(mcp_client, seed_task):
         "task_id": task.id, "note_type": "investigation", "content": content,
     })
     assert not r2.is_error, r2
-    assert r1.structured_content["note_id"] != r2.structured_content["note_id"]
+    # Deduplication: identical content returns the same note_id and was_duplicate=True
+    assert r1.structured_content["note_id"] == r2.structured_content["note_id"]
+    assert r2.structured_content["was_duplicate"] is True
 
     r = await mcp_client.call_tool("task_start", {"task_id": task.id})
     assert not r.is_error, r
-    assert sum(r.structured_content["notes_by_type"].values()) == 2
+    # Only one note persisted due to deduplication
+    assert sum(r.structured_content["notes_by_type"].values()) == 1

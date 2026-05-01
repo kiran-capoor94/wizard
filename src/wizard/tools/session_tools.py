@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import uuid
-from pathlib import Path
 from typing import Literal
 
 import sentry_sdk
@@ -22,7 +20,7 @@ from ..deps import (
     get_task_state_repo,
 )
 from ..mcp_instance import mcp
-from ..mid_session import MID_SESSION_TASKS, cancel_mid_session_synthesis
+from ..mid_session import cancel_mid_session_synthesis, register_mid_session_task
 from ..models import Note, NoteType, WizardSession
 from ..repositories import (
     MeetingRepository,
@@ -47,7 +45,7 @@ from ..skills import (
     SKILL_SESSION_RESUME,
     load_skill_post,
 )
-from .formatting import task_contexts_to_json, try_notify
+from .formatting import try_notify
 from .mode_tools import build_available_modes
 from .session_helpers import (
     build_prior_summaries,
@@ -58,7 +56,26 @@ from .session_helpers import (
 
 logger = logging.getLogger(__name__)
 
-SESSIONS_DIR = Path.home() / ".wizard" / "sessions"
+_UNSAFE_SESSION_ID_CHARS = frozenset("/\\:")
+
+
+def _scrub_field(sec: SecurityService, value: str | None, field_name: str) -> str | None:
+    """Scrub PII from a single field, logging if modified. Returns None unchanged."""
+    if value is None:
+        return None
+    result = sec.scrub(value)
+    if result.was_modified:
+        logger.info("PII scrubbed from %s", field_name)
+    return result.clean
+
+
+def _is_safe_session_id(sid: str) -> bool:
+    """Return True if sid is safe to use as a filesystem path component.
+
+    Rejects path traversal sequences and empty strings; allows UUIDs and
+    agent-generated IDs like 'session-2026-04-22-gemini-studio-free-tier'.
+    """
+    return bool(sid) and ".." not in sid and not any(c in sid for c in _UNSAFE_SESSION_ID_CHARS)
 
 
 def _apply_default_mode(session: WizardSession) -> None:
@@ -69,6 +86,23 @@ def _apply_default_mode(session: WizardSession) -> None:
         and settings.modes.default in settings.modes.allowed
     ):
         session.active_mode = settings.modes.default
+
+
+async def _detect_skill_candidate(ctx: Context, summary: str, intent: str) -> str | None:
+    prompt = (
+        "Review this session summary and intent. Did this session demonstrate a reusable "
+        "problem-solving pattern worth turning into a skill?\n\n"
+        f"Intent: {intent}\n"
+        f"Summary: {summary}\n\n"
+        "If yes, describe the pattern in 2-3 sentences covering: what the pattern is, "
+        "when to apply it, and the key steps. "
+        "If no reusable pattern is present, return exactly: null"
+    )
+    result = await ctx.sample(prompt)
+    text = result.text.strip()
+    if not text or text.lower() == "null":
+        return None
+    return text
 
 
 async def session_start(
@@ -82,16 +116,14 @@ async def session_start(
     """Create a session, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start agent_session_id=%s", agent_session_id)
 
-    if agent_session_id:
-        try:
-            uuid.UUID(agent_session_id)
-        except ValueError:
-            raise ToolError("Invalid agent_session_id") from None
+    if agent_session_id and not _is_safe_session_id(agent_session_id):
+        logger.warning("session_start: unsafe agent_session_id %r — ignoring", agent_session_id)
+        agent_session_id = None
 
     # Read session source from hook-written keyed directory.
     source = "startup"
     if agent_session_id:
-        source_file = SESSIONS_DIR / agent_session_id / "source"
+        source_file = settings.paths.sessions_dir / agent_session_id / "source"
         if source_file.exists():
             source = source_file.read_text().strip() or "startup"
 
@@ -122,7 +154,7 @@ async def session_start(
 
         # Write wizard integer ID to the agent-session keyed directory.
         if agent_session_id:
-            keyed_dir = SESSIONS_DIR / agent_session_id
+            keyed_dir = settings.paths.sessions_dir / agent_session_id
             keyed_dir.mkdir(parents=True, exist_ok=True)
             (keyed_dir / "wizard_id").write_text(str(session.id))
 
@@ -141,8 +173,8 @@ async def session_start(
         await try_notify(ctx.report_progress(2, 4))
 
         open_tasks_total = t_repo.count_open_tasks(db)
-        open_tasks_list = t_repo.get_open_task_contexts(db, limit=20)
-        blocked_list = t_repo.get_blocked_task_contexts(db)
+        open_tasks_index = t_repo.get_open_task_index(db, limit=20)
+        blocked_index = t_repo.get_blocked_task_index(db)
 
         await try_notify(ctx.report_progress(3, 4))
 
@@ -152,9 +184,9 @@ async def session_start(
             session_id=session.id,
             continued_from_id=continued_from_id,
             source=source,
-            open_tasks=task_contexts_to_json(open_tasks_list),
+            open_tasks=open_tasks_index,
             open_tasks_total=open_tasks_total,
-            blocked_tasks=task_contexts_to_json(blocked_list),
+            blocked_tasks=blocked_index,
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             wizard_context=build_wizard_context(),
             closed_sessions=closed_sessions,
@@ -175,9 +207,107 @@ async def session_start(
                 wizard_session_id=response.session_id,
             )
         )
-        MID_SESSION_TASKS[agent_session_id] = mid_task
+        await register_mid_session_task(agent_session_id, mid_task)
 
     return response
+
+
+def _scrub_session_state(
+    sec: SecurityService,
+    intent: str,
+    working_set: list[int],
+    state_delta: str,
+    open_loops: list[str],
+    next_actions: list[str],
+    closure_status: Literal["clean", "interrupted", "blocked"],
+    tool_registry: str | None,
+) -> tuple[SessionState, str]:
+    """Scrub PII from session state fields and return state + clean intent."""
+
+    state = SessionState(
+        intent=_scrub_field(sec, intent, "session intent"),
+        working_set=working_set,
+        state_delta=_scrub_field(sec, state_delta, "state_delta"),
+        open_loops=[_scrub_field(sec, loop, "open_loop") for loop in open_loops],
+        next_actions=[_scrub_field(sec, action, "next_action") for action in next_actions],
+        closure_status=closure_status,
+        tool_registry=tool_registry,
+    )
+    return state, state.intent
+
+
+async def _persist_session_end(
+    ctx: Context,
+    session_id: int,
+    summary: str,
+    intent: str,
+    working_set: list[int],
+    state_delta: str,
+    open_loops: list[str],
+    next_actions: list[str],
+    closure_status: Literal["clean", "interrupted", "blocked"],
+    tool_registry: str | None,
+    sec: SecurityService,
+    n_repo: NoteRepository,
+) -> SessionEndResponse:
+    """Write session close state and summary note to the DB; return response."""
+    state, clean_intent = _scrub_session_state(
+        sec, intent, working_set, state_delta, open_loops, next_actions,
+        closure_status, tool_registry,
+    )
+
+    with get_session() as db:
+        session = db.get(WizardSession, session_id)
+        if session is None:
+            await ctx.error(f"Session {session_id} not found")
+            raise ToolError(f"Session {session_id} not found")
+
+        agent_id = session.agent_session_id
+        if agent_id:
+            cancel_mid_session_synthesis(agent_id)
+
+        session_state_saved = False
+        try:
+            session.session_state = state.model_dump_json()
+            session_state_saved = True
+        except (ValueError, TypeError) as e:
+            logger.warning("session_end: failed to serialise session_state: %s", e)
+
+        clean_summary = _scrub_field(sec, summary, "session summary")
+        session.closed_by = "user"
+        session.summary = clean_summary
+        db.add(session)
+        db.flush()
+        db.refresh(session)
+        if session.id is None:
+            raise ToolError("Internal error: session was not assigned an id after flush")
+
+        note = Note(
+            note_type=NoteType.SESSION_SUMMARY,
+            content=clean_summary,
+            session_id=session.id,
+            artifact_id=session.artifact_id,
+            artifact_type="session",
+        )
+        saved = n_repo.save(db, note)
+        if saved.id is None:
+            raise ToolError("Internal error: note was not assigned an id after flush")
+
+        await ctx.delete_state("current_session_id")
+        await try_notify(ctx.info(
+            f"Session {session.id} closed. Status: {closure_status}. "
+            f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
+        ))
+
+        return SessionEndResponse(
+            note_id=saved.id,
+            session_state_saved=session_state_saved,
+            closure_status=closure_status,
+            open_loops_count=len(open_loops),
+            next_actions_count=len(next_actions),
+            intent=clean_intent,
+            skill_instructions=load_skill_post(SKILL_SESSION_END),
+        )
 
 
 async def session_end(
@@ -197,78 +327,24 @@ async def session_end(
     """Persists session summary + SessionState to WizardSession."""
     logger.info("session_end session_id=%d", session_id)
     try:
-        with get_session() as db:
-            session = db.get(WizardSession, session_id)
-            if session is None:
-                await ctx.error(f"Session {session_id} not found")
-                raise ToolError(f"Session {session_id} not found")
-
-            agent_id = session.agent_session_id
-            if agent_id:
-                cancel_mid_session_synthesis(agent_id)
-
-            state = SessionState(
-                intent=sec.scrub(intent).clean,
-                working_set=working_set,
-                state_delta=sec.scrub(state_delta).clean,
-                open_loops=[sec.scrub(loop).clean for loop in open_loops],
-                next_actions=[sec.scrub(action).clean for action in next_actions],
-                closure_status=closure_status,
-                tool_registry=tool_registry,
-            )
-            session_state_saved = False
-            try:
-                session.session_state = state.model_dump_json()
-                session_state_saved = True
-            except (ValueError, TypeError) as e:
-                logger.warning("session_end: failed to serialise session_state: %s", e)
-
-            clean_summary = sec.scrub(summary).clean
-            session.closed_by = "user"
-            session.summary = clean_summary
-            db.add(session)
-            db.flush()
-            db.refresh(session)
-            if session.id is None:
-                raise ToolError(
-                    "Internal error: session was not assigned an id after flush"
-                )
-
-            note = Note(
-                note_type=NoteType.SESSION_SUMMARY,
-                content=clean_summary,
-                session_id=session.id,
-                artifact_id=session.artifact_id,
-                artifact_type="session",
-            )
-            saved = n_repo.save(db, note)
-            if saved.id is None:
-                raise ToolError(
-                    "Internal error: note was not assigned an id after flush"
-                )
-
-            await ctx.delete_state("current_session_id")
-            await try_notify(ctx.info(
-                f"Session {session.id} closed. Status: {closure_status}. "
-                f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
-            ))
-
-            return SessionEndResponse(
-                note_id=saved.id,
-                session_state_saved=session_state_saved,
-                closure_status=closure_status,
-                open_loops_count=len(open_loops),
-                next_actions_count=len(next_actions),
-                intent=intent,
-                skill_instructions=load_skill_post(SKILL_SESSION_END),
-            )
+        response = await _persist_session_end(
+            ctx, session_id, summary, intent, working_set, state_delta,
+            open_loops, next_actions, closure_status, tool_registry, sec, n_repo,
+        )
     except ValueError as e:
         logger.warning("session_end failed: %s", e)
         raise ToolError(str(e)) from e
     except Exception as e:
-        # Capture unexpected exceptions in Sentry
         sentry_sdk.capture_exception(e)
         raise
+
+    if working_set:
+        try:
+            response.skill_candidate = await _detect_skill_candidate(ctx, summary, intent)
+        except Exception as e:
+            logger.warning("session_end: skill candidate detection failed: %s", e)
+
+    return response
 
 
 def _deserialise_session_state(
@@ -340,11 +416,9 @@ async def resume_session(
     """Resume a prior session in a new thread. Creates a new session."""
     logger.info("resume_session session_id=%s", session_id)
 
-    if agent_session_id:
-        try:
-            uuid.UUID(agent_session_id)
-        except ValueError:
-            raise ToolError("Invalid agent_session_id") from None
+    if agent_session_id and not _is_safe_session_id(agent_session_id):
+        logger.warning("resume_session: unsafe agent_session_id %r — ignoring", agent_session_id)
+        agent_session_id = None
 
     with get_session() as db:
         # Find prior session
@@ -378,7 +452,7 @@ async def resume_session(
 
         # Write wizard integer ID to the agent-session keyed directory (mirrors session_start).
         if agent_session_id and new_session.id is not None:
-            keyed_dir = SESSIONS_DIR / agent_session_id
+            keyed_dir = settings.paths.sessions_dir / agent_session_id
             keyed_dir.mkdir(parents=True, exist_ok=True)
             (keyed_dir / "wizard_id").write_text(str(new_session.id))
 

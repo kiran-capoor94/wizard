@@ -1,9 +1,10 @@
+import datetime
 import logging
 
 from sqlmodel import Session, case, col, func, select
 
 from ..models import Note, Task, TaskPriority, TaskState, TaskStatus
-from ..schemas import TaskContext
+from ..schemas import TaskContext, TaskIndexEntry
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,19 @@ _PRIORITY_ORDER = case(
     (col(Task.priority) == TaskPriority.MEDIUM, 1),
     else_=2,
 )
+
+
+def _score_open_task(entry: TaskIndexEntry) -> int:
+    score = 0
+    if entry.stale_days == 0:
+        score += 40
+    if entry.status == TaskStatus.IN_PROGRESS:
+        score += 30
+    if entry.notes_by_type.get("decision", 0) > 0:
+        score += 15
+    if entry.note_count >= 3:
+        score += 15
+    return score
 
 
 class TaskRepository:
@@ -109,7 +123,10 @@ class TaskRepository:
     def get_open_task_contexts(
         self, db: Session, limit: int | None = None
     ) -> list[TaskContext]:
-        """Open tasks (TODO / IN_PROGRESS) sorted by priority then last-worked desc."""
+        """Open tasks for resources.py (OpenTasksResource).
+
+        Use get_open_task_index for session_start.
+        """
         return self._query_task_contexts(
             db,
             col(Task.status).in_(
@@ -121,7 +138,10 @@ class TaskRepository:
     def get_blocked_task_contexts(
         self, db: Session, limit: int | None = None
     ) -> list[TaskContext]:
-        """Blocked tasks sorted by priority then last-worked desc."""
+        """Blocked tasks for resources.py (BlockedTasksResource).
+
+        Use get_blocked_task_index for session_start.
+        """
         return self._query_task_contexts(
             db, Task.status == TaskStatus.BLOCKED, limit=limit
         )
@@ -160,11 +180,12 @@ class TaskRepository:
             .order_by(_PRIORITY_ORDER)
             .limit(limit)
         )
-        return [(row[0], row[1]) for row in db.execute(stmt).all()]  # type: ignore
+        return [(row[0], row[1]) for row in db.execute(stmt).all()]  # type: ignore[call-overload]
 
-    def _query_task_contexts(
+    def _load_task_scaffolding(
         self, db: Session, *where, limit: int | None = None
-    ) -> list[TaskContext]:
+    ) -> tuple[list[Task], dict[int, TaskState], dict[int, Note]]:
+        """Batch-load tasks with states and latest notes. Shared by index and context queries."""
         last_worked = self._latest_note_subquery()
         stmt = (
             select(Task, last_worked)
@@ -173,9 +194,9 @@ class TaskRepository:
         )
         if limit is not None:
             stmt = stmt.limit(limit)
-        rows = db.execute(stmt).all()  # type: ignore
+        rows = db.execute(stmt).all()  # type: ignore[call-overload]
         if not rows:
-            return []
+            return [], {}, {}
 
         tasks: list[Task] = [row[0] for row in rows]
         task_ids = [t.id for t in tasks if t.id is not None]
@@ -188,7 +209,14 @@ class TaskRepository:
                 task_states[ts.task_id] = ts
 
         latest_notes = self._batch_load_latest_notes(db, tasks)
+        return tasks, task_states, latest_notes
 
+    def _query_task_contexts(
+        self, db: Session, *where, limit: int | None = None
+    ) -> list[TaskContext]:
+        tasks, task_states, latest_notes = self._load_task_scaffolding(
+            db, *where, limit=limit
+        )
         results: list[TaskContext] = []
         for task in tasks:
             tid = task.id
@@ -258,3 +286,88 @@ class TaskRepository:
             if n.task_id is not None and n.task_id not in latest:
                 latest[n.task_id] = n
         return latest
+
+    def _batch_load_notes_by_type(
+        self,
+        db: Session,
+        task_ids: list[int],
+    ) -> dict[int, dict[str, int]]:
+        """Return {task_id: {note_type_str: count}} for active notes on given tasks."""
+        if not task_ids:
+            return {}
+        rows = db.execute(
+            select(Note.task_id, Note.note_type, func.count())
+            .where(col(Note.task_id).in_(task_ids))
+            .where(Note.status == "active")
+            .group_by(Note.task_id, Note.note_type)
+        ).all()
+        result: dict[int, dict[str, int]] = {}
+        for task_id, note_type, count in rows:
+            if task_id is not None:
+                result.setdefault(task_id, {})[note_type] = count
+        return result
+
+    def _query_task_index(
+        self,
+        db: Session,
+        *where,
+        limit: int | None = None,
+    ) -> list[TaskIndexEntry]:
+        """Build compact TaskIndexEntry list for session_start index."""
+        tasks, task_states, latest_notes = self._load_task_scaffolding(
+            db, *where, limit=limit
+        )
+        task_ids = [t.id for t in tasks if t.id is not None]
+        notes_by_type = self._batch_load_notes_by_type(db, task_ids)
+
+        results: list[TaskIndexEntry] = []
+        for task in tasks:
+            tid = task.id
+            if tid is None:
+                continue
+            ts = task_states.get(tid)
+            latest = latest_notes.get(tid)
+            nbt = notes_by_type.get(tid, {})
+            results.append(TaskIndexEntry(
+                id=tid,
+                name=task.name,
+                status=task.status,
+                priority=task.priority,
+                note_count=sum(nbt.values()),
+                notes_by_type=nbt,
+                last_note_hint=latest.content[:80] if latest else None,
+                last_worked_at=ts.last_note_at if ts else None,
+                stale_days=ts.stale_days if ts else 0,
+            ))
+        return results
+
+    def get_open_task_index(
+        self,
+        db: Session,
+        limit: int | None = None,
+    ) -> list[TaskIndexEntry]:
+        """Compact index of open tasks for session_start."""
+        entries = self._query_task_index(
+            db,
+            col(Task.status).in_(  # pyright: ignore[reportAttributeAccessIssue]
+                [TaskStatus.TODO, TaskStatus.IN_PROGRESS]
+            ),
+            limit=limit,
+        )
+        entries.sort(
+            key=lambda e: (_score_open_task(e), e.last_worked_at or datetime.datetime.min),
+            reverse=True,
+        )
+        return entries
+
+    def get_blocked_task_index(
+        self,
+        db: Session,
+        limit: int | None = None,
+    ) -> list[TaskIndexEntry]:
+        """Compact index of blocked tasks for session_start."""
+        entries = self._query_task_index(
+            db, Task.status == TaskStatus.BLOCKED, limit=limit
+        )
+        entries.sort(key=lambda e: e.stale_days, reverse=True)
+        return entries

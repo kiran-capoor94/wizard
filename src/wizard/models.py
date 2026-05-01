@@ -71,6 +71,7 @@ class NoteType(str, Enum):
     DOCS = "docs"
     LEARNINGS = "learnings"
     SESSION_SUMMARY = "session_summary"
+    FAILURE = "failure"
 
 
 class MeetingTasks(SQLModel, table=True):

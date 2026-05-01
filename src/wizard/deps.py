@@ -7,11 +7,12 @@ from pathlib import Path
 
 from sqlmodel import Session
 
-from .config import settings
+from .config import WizardPaths, settings
 from .database import get_session as _get_db_session_impl
 from .repositories import (
     MeetingRepository,
     NoteRepository,
+    SearchRepository,
     SessionRepository,
     TaskRepository,
     TaskStateRepository,
@@ -61,13 +62,18 @@ def get_session_repo() -> SessionRepository:
     return SessionRepository()
 
 
+def get_search_repo() -> SearchRepository:
+    return SearchRepository()
+
+
 def get_session_closer() -> SessionCloser:
     return SessionCloser(security=get_security(), settings=settings)
 
 
+def get_wizard_paths() -> WizardPaths:
+    return settings.paths
+
+
 def get_skill_roots() -> list[Path]:
     """Return the default skill search roots for mode tools."""
-    return [
-        Path.home() / ".wizard" / "skills",
-        Path(__file__).resolve().parent / "skills",
-    ]
+    return [settings.paths.installed_skills, settings.paths.package_skills]

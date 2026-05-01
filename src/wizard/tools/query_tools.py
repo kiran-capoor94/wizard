@@ -4,16 +4,24 @@ import base64
 import contextlib
 import json
 import logging
+from typing import Literal
 
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from sqlmodel import Session
 
 from ..deps import get_db_session as _get_db_session
-from ..deps import get_note_repo, get_session_repo, get_task_repo, get_task_state_repo
+from ..deps import (
+    get_note_repo,
+    get_search_repo,
+    get_session_repo,
+    get_task_repo,
+    get_task_state_repo,
+)
 from ..mcp_instance import mcp
 from ..repositories import (
     NoteRepository,
+    SearchRepository,
     SessionRepository,
     TaskRepository,
     TaskStateRepository,
@@ -22,6 +30,7 @@ from ..schemas import (
     GetSessionsResponse,
     GetTasksResponse,
     NoteDetail,
+    SearchResponse,
     SessionDetailResponse,
     SessionState,
     SessionSummary,
@@ -226,7 +235,26 @@ async def get_session(
     return SessionDetailResponse(session=summary, session_state=state, notes=notes)
 
 
+async def search(
+    query: str,
+    limit: int = 10,
+    entity_type: Literal["note", "session", "meeting", "task"] | None = None,
+    s_repo: SearchRepository = Depends(get_search_repo),
+    db: Session = Depends(_get_db_session),
+) -> SearchResponse:
+    """Search across notes, sessions, meetings, and tasks by keyword.
+
+    Uses SQLite FTS5. Results ranked by relevance (BM25).
+    entity_type: optional filter — 'note', 'session', 'meeting', or 'task'.
+    """
+    if not query.strip():
+        raise ToolError("query must not be empty")
+    results = s_repo.search(db, query, limit=limit, entity_type=entity_type)
+    return SearchResponse(results=results, total=len(results))
+
+
 mcp.tool()(get_tasks)
 mcp.tool()(get_task)
 mcp.tool()(get_sessions)
 mcp.tool()(get_session)
+mcp.tool()(search)

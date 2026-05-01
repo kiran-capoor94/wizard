@@ -69,7 +69,7 @@ def test_ollama_adapter_posts_to_api_chat():
 
     # Required payload fields
     payload = mock_post.call_args.kwargs["json"]
-    # No grammar constraint — instruction following + _parse_notes instead
+    # No grammar constraint — instruction following + parse_notes instead
     assert "format" not in payload
     # Thinking suppressed for models that support it (e.g. Qwen 3.5)
     assert payload["think"] is False

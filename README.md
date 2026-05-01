@@ -203,7 +203,7 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 
 ## Skills
 
-13 FastMCP skills installed to `~/.wizard/skills/` during setup. Skills guide agent behaviour for common workflows.
+14 FastMCP skills installed to `~/.wizard/skills/` during setup. Skills guide agent behaviour for common workflows.
 
 | Skill                   | When it fires                                               |
 | ----------------------- | ----------------------------------------------------------- |
@@ -217,9 +217,12 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 | `meeting-to-tasks`      | Turning meeting action items into tracked tasks             |
 | `code-review`           | Reviewing code changes with prior wizard context            |
 | `architecture-debate`   | Choosing between design approaches before implementing      |
-| `architect`             | Activated via `set_mode` — principal-level systems thinking |
+| `wizard-playground`     | Any diagram request — architecture, sequence, ERD, flow, state machine |
+| `architect`             | Activated via `set_mode` — principal-level systems thinking with sub-skills for arch review, constraints design, and diagramming |
 | `ideation`              | Activated via `set_mode` — divergent creative exploration with elicitation and ranked recommendations |
 | `product-owner`         | Activated via `set_mode` — ruthless user-value focus        |
+
+**Mode sub-skills** are loaded automatically as supporting context when a mode is active. `architect` mode ships with two: `arch-review` (structured architecture audit with blast-radius scoring) and `constraints-designer` (elicitation protocol for constraints and named invariants). They also appear in the mode's trigger table so the agent invokes them at the right moment.
 
 ---
 
@@ -245,7 +248,7 @@ graph TD
 
 **Layers:**
 
-- **MCP Layer** — FastMCP server with tools (write path), resources (read path), and skills (agent guidance). A `ToolLoggingMiddleware` logs every invocation to an append-only telemetry table.
+- **MCP Layer** — FastMCP server with tools (write path), resources (read path), and skills (agent guidance). `ToolLoggingMiddleware` logs every invocation with a Sentry span. `SessionStateMiddleware` snapshots session state and sets the Sentry user on each tool call.
 - **Repositories** — Query layer over SQLModel/SQLite. `TaskRepository`, `NoteRepository`, `MeetingRepository`, `SessionRepository`, `TaskStateRepository`.
 - **Synthesis** — Runs at hook time, outside the MCP server. `OllamaAdapter` for local Ollama backends; LiteLLM for cloud. Backends tried in priority order; first healthy wins.
 - **Artifact identity** — Every task, meeting, and session carries a UUID `artifact_id`. Notes anchor to a single entity. Enables synthesis deduplication and note lifecycle tracking (`active` / `superseded` / `unclassified`).
@@ -343,7 +346,7 @@ src/wizard/
     task_state.py
   resources.py               # 5 MCP read-only resources
   prompts.py                 # MCP prompt templates
-  middleware.py              # ToolLoggingMiddleware
+  middleware.py              # ToolLoggingMiddleware (Sentry spans) + SessionStateMiddleware (snapshot + user tag)
   transcript.py              # TranscriptReader (JSONL parser)
   synthesis.py               # Synthesiser (ordered backend failover)
   llm_adapters.py            # OllamaAdapter, LiteLLM wrapper, probe_backend_health
@@ -359,6 +362,10 @@ src/wizard/
   alembic/                   # DB migrations (bundled for wizard update)
   hooks/                     # hook scripts (bundled, copied to ~/.wizard/hooks/ on setup)
   skills/                    # FastMCP skills source (copied to ~/.wizard/skills/ on setup)
+    architect/               # Mode skill + references/ sub-skills (arch-review, constraints-designer)
+    ideation/                # Mode skill
+    product-owner/           # Mode skill
+    wizard-playground/       # Mermaid diagram workbench (invocable skill, not a mode)
 hooks/
   session-end.sh             # SessionEnd hook — transcript synthesis trigger
   session-start.sh           # SessionStart hook — personalization + session boot injection

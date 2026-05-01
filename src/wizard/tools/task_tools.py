@@ -1,9 +1,12 @@
+import hashlib
 import logging
+from typing import Annotated
 
 import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
+from pydantic import BeforeValidator
 
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
@@ -19,15 +22,9 @@ from ..models import (
 from ..repositories import MeetingRepository, NoteRepository, TaskRepository, TaskStateRepository
 from ..schemas import (
     CreateTaskResponse,
-    MissingResponse,
     NoteDetail,
-    RewindResponse,
-    RewindSummary,
     SaveNoteResponse,
-    Signal,
-    TaskContext,
     TaskStartResponse,
-    TimelineEntry,
     UpdateTaskResponse,
 )
 from ..security import SecurityService
@@ -39,40 +36,83 @@ from .task_fields import (
     elicit_done_confirmation,
 )
 
-SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-_VALID_STATUSES = {s.value for s in TaskStatus}
+_STATUS_ALIASES: dict[str, str] = {
+    "completed": "done",
+    "complete": "done",
+    "finish": "done",
+    "finished": "done",
+    "open": "todo",
+    "pending": "todo",
+    "wip": "in_progress",
+    "doing": "in_progress",
+    "inactive": "archived",
+}
+
+
+def _normalize_status(v: object) -> object:
+    if isinstance(v, str):
+        return _STATUS_ALIASES.get(v.lower(), v)
+    return v
+
+
+NullableTaskStatus = Annotated[TaskStatus | None, BeforeValidator(_normalize_status)]
+TaskStatusWithDefault = Annotated[TaskStatus, BeforeValidator(_normalize_status)]
 
 logger = logging.getLogger(__name__)
 
-
 _KEY_NOTES_CAP = 5  # max notes returned by task_start
 
+
+def _add_tier_notes(
+    selected: list,
+    seen: set[int],
+    notes: list,
+) -> None:
+    """Add notes from a tier until cap is reached. Modifies selected and seen in place."""
+    for n in sorted(notes, key=lambda x: x.created_at):
+        if len(selected) >= _KEY_NOTES_CAP:
+            break
+        if n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
 
 
 def _select_key_notes(notes_desc: list) -> list:
     """Select the most informative notes for task_start context.
 
     Priority (hard-ordered, total capped at _KEY_NOTES_CAP):
+    0. All failure notes — what didn't work is load-bearing context.
     1. All decision notes — resolved choices are always load-bearing.
-    2. Notes with mental_models — explicit understanding captures; already
-       distilled into rolling_summary but useful as anchors.
-    3. Fill remaining slots with most recent notes not already selected.
+    2. Notes with mental_models — explicit understanding captures.
+    3. Fill remaining slots with most recent notes (newest-first).
 
-    Returns notes sorted oldest-first for readability.
+    Returns notes in priority order (oldest-first within tiers 0-2, newest-first for tier 3).
     """
     selected = []
     seen: set[int] = set()
 
-    for n in notes_desc:
-        if n.note_type == NoteType.DECISION and n.id is not None and n.id not in seen:
-            selected.append(n)
-            seen.add(n.id)
+    # Tier 0: failure notes (oldest-first within tier)
+    failure_notes = [
+        n for n in notes_desc
+        if n.note_type == NoteType.FAILURE and n.id is not None
+    ]
+    _add_tier_notes(selected, seen, failure_notes)
 
-    for n in notes_desc:
-        if n.mental_model is not None and n.id is not None and n.id not in seen:
-            selected.append(n)
-            seen.add(n.id)
+    # Tier 1: decision notes (oldest-first within tier)
+    decision_notes = [
+        n for n in notes_desc
+        if n.note_type == NoteType.DECISION and n.id is not None
+    ]
+    _add_tier_notes(selected, seen, decision_notes)
 
+    # Tier 2: notes with mental models (oldest-first within tier)
+    mental_model_notes = [
+        n for n in notes_desc
+        if n.mental_model is not None and n.id is not None
+    ]
+    _add_tier_notes(selected, seen, mental_model_notes)
+
+    # Tier 3: fill remaining slots with most recent notes (newest-first)
     for n in notes_desc:
         if len(selected) >= _KEY_NOTES_CAP:
             break
@@ -80,7 +120,7 @@ def _select_key_notes(notes_desc: list) -> list:
             selected.append(n)
             seen.add(n.id)
 
-    return sorted(selected, key=lambda x: x.created_at)
+    return selected
 
 
 async def task_start(
@@ -142,6 +182,88 @@ async def task_start(
         raise
 
 
+async def _compress_note_content(ctx: Context, content: str) -> str:
+    """Compress content to under 1000 chars via LLM, preserving technical specifics."""
+    result = await ctx.sample(
+        f"Compress the following note to under 1000 characters. "
+        f"Preserve all file paths, function names, line numbers, error messages, "
+        f"decisions, and technical specifics exactly. Remove filler words and "
+        f"redundant phrasing only. Return only the compressed note, no preamble.\n\n"
+        f"{content}"
+    )
+    compressed = result.text.strip()
+    return compressed[:1000] if len(compressed) > 1000 else compressed
+
+
+async def _prepare_note_fields(
+    ctx: Context,
+    sec: SecurityService,
+    content: str,
+    mental_model: str | None,
+) -> tuple[str, str | None, str]:
+    """Compress (if needed), scrub PII, and hash content. Returns (clean, mental_model, hash)."""
+    if len(content) > 1000:
+        content = await _compress_note_content(ctx, content)
+    if mental_model is not None and len(mental_model) > 1000:
+        mental_model = await _compress_note_content(ctx, mental_model)
+    scrub_result = sec.scrub(content)
+    if scrub_result.was_modified:
+        logger.info("PII scrubbed from note content")
+    clean = scrub_result.clean
+    if mental_model is not None:
+        mm_scrub = sec.scrub(mental_model)
+        if mm_scrub.was_modified:
+            logger.info("PII scrubbed from mental_model")
+        mental_model = mm_scrub.clean
+    content_hash = hashlib.sha256(clean.encode()).hexdigest()
+    return clean, mental_model, content_hash
+
+
+def _persist_note(
+    n_repo: NoteRepository,
+    t_state_repo: TaskStateRepository,
+    note_type: NoteType,
+    clean: str,
+    mental_model: str | None,
+    task_db_id: int,
+    session_id: int | None,
+    task_artifact_id: str | None,
+    content_hash: str,
+) -> SaveNoteResponse:
+    """Dedup-check then write note. Returns SaveNoteResponse."""
+    with get_session() as db:
+        existing = n_repo.get_by_content_hash(db, task_db_id, content_hash)
+        if existing is not None and existing.id is not None:
+            if mental_model is not None and existing.mental_model is None:
+                existing.mental_model = mental_model
+                db.add(existing)
+                db.flush()
+            return SaveNoteResponse(
+                note_id=existing.id,
+                mental_model_saved=existing.mental_model is not None,
+                was_duplicate=True,
+            )
+        note = Note(
+            note_type=note_type,
+            content=clean,
+            mental_model=mental_model,
+            task_id=task_db_id,
+            session_id=session_id,
+            artifact_id=task_artifact_id,
+            artifact_type="task",
+            synthesis_content_hash=content_hash,
+        )
+        saved = n_repo.save(db, note)
+        if saved.id is None:
+            raise ToolError("Internal error: note was not assigned an id after flush")
+        t_state_repo.on_note_saved(db, task_db_id, note_type, saved.created_at)
+        return SaveNoteResponse(
+            note_id=saved.id,
+            mental_model_saved=saved.mental_model is not None,
+            was_duplicate=False,
+        )
+
+
 async def save_note(
     ctx: Context,
     task_id: int,
@@ -153,10 +275,13 @@ async def save_note(
     n_repo: NoteRepository = Depends(get_note_repo),
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
 ) -> SaveNoteResponse:
-    """Scrub and persist a note. Types: investigation|decision|docs|learnings|session_summary."""
+    """Scrub and persist a note.
+
+    Types: investigation|decision|docs|learnings|session_summary|failure.
+    """
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
-        # Phase 1: fetch data needed for elicitation prompt, then close DB.
+        # Phase 1: fetch task metadata, then close DB.
         session_id: int | None = await ctx.get_state("current_session_id")
         with get_session() as db:
             task = t_repo.get_by_id(db, task_id)
@@ -165,35 +290,22 @@ async def save_note(
                 raise ToolError("Internal error: task has no id")
             task_db_id: int = task.id
 
-        # Phase 3: validate and write.
+        # Phase 2: validate size limit.
         if len(content) > 100_000:
             raise ToolError("Content exceeds 100k character limit")
-        clean = sec.scrub(content).clean
-        if mental_model is not None:
-            mental_model = sec.scrub(mental_model).clean
-        note = Note(
-            note_type=note_type,
-            content=clean,
-            mental_model=mental_model,
-            task_id=task_db_id,
-            session_id=session_id,
-            artifact_id=task_artifact_id,
-            artifact_type="task",
+
+        # Phase 3: compress, scrub, dedup, and write.
+        clean, mental_model, content_hash = await _prepare_note_fields(
+            ctx, sec, content, mental_model
         )
-        with get_session() as db:
-            saved = n_repo.save(db, note)
-            if saved.id is None:
-                raise ToolError("Internal error: note was not assigned an id after flush")
-            t_state_repo.on_note_saved(db, task_db_id)
-            note_id = saved.id
-            mental_model_saved = saved.mental_model is not None
+        result = _persist_note(
+            n_repo, t_state_repo, note_type, clean, mental_model,
+            task_db_id, session_id, task_artifact_id, content_hash,
+        )
         await try_notify(ctx.report_progress(1, 2))
         await try_notify(ctx.report_progress(2, 2))
-        await try_notify(ctx.info(f"Note {note_id} saved ({note_type.value})."))
-        return SaveNoteResponse(
-            note_id=note_id,
-            mental_model_saved=mental_model_saved,
-        )
+        await try_notify(ctx.info(f"Note {result.note_id} saved ({note_type.value})."))
+        return result
     except ValueError as e:
         logger.warning("save_note failed: %s", e)
         raise ToolError(str(e)) from e
@@ -205,7 +317,7 @@ async def save_note(
 async def update_task(
     ctx: Context,
     task_id: int,
-    status: TaskStatus | None = None,
+    status: NullableTaskStatus = None,
     priority: TaskPriority | None = None,
     due_date: str | None = None,
     name: str | None = None,
@@ -271,7 +383,7 @@ async def create_task(
     source_id: str | None = None,
     source_type: str | None = None,
     source_url: str | None = None,
-    status: str = "todo",
+    status: TaskStatusWithDefault = TaskStatus.TODO,
     meeting_id: int | None = None,
     t_repo: TaskRepository = Depends(get_task_repo),
     sec: SecurityService = Depends(get_security),
@@ -281,14 +393,17 @@ async def create_task(
     """Creates a task, optionally links to a meeting, writes to Notion."""
     logger.info("create_task priority=%s category=%s", priority.value, category.value)
 
-    if status not in _VALID_STATUSES:
-        raise ValueError(f"Invalid status {status!r}. Valid values: {sorted(_VALID_STATUSES)}")
+    # Scrub name once; audit if PII was detected.
+    _name_scrub = sec.scrub(name)
+    if _name_scrub.was_modified:
+        logger.info("PII scrubbed from create_task name")
+    clean_name = _name_scrub.clean
 
     # Phase 1: source_id upsert — no elicitation needed; one DB context.
     if source_id:
         with get_session() as db:
             existing = t_repo.upsert_by_source_id(
-                db, source_id, sec.scrub(name).clean, priority, source_url
+                db, source_id, clean_name, priority, source_url
             )
             if existing and existing.id is not None:
                 return CreateTaskResponse(task_id=existing.id, already_existed=True)
@@ -300,8 +415,6 @@ async def create_task(
         blocked_by = await check_duplicate_name(ctx, name, existing_names)
 
     # Phase 3: create or return existing — single transaction eliminates TOCTOU window.
-    clean_name = sec.scrub(name).clean
-    task_status = TaskStatus(status)
     with get_session() as db:
         if blocked_by is not None:
             # Re-fetch inside this transaction: if task was renamed/deleted since
@@ -313,7 +426,7 @@ async def create_task(
             name=clean_name,
             priority=priority,
             category=category,
-            status=task_status,
+            status=status,
             source_id=source_id,
             source_type=source_type,
             source_url=source_url,
@@ -329,146 +442,8 @@ async def create_task(
     return CreateTaskResponse(task_id=task_id, already_existed=False)
 
 
-async def rewind_task(
-    task_id: int,
-    t_repo: TaskRepository = Depends(get_task_repo),
-    n_repo: NoteRepository = Depends(get_note_repo),
-    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
-) -> RewindResponse:
-    """Reconstruct the full note timeline for a task, oldest first."""
-    logger.info("rewind_task task_id=%d", task_id)
-    with get_session() as db:
-        try:
-            task = t_repo.get_by_id(db, task_id)
-        except ValueError as e:
-            raise ToolError(str(e)) from e
-
-        task_state = t_state_repo.get_by_task_id(db, task_id)
-        if task_state is None:
-            raise ToolError(f"TaskState missing for task {task_id}")
-        notes_desc = n_repo.get_for_task(db, task_id=task.id)
-        notes_asc = [n for n in reversed(notes_desc) if n.id is not None]
-
-        timeline = [
-            TimelineEntry(
-                note_id=n.id,  # type: ignore[arg-type]  # id is not None: filtered above
-                created_at=n.created_at,
-                note_type=n.note_type,
-                preview=n.content[:200],
-                mental_model=n.mental_model,
-            )
-            for n in notes_asc
-        ]
-
-        total_notes = len(notes_asc)
-        if total_notes >= 2:
-            duration_days = (notes_asc[-1].created_at - notes_asc[0].created_at).days
-        else:
-            duration_days = 0
-        last_activity = notes_asc[-1].created_at if notes_asc else task.created_at
-
-        summary = RewindSummary(
-            total_notes=total_notes, duration_days=duration_days, last_activity=last_activity
-        )
-        return RewindResponse(
-            task=TaskContext.from_model(task, task_state), timeline=timeline, summary=summary
-        )
-
-
-async def what_am_i_missing(
-    task_id: int,
-    t_repo: TaskRepository = Depends(get_task_repo),
-    n_repo: NoteRepository = Depends(get_note_repo),
-    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
-) -> MissingResponse:
-    """Surface cognitive gaps for a task using seven diagnostic rules."""
-    logger.info("what_am_i_missing task_id=%d", task_id)
-    with get_session() as db:
-        try:
-            t_repo.get_by_id(db, task_id)
-        except ValueError as e:
-            raise ToolError(str(e)) from e
-        task_state = t_state_repo.get_by_task_id(db, task_id)
-        if task_state is None:
-            raise ToolError(f"TaskState missing for task {task_id}")
-
-        signals: list[Signal] = []
-        nc = task_state.note_count
-        dc = task_state.decision_count
-        sd = task_state.stale_days
-
-        # Rule 1: no notes at all
-        if nc == 0:
-            signals.append(
-                Signal(
-                    type="no_context",
-                    severity="high",
-                    message="No notes recorded for this task",
-                )
-            )
-        # Rule 2: stale
-        if sd >= 3:
-            signals.append(
-                Signal(
-                    type="stale",
-                    severity="medium",
-                    message=f"No activity for {sd} days",
-                )
-            )
-        # Rule 3: very few notes
-        if 0 < nc <= 2:
-            signals.append(
-                Signal(
-                    type="low_context",
-                    severity="medium",
-                    message="Very few notes — context may be shallow",
-                )
-            )
-        # Rule 4: notes exist but no decisions
-        if dc == 0 and nc > 0:
-            signals.append(
-                Signal(
-                    type="no_decisions",
-                    severity="medium",
-                    message="No decisions recorded",
-                )
-            )
-        # Rule 5: many investigations, no decisions
-        if n_repo.count_investigations(db, task_id) > 3 and dc == 0:
-            signals.append(
-                Signal(
-                    type="analysis_loop",
-                    severity="high",
-                    message="Multiple investigations without a decision",
-                )
-            )
-        # Rule 6: has notes and stale 2-3 days (rule 2 covers >= 3 days; avoid double-signal)
-        if task_state.last_note_at is not None and 2 <= sd < 3:
-            signals.append(
-                Signal(
-                    type="lost_context",
-                    severity="medium",
-                    message="Context may be degrading due to inactivity",
-                )
-            )
-        # Rule 7: no mental model captured
-        if nc >= 2 and not n_repo.has_mental_model(db, task_id):
-            signals.append(
-                Signal(
-                    type="no_model",
-                    severity="medium",
-                    message="No mental model captured — understanding may be shallow",
-                )
-            )
-
-        signals.sort(key=lambda s: SEVERITY_ORDER[s.severity])
-        return MissingResponse(signals=signals)
-
-
 # Register tools with MCP
 mcp.tool()(task_start)
 mcp.tool()(save_note)
 mcp.tool()(update_task)
 mcp.tool()(create_task)
-mcp.tool()(rewind_task)
-mcp.tool()(what_am_i_missing)

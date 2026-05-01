@@ -1,10 +1,9 @@
 import logging
 
-from pydantic import ValidationError
 from sqlmodel import Session, col, func, select
 
 from ..models import Note, WizardSession
-from ..schemas import PriorSessionSummary, SessionState
+from ..schemas import PriorSessionSummary
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +55,13 @@ class SessionRepository:
         for s in prior_sessions:
             if s.id is None or s.summary is None:
                 continue
-            task_ids: list[int] = []
-            if s.session_state:
-                try:
-                    state_obj = SessionState.model_validate_json(s.session_state)
-                    task_ids = state_obj.working_set
-                except (ValueError, ValidationError) as e:
-                    logger.warning("prior_summaries: bad session_state sid=%s: %s", s.id, e)
             result.append(
                 PriorSessionSummary(
                     session_id=s.id,
                     summary=s.summary,
                     closed_at=s.updated_at,
-                    task_ids=task_ids,
+                    raw_session_state=s.session_state,
+                    task_ids=[],
                 )
             )
         return result

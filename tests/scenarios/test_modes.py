@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastmcp.exceptions import ToolError
 
-from wizard.config import ModesSettings, Settings
+from wizard.config import ModesSettings
 from wizard.models import WizardSession
 from wizard.schemas import (
     GetModesResponse,
@@ -18,9 +18,9 @@ from wizard.tools.mode_tools import build_available_modes, get_modes, set_mode
 
 def test_modes_settings_defaults():
     """ModesSettings has sane defaults when not configured."""
-    s = Settings()
-    assert s.modes.default is None
-    assert s.modes.allowed == []
+    m = ModesSettings()
+    assert m.default is None
+    assert m.allowed == ["architect", "ideation", "product-owner", "caveman"]
 
 
 def test_modes_settings_from_dict():
