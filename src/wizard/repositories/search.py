@@ -28,7 +28,10 @@ class SearchRepository:
         """Fan out across FTS5 tables, merge, sort by rank, return top results."""
         # Wrap in double-quotes so FTS5 treats the whole phrase literally,
         # avoiding mis-parsing of hyphens and special characters as operators.
-        fts_query = f'"{query.replace(chr(34), "")}"'
+        sanitised = query.replace('"', "").replace("*", "").strip()
+        if not sanitised:
+            return []
+        fts_query = f'"{sanitised}"'
         results: list[tuple[float, SearchResult]] = []
 
         if entity_type is None or entity_type == "note":
@@ -46,29 +49,30 @@ class SearchRepository:
     def _search_notes(
         self, db: Session, query: str, limit: int
     ) -> list[tuple[float, SearchResult]]:
-        rows = db.execute(
+        rows = db.execute(  # type: ignore[call-overload]
             text(
-                "SELECT note_fts.rowid, note_fts.content, note_fts.note_type, "
-                "note.task_id, note.created_at, note_fts.rank "
+                "SELECT note_fts.rowid AS entity_id, note_fts.content AS content, "
+                "note_fts.note_type AS note_type, note.task_id AS task_id, "
+                "note.created_at AS created_at, note_fts.rank AS rank "
                 "FROM note_fts "
                 "JOIN note ON note.id = note_fts.rowid "
                 "WHERE note_fts MATCH :q "
                 "ORDER BY note_fts.rank LIMIT :lim"
             ),
             {"q": query, "lim": limit},
-        ).fetchall()
+        ).mappings().fetchall()
         out = []
         for row in rows:
-            snippet = (row[1] or "")[:200]
+            snippet = (row["content"] or "")[:200]
             out.append((
-                row[5],
+                row["rank"],
                 SearchResult(
                     entity_type="note",
-                    entity_id=row[0],
-                    title=row[2] or "note",
+                    entity_id=row["entity_id"],
+                    title=row["note_type"] or "note",
                     snippet=snippet,
-                    created_at=row[4],
-                    task_id=row[3],
+                    created_at=row["created_at"],
+                    task_id=row["task_id"],
                 ),
             ))
         return out
@@ -76,33 +80,33 @@ class SearchRepository:
     def _search_sessions(
         self, db: Session, query: str, limit: int
     ) -> list[tuple[float, SearchResult]]:
-        rows = db.execute(
+        rows = db.execute(  # type: ignore[call-overload]
             text(
-                "SELECT session_fts.rowid, session_fts.summary, "
-                "wizardsession.created_at, session_fts.rank "
+                "SELECT session_fts.rowid AS entity_id, session_fts.summary AS summary, "
+                "wizardsession.created_at AS created_at, session_fts.rank AS rank "
                 "FROM session_fts "
                 "JOIN wizardsession ON wizardsession.id = session_fts.rowid "
                 "WHERE session_fts MATCH :q "
                 "ORDER BY session_fts.rank LIMIT :lim"
             ),
             {"q": query, "lim": limit},
-        ).fetchall()
+        ).mappings().fetchall()
         out = []
         for row in rows:
-            snippet = (row[1] or "")[:200]
-            created = row[2]
-            title = f"Session {row[0]}"
+            snippet = (row["summary"] or "")[:200]
+            created = row["created_at"]
+            title = f"Session {row['entity_id']}"
             if created:
                 with contextlib.suppress(ValueError):
                     title = f"Session {datetime.fromisoformat(str(created)).strftime('%Y-%m-%d')}"
             out.append((
-                row[3],
+                row["rank"],
                 SearchResult(
                     entity_type="session",
-                    entity_id=row[0],
+                    entity_id=row["entity_id"],
                     title=title,
                     snippet=snippet,
-                    created_at=row[2],
+                    created_at=row["created_at"],
                 ),
             ))
         return out
@@ -110,28 +114,29 @@ class SearchRepository:
     def _search_meetings(
         self, db: Session, query: str, limit: int
     ) -> list[tuple[float, SearchResult]]:
-        rows = db.execute(
+        rows = db.execute(  # type: ignore[call-overload]
             text(
-                "SELECT meeting_fts.rowid, meeting_fts.content, meeting_fts.title, "
-                "meeting.created_at, meeting_fts.rank "
+                "SELECT meeting_fts.rowid AS entity_id, meeting_fts.content AS content, "
+                "meeting_fts.title AS title, meeting.created_at AS created_at, "
+                "meeting_fts.rank AS rank "
                 "FROM meeting_fts "
                 "JOIN meeting ON meeting.id = meeting_fts.rowid "
                 "WHERE meeting_fts MATCH :q "
                 "ORDER BY meeting_fts.rank LIMIT :lim"
             ),
             {"q": query, "lim": limit},
-        ).fetchall()
+        ).mappings().fetchall()
         out = []
         for row in rows:
-            snippet = (row[1] or "")[:200]
+            snippet = (row["content"] or "")[:200]
             out.append((
-                row[4],
+                row["rank"],
                 SearchResult(
                     entity_type="meeting",
-                    entity_id=row[0],
-                    title=row[2] or "meeting",
+                    entity_id=row["entity_id"],
+                    title=row["title"] or "meeting",
                     snippet=snippet,
-                    created_at=row[3],
+                    created_at=row["created_at"],
                 ),
             ))
         return out
@@ -139,26 +144,27 @@ class SearchRepository:
     def _search_tasks(
         self, db: Session, query: str, limit: int
     ) -> list[tuple[float, SearchResult]]:
-        rows = db.execute(
+        rows = db.execute(  # type: ignore[call-overload]
             text(
-                "SELECT task_fts.rowid, task_fts.name, task.created_at, task_fts.rank "
+                "SELECT task_fts.rowid AS entity_id, task_fts.name AS name, "
+                "task.created_at AS created_at, task_fts.rank AS rank "
                 "FROM task_fts "
                 "JOIN task ON task.id = task_fts.rowid "
                 "WHERE task_fts MATCH :q "
                 "ORDER BY task_fts.rank LIMIT :lim"
             ),
             {"q": query, "lim": limit},
-        ).fetchall()
+        ).mappings().fetchall()
         out = []
         for row in rows:
             out.append((
-                row[3],
+                row["rank"],
                 SearchResult(
                     entity_type="task",
-                    entity_id=row[0],
-                    title=row[1] or "task",
-                    snippet=row[1] or "",
-                    created_at=row[2],
+                    entity_id=row["entity_id"],
+                    title=row["name"] or "task",
+                    snippet=row["name"] or "",
+                    created_at=row["created_at"],
                 ),
             ))
         return out
