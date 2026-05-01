@@ -162,9 +162,10 @@ class TaskRepository:
         )
         return [(row[0], row[1]) for row in db.execute(stmt).all()]  # type: ignore
 
-    def _query_task_contexts(
+    def _load_task_scaffolding(
         self, db: Session, *where, limit: int | None = None
-    ) -> list[TaskContext]:
+    ) -> tuple[list[Task], dict[int, TaskState], dict[int, Note]]:
+        """Batch-load tasks with states and latest notes. Shared by index and context queries."""
         last_worked = self._latest_note_subquery()
         stmt = (
             select(Task, last_worked)
@@ -175,7 +176,7 @@ class TaskRepository:
             stmt = stmt.limit(limit)
         rows = db.execute(stmt).all()  # type: ignore
         if not rows:
-            return []
+            return [], {}, {}
 
         tasks: list[Task] = [row[0] for row in rows]
         task_ids = [t.id for t in tasks if t.id is not None]
@@ -188,7 +189,14 @@ class TaskRepository:
                 task_states[ts.task_id] = ts
 
         latest_notes = self._batch_load_latest_notes(db, tasks)
+        return tasks, task_states, latest_notes
 
+    def _query_task_contexts(
+        self, db: Session, *where, limit: int | None = None
+    ) -> list[TaskContext]:
+        tasks, task_states, latest_notes = self._load_task_scaffolding(
+            db, *where, limit=limit
+        )
         results: list[TaskContext] = []
         for task in tasks:
             tid = task.id
@@ -286,29 +294,10 @@ class TaskRepository:
         limit: int | None = None,
     ) -> list[TaskIndexEntry]:
         """Build compact TaskIndexEntry list for session_start index."""
-        last_worked = self._latest_note_subquery()
-        stmt = (
-            select(Task, last_worked)
-            .where(*where)
-            .order_by(_PRIORITY_ORDER, func.coalesce(last_worked, 0).desc())
+        tasks, task_states, latest_notes = self._load_task_scaffolding(
+            db, *where, limit=limit
         )
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        rows = db.execute(stmt).all()  # type: ignore
-        if not rows:
-            return []
-
-        tasks: list[Task] = [row[0] for row in rows]
         task_ids = [t.id for t in tasks if t.id is not None]
-
-        task_states: dict[int, TaskState] = {}
-        if task_ids:
-            for ts in db.exec(
-                select(TaskState).where(col(TaskState.task_id).in_(task_ids))
-            ).all():
-                task_states[ts.task_id] = ts
-
-        latest_notes = self._batch_load_latest_notes(db, tasks)
         notes_by_type = self._batch_load_notes_by_type(db, task_ids)
 
         results: list[TaskIndexEntry] = []
