@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine
 
-from wizard.models import Meeting, Note, NoteType, Task
+from wizard.models import Meeting, Note, NoteType, Task, WizardSession
 from wizard.repositories.search import SearchRepository
 
 
@@ -26,7 +26,7 @@ def fts_engine():
         ))
         conn.execute(text(
             "CREATE VIRTUAL TABLE IF NOT EXISTS meeting_fts USING fts5("
-            "content, title UNINDEXED,"
+            "content, title,"
             "content='meeting', content_rowid='id')"
         ))
         conn.execute(text(
@@ -49,6 +49,11 @@ def fts_engine():
             "CREATE TRIGGER IF NOT EXISTS task_fts_ai AFTER INSERT ON task BEGIN "
             "INSERT INTO task_fts(rowid, name) "
             "VALUES (new.id, new.name); END"
+        ))
+        conn.execute(text(
+            "CREATE TRIGGER IF NOT EXISTS session_fts_ai AFTER INSERT ON wizardsession BEGIN "
+            "INSERT INTO session_fts(rowid, summary) "
+            "VALUES (new.id, new.summary); END"
         ))
         conn.commit()
     return engine
@@ -103,3 +108,13 @@ class TestSearchRepository:
         results = SearchRepository().search(fts_db, "Kafka", limit=10)
         assert len(results) == 1
         assert results[0].entity_type == "meeting"
+
+    def test_session_summary_searched(self, fts_db):
+        session = WizardSession(agent="claude-code", summary="Investigated Redis cache invalidation issue")
+        fts_db.add(session)
+        fts_db.flush()
+
+        results = SearchRepository().search(fts_db, "Redis", limit=10, entity_type="session")
+        assert len(results) == 1
+        assert results[0].entity_type == "session"
+        assert "Redis" in results[0].snippet or "redis" in results[0].snippet.lower()
