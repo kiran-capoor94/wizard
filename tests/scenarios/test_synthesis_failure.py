@@ -255,14 +255,13 @@ def test_parse_notes_maps_note_type_synonym():
     assert notes[0].note_type == "investigation"
 
 
-def test_parse_notes_coerces_null_content():
-    """LLM returns null content — must coerce to empty string rather than fail."""
+def test_parse_notes_filters_null_content():
+    """LLM returns null content — note is filtered out rather than kept as empty string."""
     raw = json.dumps([
         {"note_type": "investigation", "content": None, "task_id": None}
     ])
     notes = parse_notes(raw)
-    assert len(notes) == 1
-    assert notes[0].content == ""
+    assert len(notes) == 0
 
 
 def test_parse_notes_coerces_mental_model_list():

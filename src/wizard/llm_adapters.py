@@ -124,7 +124,8 @@ def parse_notes(raw: str) -> list[SynthesisNote]:
                 parsed = json.loads(attempt)
                 if isinstance(parsed, dict):
                     parsed = [parsed]
-                return [SynthesisNote.model_validate(_coerce_note(n)) for n in parsed]
+                coerced = [_coerce_note(n) for n in parsed]
+                return [SynthesisNote.model_validate(c) for c in coerced if c.get("content")]
             except Exception as e:
                 last_err = e
 
