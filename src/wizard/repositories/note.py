@@ -16,7 +16,8 @@ class NoteRepository:
 
     def get_by_content_hash(
         self, db: Session, task_id: int, content_hash: str
-    ) -> "Note | None":
+    ) -> Note | None:
+        """Return the first active note on task_id matching content_hash, or None."""
         stmt = (
             select(Note)
             .where(Note.task_id == task_id)
