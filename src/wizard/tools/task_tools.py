@@ -166,7 +166,8 @@ async def compress_note_content(ctx: Context, content: str) -> str:
         f"redundant phrasing only. Return only the compressed note, no preamble.\n\n"
         f"{content}"
     )
-    return result.text.strip()
+    compressed = result.text.strip()
+    return compressed[:1000] if len(compressed) > 1000 else compressed
 
 
 async def _prepare_note_fields(
@@ -208,6 +209,10 @@ def _persist_note(
     with get_session() as db:
         existing = n_repo.get_by_content_hash(db, task_db_id, content_hash)
         if existing is not None and existing.id is not None:
+            if mental_model is not None and existing.mental_model is None:
+                existing.mental_model = mental_model
+                db.add(existing)
+                db.flush()
             return SaveNoteResponse(
                 note_id=existing.id,
                 mental_model_saved=existing.mental_model is not None,
