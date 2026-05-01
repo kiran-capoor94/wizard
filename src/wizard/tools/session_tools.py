@@ -59,6 +59,16 @@ logger = logging.getLogger(__name__)
 _UNSAFE_SESSION_ID_CHARS = frozenset("/\\:")
 
 
+def _scrub_field(sec: SecurityService, value: str | None, field_name: str) -> str | None:
+    """Scrub PII from a single field, logging if modified. Returns None unchanged."""
+    if value is None:
+        return None
+    result = sec.scrub(value)
+    if result.was_modified:
+        logger.info("PII scrubbed from %s", field_name)
+    return result.clean
+
+
 def _is_safe_session_id(sid: str) -> bool:
     """Return True if sid is safe to use as a filesystem path component.
 
@@ -214,18 +224,12 @@ def _scrub_session_state(
 ) -> tuple[SessionState, str]:
     """Scrub PII from session state fields and return state + clean intent."""
 
-    def scrub(content: str, field_name: str) -> str:
-        result = sec.scrub(content)
-        if result.was_modified:
-            logger.info("PII scrubbed from %s", field_name)
-        return result.clean
-
     state = SessionState(
-        intent=scrub(intent, "session intent"),
+        intent=_scrub_field(sec, intent, "session intent"),
         working_set=working_set,
-        state_delta=scrub(state_delta, "state_delta"),
-        open_loops=[scrub(loop, "open_loop") for loop in open_loops],
-        next_actions=[scrub(action, "next_action") for action in next_actions],
+        state_delta=_scrub_field(sec, state_delta, "state_delta"),
+        open_loops=[_scrub_field(sec, loop, "open_loop") for loop in open_loops],
+        next_actions=[_scrub_field(sec, action, "next_action") for action in next_actions],
         closure_status=closure_status,
         tool_registry=tool_registry,
     )
@@ -252,12 +256,6 @@ async def _persist_session_end(
         closure_status, tool_registry,
     )
 
-    def scrub(content: str, field_name: str) -> str:
-        result = sec.scrub(content)
-        if result.was_modified:
-            logger.info("PII scrubbed from %s", field_name)
-        return result.clean
-
     with get_session() as db:
         session = db.get(WizardSession, session_id)
         if session is None:
@@ -275,7 +273,7 @@ async def _persist_session_end(
         except (ValueError, TypeError) as e:
             logger.warning("session_end: failed to serialise session_state: %s", e)
 
-        clean_summary = scrub(summary, "session summary")
+        clean_summary = _scrub_field(sec, summary, "session summary")
         session.closed_by = "user"
         session.summary = clean_summary
         db.add(session)
