@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from wizard.config import settings
 from wizard.llm_adapters import parse_notes
 from wizard.models import Task, WizardSession
 from wizard.repositories.note import NoteRepository
@@ -18,7 +19,6 @@ from wizard.transcript import TranscriptReader
 
 @pytest.fixture
 def synthesiser(security, note_repo):
-    from wizard.config import settings
     return Synthesiser(
         reader=TranscriptReader(),
         note_repo=note_repo,
