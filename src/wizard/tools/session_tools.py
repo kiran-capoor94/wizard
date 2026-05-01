@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import uuid
 from typing import Literal
 
 import sentry_sdk
@@ -46,7 +45,7 @@ from ..skills import (
     SKILL_SESSION_RESUME,
     load_skill_post,
 )
-from .formatting import task_contexts_to_json, try_notify
+from .formatting import try_notify
 from .mode_tools import build_available_modes
 from .session_helpers import (
     build_prior_summaries,
@@ -57,7 +56,16 @@ from .session_helpers import (
 
 logger = logging.getLogger(__name__)
 
+_UNSAFE_SESSION_ID_CHARS = frozenset("/\\:")
 
+
+def _is_safe_session_id(sid: str) -> bool:
+    """Return True if sid is safe to use as a filesystem path component.
+
+    Rejects path traversal sequences and empty strings; allows UUIDs and
+    agent-generated IDs like 'session-2026-04-22-gemini-studio-free-tier'.
+    """
+    return bool(sid) and ".." not in sid and not any(c in sid for c in _UNSAFE_SESSION_ID_CHARS)
 
 
 def _apply_default_mode(session: WizardSession) -> None:
@@ -81,11 +89,9 @@ async def session_start(
     """Create a session, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start agent_session_id=%s", agent_session_id)
 
-    if agent_session_id:
-        try:
-            uuid.UUID(agent_session_id)
-        except ValueError:
-            raise ToolError("Invalid agent_session_id") from None
+    if agent_session_id and not _is_safe_session_id(agent_session_id):
+        logger.warning("session_start: unsafe agent_session_id %r — ignoring", agent_session_id)
+        agent_session_id = None
 
     # Read session source from hook-written keyed directory.
     source = "startup"
@@ -140,8 +146,8 @@ async def session_start(
         await try_notify(ctx.report_progress(2, 4))
 
         open_tasks_total = t_repo.count_open_tasks(db)
-        open_tasks_list = t_repo.get_open_task_contexts(db, limit=20)
-        blocked_list = t_repo.get_blocked_task_contexts(db)
+        open_tasks_index = t_repo.get_open_task_index(db, limit=20)
+        blocked_index = t_repo.get_blocked_task_index(db)
 
         await try_notify(ctx.report_progress(3, 4))
 
@@ -151,9 +157,9 @@ async def session_start(
             session_id=session.id,
             continued_from_id=continued_from_id,
             source=source,
-            open_tasks=task_contexts_to_json(open_tasks_list),
+            open_tasks=open_tasks_index,
             open_tasks_total=open_tasks_total,
-            blocked_tasks=task_contexts_to_json(blocked_list),
+            blocked_tasks=blocked_index,
             unsummarised_meetings=m_repo.get_unsummarised_contexts(db),
             wizard_context=build_wizard_context(),
             closed_sessions=closed_sessions,
@@ -350,11 +356,9 @@ async def resume_session(
     """Resume a prior session in a new thread. Creates a new session."""
     logger.info("resume_session session_id=%s", session_id)
 
-    if agent_session_id:
-        try:
-            uuid.UUID(agent_session_id)
-        except ValueError:
-            raise ToolError("Invalid agent_session_id") from None
+    if agent_session_id and not _is_safe_session_id(agent_session_id):
+        logger.warning("resume_session: unsafe agent_session_id %r — ignoring", agent_session_id)
+        agent_session_id = None
 
     with get_session() as db:
         # Find prior session

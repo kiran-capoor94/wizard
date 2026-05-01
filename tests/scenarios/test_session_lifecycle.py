@@ -16,8 +16,8 @@ async def test_session_lifecycle(mcp_client, seed_task):
     session_id = d["session_id"]
     assert session_id is not None
     assert d["source"] == "startup"
-    assert isinstance(d["open_tasks"], str)
-    assert d["open_tasks"].startswith("[")
+    assert isinstance(d["open_tasks"], list)
+    assert len(d["open_tasks"]) >= 1
 
     # 2. task_start
     r = await mcp_client.call_tool("task_start", {"task_id": task.id})
