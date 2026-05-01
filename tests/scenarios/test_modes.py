@@ -20,7 +20,7 @@ def test_modes_settings_defaults():
     """ModesSettings has sane defaults when not configured."""
     m = ModesSettings()
     assert m.default is None
-    assert m.allowed == []
+    assert m.allowed == ["architect", "ideation", "product-owner", "caveman"]
 
 
 def test_modes_settings_from_dict():
