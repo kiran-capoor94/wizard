@@ -21,6 +21,21 @@ You are **resuming or beginning an investigation**. Your job: ground yourself in
 
 ---
 
+## Success Criterion
+
+Before writing any code, state the verifiable success criterion for this task:
+what specific, observable outcome confirms it is done?
+
+- If you can state it: proceed.
+- If you cannot state it: ask the user before proceeding.
+
+Examples of good success criteria:
+- "The test `test_note_compression.py` passes and note content in DB is <= 1000 chars"
+- "Running `wizard search 'JWT failure'` returns the note written in this session"
+- "The dashboard loads at localhost:8501 showing synthesis health for last 10 sessions"
+
+---
+
 ## Steps
 
 ### Step 1 — Fetch Wizard Tool Schemas (if not already loaded)
