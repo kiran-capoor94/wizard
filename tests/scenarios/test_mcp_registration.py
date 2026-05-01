@@ -76,12 +76,13 @@ EXPECTED_TOOLS = {
     "get_session",
     "get_modes",
     "set_mode",
+    "search",
 }
 
 
 @pytest.mark.asyncio
 async def test_all_tools_registered(mcp_app):
-    """All 19 expected tools are registered — none missing, none phantom."""
+    """All 20 expected tools are registered — none missing, none phantom."""
     async with Client(mcp_app) as client:
         tools = await client.list_tools()
         registered = {t.name for t in tools}
@@ -118,11 +119,12 @@ REQUIRED_PARAMS: dict[str, list[str]] = {
     "get_task": ["task_id"],
     "get_sessions": [],
     "get_session": ["session_id"],
+    "search": ["query"],
 }
 
 INJECTED_PARAMS = {
     "ctx", "t_repo", "n_repo", "m_repo", "ts_repo", "sec", "security",
-    "session_closer", "session_repo", "task_state_repo",
+    "session_closer", "session_repo", "task_state_repo", "s_repo", "db",
 }
 
 
