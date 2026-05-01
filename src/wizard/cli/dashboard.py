@@ -5,7 +5,6 @@ Or directly: streamlit run src/wizard/cli/dashboard.py
 """
 
 import datetime
-import time
 from pathlib import Path
 
 import pandas as pd
@@ -73,7 +72,7 @@ def _render_recent_notes(data: dict) -> None:
     st.subheader(f"Recent Notes (last {_NOTE_WINDOW_DAYS} days)")
     by_type: dict[str, int] = data["note_stats"].get("by_type", {})
     if not by_type:
-        st.info("No notes in the last 7 days.")
+        st.info(f"No notes in the last {_NOTE_WINDOW_DAYS} days.")
         return
     chart_df = pd.DataFrame(
         {"type": list(by_type.keys()), "count": list(by_type.values())}
@@ -123,7 +122,7 @@ def _render_tool_call_frequency(data: dict) -> None:
     st.subheader(f"Tool Call Frequency (last {_TOOL_WINDOW_DAYS} days)")
     tool_freq: dict[str, int] = data["tool_freq"]
     if not tool_freq:
-        st.info("No tool calls recorded in the last 30 days.")
+        st.info(f"No tool calls recorded in the last {_TOOL_WINDOW_DAYS} days.")
         return
     freq_df = pd.DataFrame(
         {"tool": list(tool_freq.keys()), "calls": list(tool_freq.values())}
@@ -135,7 +134,9 @@ def main() -> None:
     st.set_page_config(page_title="Wizard Dashboard", layout="wide")
     st.title("Wizard Health Dashboard")
     now = datetime.datetime.now().strftime("%H:%M:%S")
-    st.caption(f"Refreshed at {now} — auto-refresh every 30s")
+    st.caption(f"Refreshed at {now}")
+    if st.button("Refresh"):
+        st.rerun()
     data = _load_dashboard_data()
     _render_active_session(data)
     st.divider()
@@ -146,8 +147,6 @@ def main() -> None:
     _render_memory_utilisation(data)
     st.divider()
     _render_tool_call_frequency(data)
-    time.sleep(30)
-    st.rerun()
 
 
 main()
