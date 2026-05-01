@@ -103,8 +103,9 @@ def format_prompt(filtered: list[TranscriptEntry], task_table: str = "") -> str:
     lines.append(
         "\nCRITICAL: Respond ONLY with a valid JSON array of objects. "
         "DO NOT include any text outside the JSON array. "
+        "Use note_type=\"failure\" for anything that was tried and didn't work. "
         "Format: "
-        '[{"note_type": "investigation"|"decision"|"docs"|"learnings", '
+        '[{"note_type": "investigation"|"decision"|"docs"|"learnings"|"failure", '
         '"content": "string", "task_id": integer|null, "mental_model": "string"}]'
     )
     return "\n".join(lines)

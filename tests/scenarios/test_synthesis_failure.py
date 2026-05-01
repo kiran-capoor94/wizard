@@ -159,6 +159,42 @@ class TestSynthesisFailureHandling:
         assert ws.is_synthesised is True
 
 
+class TestFailureNoteTypeSynthesis:
+    """Phase 3: synthesis prompt includes failure type; LLM can produce failure notes."""
+
+    def test_format_prompt_includes_failure_note_type(self):
+        """format_prompt output must list 'failure' as a valid note_type."""
+        from wizard.synthesis_prompt import format_prompt
+
+        output = format_prompt([], task_table="")
+        assert '"failure"' in output
+
+    def test_synthesise_path_writes_failure_note(self, db_session, synthesiser):
+        """When LLM returns failure note_type, it is written as NoteType.FAILURE."""
+        from wizard.models import NoteType
+
+        ws = WizardSession(agent="claude-code")
+        db_session.add(ws)
+        db_session.flush()
+
+        tmp = _write_jsonl([{"type": "user", "content": "tried approach X"}])
+        try:
+            llm_response = [SynthesisNote(
+                task_id=None,
+                note_type="failure",
+                content="Tried inline cache invalidation — thundering herd on cache miss.",
+            )]
+            with patch("wizard.synthesis.llm_complete", return_value=llm_response):
+                synthesiser.synthesise_path(db_session, ws, Path(tmp), terminal=True)
+        finally:
+            os.unlink(tmp)
+
+        repo = NoteRepository()
+        notes = repo.get_notes_by_artifact_id(db_session, ws.artifact_id)
+        assert len(notes) == 1
+        assert notes[0].note_type == NoteType.FAILURE
+
+
 def test_parse_notes_coerces_task_id_list_to_none():
     """LLM returns task_id as a list (ambiguous multi-task note) — must drop to None."""
     raw = json.dumps([
