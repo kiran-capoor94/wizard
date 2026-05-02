@@ -305,7 +305,7 @@ async def _persist_session_end(
 
         await tool_call_buffer.flush_now(db)
 
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=90)
+        cutoff = datetime.datetime.now() - datetime.timedelta(days=90)
         db.execute(sa_delete(ToolCall).where(ToolCall.called_at < cutoff))
 
         response = SessionEndResponse(
@@ -319,11 +319,11 @@ async def _persist_session_end(
         )
 
     with get_session() as maint_db:
-        maint_db.execute(text("PRAGMA incremental_vacuum(100)"))
         try:
+            maint_db.execute(text("PRAGMA incremental_vacuum(100)"))
             maint_db.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
         except Exception as e:
-            logger.warning("session_end: WAL checkpoint skipped (db busy): %s", e)
+            logger.warning("session_end: maintenance PRAGMAs skipped: %s", e)
 
     return response
 

@@ -197,7 +197,7 @@ async def test_session_end_prunes_old_tool_calls(mcp_client, db_session):
     """session_end must delete ToolCall rows older than 90 days."""
     import datetime as dt_module
 
-    stale_date = dt_module.datetime.utcnow() - dt_module.timedelta(days=91)
+    stale_date = dt_module.datetime.now() - dt_module.timedelta(days=91)
     old_call = ToolCall(tool_name="old_tool", session_id=None)
     old_call.called_at = stale_date
     db_session.add(old_call)
