@@ -133,6 +133,16 @@ def check_skills_installed() -> tuple[bool, str]:
     )
 
 
+def _check_db_size() -> tuple[bool, str]:
+    db_path = Path(os.environ.get("WIZARD_DB", settings.db))
+    if not db_path.exists():
+        return True, "Database not found — skipping size check"
+    size_mb = db_path.stat().st_size / 1_048_576
+    if size_mb > 200:
+        return False, f"Database is {size_mb:.0f} MB — run 'wizard vacuum' to reclaim space"
+    return True, f"Database size: {size_mb:.1f} MB"
+
+
 def _check_knowledge_store() -> tuple[bool, str]:
     ks_type = settings.knowledge_store.type
     if not ks_type:
@@ -150,6 +160,7 @@ def run_checks(stop_on_failure: bool = True) -> list[tuple[str, bool, str]]:
         ("DB file exists", check_db_file),
         ("Config file", check_config_file),
         ("DB tables", check_db_tables),
+        ("DB size", _check_db_size),
         ("Allowlist file", _check_allowlist_file),
         ("Agent registered", _check_agent_registrations),
         ("Migration current", _check_migration_current),
