@@ -13,6 +13,7 @@ from wizard.database import get_session
 from wizard.models import Note, NoteType, ToolCall, WizardSession
 from wizard.repositories import NoteRepository
 from wizard.security import PseudonymStore, SecurityService
+from wizard.tool_call_buffer import ToolCallBuffer
 
 
 @pytest.fixture
@@ -143,8 +144,6 @@ async def test_save_all_inserts_multiple_notes_in_one_flush(mcp_client, seed_tas
 @pytest.mark.asyncio
 async def test_tool_call_buffer_flushes_on_demand():
     """ToolCallBuffer.flush_now must persist enqueued items and clear the queue."""
-    from wizard.tool_call_buffer import ToolCallBuffer
-
     buffer = ToolCallBuffer()
 
     with get_session() as db:
