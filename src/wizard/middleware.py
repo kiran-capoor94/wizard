@@ -7,8 +7,9 @@ from fastmcp.tools.base import ToolResult
 from sqlmodel import select as sa_select
 
 from .database import get_session
-from .models import Note, ToolCall, WizardSession
+from .models import Note, WizardSession
 from .schemas import SessionState
+from .tool_call_buffer import tool_call_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,7 @@ class ToolLoggingMiddleware(Middleware):
             if agent_session_id:
                 span.set_tag("wizard.agent_session_id", agent_session_id)
 
-            with get_session() as db:
-                db.add(ToolCall(tool_name=tool_name, session_id=session_id))
-                db.flush()
+            tool_call_buffer.enqueue(tool_name=tool_name, session_id=session_id)
 
             try:
                 result = await call_next(context)

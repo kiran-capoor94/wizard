@@ -7,9 +7,10 @@ before reaching SQLite, and that the pseudonymised form is what is stored.
 from unittest.mock import patch
 
 import pytest
+from sqlmodel import select
 
 from wizard.database import get_session
-from wizard.models import Note, NoteType, WizardSession
+from wizard.models import Note, NoteType, ToolCall, WizardSession
 from wizard.repositories import NoteRepository
 from wizard.security import PseudonymStore, SecurityService
 
@@ -137,3 +138,28 @@ async def test_save_all_inserts_multiple_notes_in_one_flush(mcp_client, seed_tas
         saved = repo.save_all(db, notes)
         assert len(saved) == 5
         assert all(n.id is not None for n in saved)
+
+
+@pytest.mark.asyncio
+async def test_tool_call_buffer_flushes_on_demand():
+    """ToolCallBuffer.flush_now must persist enqueued items and clear the queue."""
+    from wizard.tool_call_buffer import ToolCallBuffer
+
+    buffer = ToolCallBuffer()
+
+    with get_session() as db:
+        session = WizardSession()
+        db.add(session)
+        db.flush()
+        db.refresh(session)
+        session_id = session.id
+
+        buffer.enqueue(tool_name="save_note", session_id=session_id)
+        buffer.enqueue(tool_name="task_start", session_id=session_id)
+
+        await buffer.flush_now(db)
+        rows = db.exec(select(ToolCall).where(ToolCall.session_id == session_id)).all()
+        tool_names = {r.tool_name for r in rows}
+
+    assert len(rows) == 2
+    assert tool_names == {"save_note", "task_start"}
