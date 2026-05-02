@@ -9,6 +9,10 @@ async def test_resume_unclosed_session(mcp_client, seed_task):
     assert not r.is_error, r
     session_id = r.structured_content["session_id"]
 
+    # task_start triggers a SessionState snapshot (allowlisted tool)
+    r = await mcp_client.call_tool("task_start", {"task_id": task.id})
+    assert not r.is_error, r
+
     r = await mcp_client.call_tool("save_note", {
         "task_id": task.id, "note_type": "investigation",
         "content": "Partial work before crash",

@@ -162,3 +162,31 @@ async def test_tool_call_buffer_flushes_on_demand():
 
     assert len(rows) == 2
     assert tool_names == {"save_note", "task_start"}
+
+
+@pytest.mark.asyncio
+async def test_session_state_only_written_on_allowlisted_tools(mcp_client, seed_task):
+    """SessionState snapshot must only be written on task_start and session_end, not on save_note."""
+    task = await seed_task(name="Lazy snapshot task")
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+    session_id = r.structured_content["session_id"]
+
+    with get_session() as db:
+        before = db.get(WizardSession, session_id)
+        state_before = before.session_state if before else None
+
+    await mcp_client.call_tool("save_note", {
+        "task_id": task.id,
+        "note_type": "investigation",
+        "content": "some finding",
+    })
+
+    with get_session() as db:
+        after = db.get(WizardSession, session_id)
+        state_after = after.session_state if after else None
+
+    assert state_before == state_after, (
+        "SessionState was written by save_note — should only write on task_start/session_end"
+    )
