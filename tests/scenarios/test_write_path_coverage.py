@@ -8,6 +8,9 @@ from unittest.mock import patch
 
 import pytest
 
+from wizard.database import get_session
+from wizard.models import Note, NoteType, WizardSession
+from wizard.repositories import NoteRepository
 from wizard.security import PseudonymStore, SecurityService
 
 
@@ -113,10 +116,6 @@ async def test_jira_upsert_path_pseudonymises_name(mcp_client, security_with_sto
 @pytest.mark.asyncio
 async def test_save_all_inserts_multiple_notes_in_one_flush(mcp_client, seed_task):
     """save_all must persist N notes and return them all with assigned IDs."""
-    from wizard.database import get_session
-    from wizard.models import Note, NoteType, WizardSession
-    from wizard.repositories import NoteRepository
-
     task = await seed_task(name="Batch insert task")
 
     with get_session() as db:
