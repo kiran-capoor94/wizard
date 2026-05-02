@@ -183,26 +183,28 @@ class AnalyticsRepository:
         start_dt = datetime.datetime.combine(start, datetime.time.min)
         end_dt = datetime.datetime.combine(end, datetime.time.max)
 
-        sessions_in_window = db.exec(
-            select(WizardSession).where(
+        session_rows = db.exec(
+            select(WizardSession.id, WizardSession.created_at).where(
                 WizardSession.created_at >= start_dt,
                 WizardSession.created_at <= end_dt,
             )
         ).all()
 
-        task_start_calls = db.exec(
-            select(ToolCall).where(
+        task_start_rows = db.exec(
+            select(ToolCall.session_id).where(
                 ToolCall.tool_name == "task_start",
                 ToolCall.called_at >= start_dt,
                 ToolCall.called_at <= end_dt,
             )
         ).all()
 
-        if not task_start_calls:
+        if not task_start_rows:
             return 0.0
 
-        # Index sessions by id for O(1) lookup.
-        session_map = {s.id: s for s in sessions_in_window}
+        # Index session created_at by id for O(1) lookup.
+        session_created_at: dict[int, datetime.datetime] = {
+            sid: created_at for sid, created_at in session_rows if sid is not None
+        }
 
         # Single query: earliest note ever written. If any note predates a session's
         # start, prior context existed for that task_start — same answer for every
@@ -212,14 +214,68 @@ class AnalyticsRepository:
         ).first()
 
         compounding_count = 0
-        for tc in task_start_calls:
-            session = session_map.get(tc.session_id)
-            if session is None:
+        for session_id in task_start_rows:
+            created_at = session_created_at.get(session_id)
+            if created_at is None:
                 continue
-            if earliest_note_at is not None and earliest_note_at < session.created_at:
+            if earliest_note_at is not None and earliest_note_at < created_at:
                 compounding_count += 1
 
-        return round(compounding_count / len(task_start_calls), 2)
+        return round(compounding_count / len(task_start_rows), 2)
+
+    def get_note_velocity(
+        self, db: Session, start: datetime.date, end: datetime.date
+    ) -> dict[str, int]:
+        """Return {iso_date: note_count} for each day in [start, end]."""
+        start_dt = datetime.datetime.combine(start, datetime.time.min)
+        end_dt = datetime.datetime.combine(end, datetime.time.max)
+        rows = db.exec(
+            select(
+                func.date(Note.created_at).label("day"),
+                func.count().label("cnt"),
+            )
+            .where(Note.created_at >= start_dt, Note.created_at <= end_dt)
+            .group_by(func.date(Note.created_at))
+        ).all()
+        result = {str(row[0]): row[1] for row in rows}
+        current = start
+        while current <= end:
+            result.setdefault(current.isoformat(), 0)
+            current += datetime.timedelta(days=1)
+        return result
+
+    def get_session_velocity(
+        self, db: Session, start: datetime.date, end: datetime.date
+    ) -> dict[str, float]:
+        """Return {iso_date: avg_duration_minutes} for each day in [start, end]."""
+        start_dt = datetime.datetime.combine(start, datetime.time.min)
+        end_dt = datetime.datetime.combine(end, datetime.time.max)
+        closed_at_expr = case(
+            (col(WizardSession.closed_by).in_(["user", "hook"]), WizardSession.updated_at),
+            (WizardSession.closed_by == "auto", WizardSession.last_active_at),
+        )
+        rows = db.exec(
+            select(
+                func.date(WizardSession.created_at).label("day"),
+                func.avg(
+                    (func.julianday(closed_at_expr) - func.julianday(WizardSession.created_at))
+                    * 1440
+                ).label("avg_min"),
+            )
+            .where(
+                WizardSession.created_at >= start_dt,
+                WizardSession.created_at <= end_dt,
+                col(WizardSession.closed_by).in_(["user", "hook", "auto"]),
+                closed_at_expr.is_not(None),
+            )
+            .group_by(func.date(WizardSession.created_at))
+        ).all()
+        result: dict[str, float] = {str(row[0]): round(row[1] or 0.0, 1) for row in rows}
+        current = start
+        while current <= end:
+            result.setdefault(current.isoformat(), 0.0)
+            current += datetime.timedelta(days=1)
+        return result
 
     def get_tool_call_frequency(self, db: Session, days: int) -> dict[str, int]:
         """Return {tool_name: call_count} for the last `days` days."""
