@@ -4,12 +4,14 @@ import re
 from collections.abc import Callable
 
 import phonenumbers
-import sqlalchemy as sa
 from faker import Faker
 from pydantic import BaseModel
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
 
 from .database import engine as _wizard_engine
+from .models import PseudonymMap
 
 logger = logging.getLogger(__name__)
 
@@ -119,32 +121,29 @@ class PseudonymStore:
         key = f"{entity_type}:{original.strip().lower()}"
         original_hash = hashlib.sha256(key.encode()).hexdigest()
         try:
-            with self._engine.connect() as conn:
-                existing = conn.execute(
-                    sa.text(
-                        "SELECT fake_value FROM pseudonym_map WHERE original_hash = :h"
-                    ),
-                    {"h": original_hash},
+            with Session(self._engine) as session:
+                existing = session.exec(
+                    select(PseudonymMap).where(PseudonymMap.original_hash == original_hash)
                 ).first()
                 if existing:
-                    return existing[0]
+                    return existing.fake_value
                 fake_value = generator()
-                conn.execute(
-                    sa.text(
-                        "INSERT OR IGNORE INTO pseudonym_map "
-                        "(original_hash, entity_type, fake_value) "
-                        "VALUES (:h, :et, :fv)"
-                    ),
-                    {"h": original_hash, "et": entity_type, "fv": fake_value},
+                row = PseudonymMap(
+                    original_hash=original_hash,
+                    entity_type=entity_type,
+                    fake_value=fake_value,
                 )
-                conn.commit()
-                result = conn.execute(
-                    sa.text(
-                        "SELECT fake_value FROM pseudonym_map WHERE original_hash = :h"
-                    ),
-                    {"h": original_hash},
-                ).first()
-                return result[0] if result else fake_value
+                session.add(row)
+                try:
+                    session.commit()
+                    session.refresh(row)
+                    return row.fake_value
+                except IntegrityError:
+                    session.rollback()
+                    winner = session.exec(
+                        select(PseudonymMap).where(PseudonymMap.original_hash == original_hash)
+                    ).first()
+                    return winner.fake_value if winner else fake_value
         except Exception as e:
             logger.warning(
                 "PseudonymStore: DB error for %r, falling back to stub: %s", original, e
