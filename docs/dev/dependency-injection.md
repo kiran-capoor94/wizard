@@ -7,12 +7,16 @@
 via FastMCP's `Depends()` system (identical in spirit to FastAPI's):
 
 ```python
+get_db_session()           → Generator[Session, None, None]   # centralised; tests patch wizard.deps.get_db_session
 get_security()             → SecurityService
 get_task_repo()            → TaskRepository
 get_meeting_repo()         → MeetingRepository
 get_note_repo()            → NoteRepository
 get_task_state_repo()      → TaskStateRepository
 get_session_repo()         → SessionRepository
+get_search_repo()          → SearchRepository
+get_session_closer()       → SessionCloser
+get_wizard_paths()         → WizardPaths
 get_skill_roots()          → list[Path]   # skill search roots for mode tools
 ```
 

@@ -11,7 +11,7 @@ accumulate context as you work.
 
 1. A **SessionEnd hook** fires when the agent's session ends (installed by
    `wizard setup`).
-2. The hook calls `wizard capture --close --transcript <path> --agent <id> --agent-session-id <uuid>`.
+2. The hook calls `wizard capture --close --transcript <path> --agent <id> --agent-session-id <uuid> --session-id <id>`.
 3. `wizard capture` finds the wizard session matching `--session-id` (written
    by `session_start`) or the most recent unsynthesised session within 24h,
    sets `transcript_path`, `agent`, and `agent_session_id`, then calls
@@ -26,15 +26,31 @@ accumulate context as you work.
 before the next session starts. No `ctx.sample()` involved — no round-trip
 cost, no dependency on MCP context availability.
 
+**Mid-session synthesis:** `mid_session_synthesis_loop()` in
+`tools/session_helpers.py` runs as a background asyncio task when
+`synthesis.enabled=True` and an `agent_session_id` is present. It polls the
+transcript file every 5 minutes and calls `Synthesiser.synthesise_lines()` on
+new lines since the last pass. The task is launched by `session_start` and
+cancelled at `session_end` (or when `SessionCloser` auto-closes the session)
+via `cancel_mid_session_synthesis()`. Active task handles are stored in the
+`MID_SESSION_TASKS` dict in `mid_session.py`.
+
 **Fallback:** If the LLM server is unreachable, `wizard capture` exits non-zero.
 The session retains its `transcript_path` (`is_synthesised` stays `False`). Retry
 with `wizard capture --close --session-id <id>` when the server is available.
+
+**Chunking fallback:** On `ContextWindowExceededError`, the synthesiser splits
+pre-filtered entries into chunks bounded by `min(context_chars, 15000)` chars
+and synthesises each chunk independently.
 
 **Key files:**
 
 - `transcript.py` — `TranscriptReader` (JSONL parser)
 - `synthesis.py` — `Synthesiser` (backend selection + note persistence)
-- `llm_adapters.py` — `OllamaAdapter`, `complete()` (LiteLLM call), `probe_backend_health()`, JSON parsing
+- `synthesis_prompt.py` — `filter_for_synthesis()` (drops low-signal entries, truncates by `ROLE_CHAR_LIMITS`), `format_prompt()` (builds LLM prompt string), `KEEP_RESULT_TOOLS` (tool results retained), `ROLE_CHAR_LIMITS` (per-role char budgets)
+- `llm_adapters.py` — `OllamaAdapter` (native `/api/chat` for Ollama, bypasses LiteLLM), `LiteLLMAdapter`-style `complete()` for cloud/local non-Ollama backends, `probe_backend_health()`, JSON parsing
+- `mid_session.py` — `MID_SESSION_TASKS` dict + `cancel_mid_session_synthesis()` / `register_mid_session_task()`
+- `tools/session_helpers.py` — `mid_session_synthesis_loop()` (background polling loop)
 - `hooks/session-end.sh` — Claude Code hook script
 - `agent_registration.py` — `register_hook()` / `deregister_hook()`
 - `config.py` — `SynthesisSettings` + `BackendConfig` (ordered backends list)
@@ -63,12 +79,15 @@ match `TranscriptReader._PARSERS`: `claude-code`, `codex`, `gemini`,
 
 `failure` notes are surfaced by `task_start` ahead of other note types so the agent knows what not to retry. They are also included in synthesis deduplication by content hash.
 
-**Task matching:** `Synthesiser` always sets `task_id=None` on notes.
-Wizard owns task matching — the LLM is not shown the task list.
+**Task matching:** The LLM receives the open-tasks table (id + name) in the
+prompt and returns a `task_id` per note. `_save_notes()` validates the returned
+`task_id` against `valid_task_ids` (fetched from `prepare_task_table()`); IDs
+not in the set are set to `None` and the note is anchored to the session instead.
+
+**`synthesis_status` values:** `"pending"` | `"complete"` | `"partial_failure"`
 
 **Limitations:**
 
-- No mid-session intelligence — synthesis runs at session boundaries only
 - Transcript file must exist at synthesis time; if deleted, falls back to `wizardsession.transcript_raw` (persisted at capture time)
 - Parsers: Claude Code (full), Codex, Gemini, OpenCode, Copilot CLI
 - Ollama backends require a running Ollama server; cloud backends require a valid API key
