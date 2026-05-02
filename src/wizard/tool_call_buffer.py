@@ -6,6 +6,8 @@ from .models import ToolCall
 
 logger = logging.getLogger(__name__)
 
+# ToolCall rows enqueued within this window are lost on unclean shutdown.
+# session_end calls flush_now() to close the gap for normal exits.
 _DRAIN_INTERVAL = 30
 
 
@@ -45,15 +47,8 @@ class ToolCallBuffer:
         while True:
             await asyncio.sleep(_DRAIN_INTERVAL)
             try:
-                items: list[ToolCall] = []
-                while not self._queue.empty():
-                    try:
-                        items.append(self._queue.get_nowait())
-                    except asyncio.QueueEmpty:
-                        break
-                if items:
-                    with get_session() as db:
-                        db.add_all(items)
+                with get_session() as db:
+                    await self.flush_now(db)
             except Exception as e:
                 logger.warning("ToolCallBuffer drain failed: %s", e)
 
