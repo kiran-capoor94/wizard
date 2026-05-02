@@ -177,7 +177,7 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 | `create_task`           | Create a new task, optionally linked to a meeting                                |
 | `update_task`           | Update any task field                                                            |
 | `rewind_task`           | Full note timeline for a task, oldest to newest                                  |
-| `save_note`             | Scrub PII, deduplicate by content hash, compress if >1000 chars, and persist    |
+| `save_note`             | Scrub PII, deduplicate by content hash, compress if >1000 chars, and persist     |
 | `what_am_i_missing`     | 7-point diagnostic — surfaces stale context, missing decisions, etc.             |
 | `what_should_i_work_on` | Scored recommendation with mode (focus / quick-wins / unblock) and time budget   |
 | `get_modes`             | List available modes and the active mode for the current session                 |
@@ -207,25 +207,25 @@ A `SessionStart` hook refreshes `~/.claude/settings.json` in 80% of sessions wit
 
 17 FastMCP skills installed to `~/.wizard/skills/` during setup. Skills guide agent behaviour for common workflows.
 
-| Skill                   | When it fires                                               |
-| ----------------------- | ----------------------------------------------------------- |
-| `session-start`         | Beginning a coding session                                  |
-| `session-end`           | "Let's wrap up", "I'm done for today"                       |
-| `session-resume`        | "Continue where I left off", "pick up from yesterday"       |
-| `task-start`            | "Let's work on task X", picking a task from triage          |
-| `what-should-i-work-on` | "What should I work on?", "I have 30 minutes", "quick win"  |
-| `note`                  | After investigations, decisions, or non-obvious discoveries |
-| `meeting`               | Summarising a meeting flagged by session_start              |
-| `meeting-to-tasks`      | Turning meeting action items into tracked tasks             |
-| `code-review`           | Reviewing code changes with prior wizard context            |
-| `architecture-debate`   | Choosing between design approaches before implementing      |
-| `wizard-playground`     | Any diagram request — architecture, sequence, ERD, flow, state machine |
-| `rulecheck`             | Scan codebase for guideline violations and orchestrate a fix PR |
-| `caveman`               | Switch to compressed, low-token output style                |
+| Skill                   | When it fires                                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `session-start`         | Beginning a coding session                                                                                                       |
+| `session-end`           | "Let's wrap up", "I'm done for today"                                                                                            |
+| `session-resume`        | "Continue where I left off", "pick up from yesterday"                                                                            |
+| `task-start`            | "Let's work on task X", picking a task from triage                                                                               |
+| `what-should-i-work-on` | "What should I work on?", "I have 30 minutes", "quick win"                                                                       |
+| `note`                  | After investigations, decisions, or non-obvious discoveries                                                                      |
+| `meeting`               | Summarising a meeting flagged by session_start                                                                                   |
+| `meeting-to-tasks`      | Turning meeting action items into tracked tasks                                                                                  |
+| `code-review`           | Reviewing code changes with prior wizard context                                                                                 |
+| `architecture-debate`   | Choosing between design approaches before implementing                                                                           |
+| `wizard-playground`     | Any diagram request — architecture, sequence, ERD, flow, state machine                                                           |
+| `rulecheck`             | Scan codebase for guideline violations and orchestrate a fix PR                                                                  |
+| `caveman`               | Switch to compressed, low-token output style                                                                                     |
 | `architect`             | Activated via `set_mode` — principal-level systems thinking with sub-skills for arch review, constraints design, and diagramming |
-| `ideation`              | Activated via `set_mode` — divergent creative exploration with elicitation and ranked recommendations |
-| `product-owner`         | Activated via `set_mode` — ruthless user-value focus        |
-| `socratic-mentor`       | Activated via `set_mode` — Socratic questioning to deepen understanding |
+| `ideation`              | Activated via `set_mode` — divergent creative exploration with elicitation and ranked recommendations                            |
+| `product-owner`         | Activated via `set_mode` — ruthless user-value focus                                                                             |
+| `socratic-mentor`       | Activated via `set_mode` — Socratic questioning to deepen understanding                                                          |
 
 **Mode sub-skills** are loaded automatically as supporting context when a mode is active. `architect` mode ships with two: `arch-review` (structured architecture audit with blast-radius scoring) and `constraints-designer` (elicitation protocol for constraints and named invariants). They also appear in the mode's trigger table so the agent invokes them at the right moment.
 

@@ -78,7 +78,7 @@ class RegistrationService:
 
     def register_agents(self, agent_ids: list[str]) -> list[dict]:
         results = []
-        source = Path(__file__).resolve().parent / "skills"
+        source = self.WIZARD_HOME / "skills"
         for aid in agent_ids:
             res = {"id": aid, "success": False, "parts": [], "error": None}
             try:
@@ -96,7 +96,7 @@ class RegistrationService:
 
     def deregister_agents(self, agent_ids: list[str]) -> list[dict]:
         results = []
-        source = Path(__file__).resolve().parent / "skills"
+        source = self.WIZARD_HOME / "skills"
         for aid in agent_ids:
             res = {"id": aid, "success": False, "parts": [], "error": None}
             try:

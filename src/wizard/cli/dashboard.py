@@ -23,6 +23,7 @@ _tasks = TaskRepository()
 
 _NOTE_WINDOW_DAYS = 7
 _TOOL_WINDOW_DAYS = 30
+_COMPOUNDING_WINDOW_DAYS = 30
 _SESSIONS_LIMIT = 30
 _STALE_THRESHOLD = 3
 
@@ -32,7 +33,7 @@ def _load_dashboard_data() -> dict:
         raise FileNotFoundError("Database not found. Run 'wizard setup' first.")
     today = datetime.date.today()
     week_ago = today - datetime.timedelta(days=_NOTE_WINDOW_DAYS)
-    month_ago = today - datetime.timedelta(days=_TOOL_WINDOW_DAYS)
+    month_ago = today - datetime.timedelta(days=_COMPOUNDING_WINDOW_DAYS)
     with get_session() as db:
         open_task_count = _tasks.count_open_tasks(db)
         sessions_today = _sessions.count_today(db)
@@ -94,6 +95,7 @@ def _load_dashboard_data() -> dict:
         "blocked_tasks": blocked_tasks_dicts,
         "note_velocity": note_velocity,
         "session_velocity": session_velocity,
+        "tool_calls_total": sum(tool_freq.values()),
     }
 
 
@@ -106,8 +108,6 @@ def _render_kpi_strip(data: dict) -> None:
     )
     stale = data["task_stats_7d"]["stale_count"]
     compounding_pct = round(data["compounding"] * 100)
-    tool_calls_total = sum(data["tool_freq"].values())
-
     col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     col1.metric("Open Tasks", data["open_task_count"])
     col2.metric("Sessions Today", data["sessions_today"])
@@ -130,7 +130,7 @@ def _render_kpi_strip(data: dict) -> None:
         delta="low" if data["compounding"] < 0.5 else None,
         delta_color="inverse",
     )
-    col7.metric("Tool Calls (30d)", tool_calls_total)
+    col7.metric("Tool Calls (30d)", data["tool_calls_total"])
 
 
 def _render_today_tab(data: dict) -> None:
@@ -138,7 +138,7 @@ def _render_today_tab(data: dict) -> None:
     col1, col2, col3 = st.columns(3)
     col1.metric("Sessions", data["sessions_today"])
     col2.metric("Notes Written", notes_today)
-    col3.metric("Tool Calls (30d total)", sum(data["tool_freq"].values()))
+    col3.metric("Tool Calls (30d total)", data["tool_calls_total"])
 
     st.subheader("Top Tool Calls (30d)")
     if data["tool_freq"]:

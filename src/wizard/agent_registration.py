@@ -258,11 +258,22 @@ def refresh_hooks() -> None:
     """Copy hook scripts from the installed package into ~/.wizard/hooks/.
 
     Called by `wizard setup` and `wizard update` so the stable ~/.wizard/hooks/
-    path always reflects the currently installed version.
+    path always reflects the currently installed version. Performs a full sync
+    by removing files in the destination that are not in the package.
     """
     pkg_hooks = importlib.resources.files("wizard").joinpath("hooks")
     _WIZARD_HOOKS_DIR.mkdir(parents=True, exist_ok=True)
-    for script_name in ("session-end.sh", "session-start.sh", "session-start-minimal.sh"):
+
+    # 1. Identify what should be there
+    pkg_hook_names = {f.name for f in pkg_hooks.iterdir() if not f.name.startswith("__")}
+
+    # 2. Remove obsolete files from ~/.wizard/hooks/
+    for existing in _WIZARD_HOOKS_DIR.iterdir():
+        if existing.is_file() and existing.name not in pkg_hook_names:
+            existing.unlink()
+
+    # 3. Copy/overwrite from package
+    for script_name in pkg_hook_names:
         src = pkg_hooks.joinpath(script_name)
         dest = _WIZARD_HOOKS_DIR / script_name
         dest.write_bytes(src.read_bytes())
@@ -330,11 +341,12 @@ def register_hook(agent_id: str) -> bool:
 
 
 def deregister_hook(agent_id: str) -> bool:
-    """Remove wizard hook(s) from agent's hooks config.
+    """Remove all wizard hook(s) from agent's hooks config.
 
-    Returns True if any hook was removed, False if agent not supported or nothing removed.
+    Scans the agent's hooks config and removes any command that contains the
+    ~/.wizard/hooks/ directory path. Returns True if any hook was removed.
     """
-    if agent_id not in _HOOK_CONFIGS or agent_id not in _HOOK_SCRIPTS:
+    if agent_id not in _HOOK_CONFIGS:
         return False
     config_path, hooks_key = _HOOK_CONFIGS[agent_id]
 
@@ -347,18 +359,33 @@ def deregister_hook(agent_id: str) -> bool:
         return False
 
     hooks = data.get(hooks_key, {})
-    removed_any = False
+    if not hooks:
+        return False
 
-    for event, script in _HOOK_SCRIPTS[agent_id].items():
-        name = script.name  # e.g. "session-end.sh" or "session-start.sh"
+    removed_any = False
+    hooks_dir_str = str(_WIZARD_HOOKS_DIR)
+
+    # We iterate over all events in the agent's config, not just those in _HOOK_SCRIPTS,
+    # to ensure we clean up obsolete hooks that might have changed names or events.
+    for event in list(hooks.keys()):
         event_hooks = hooks.get(event, [])
+        if not isinstance(event_hooks, list):
+            continue
+
         filtered = [
             entry
             for entry in event_hooks
-            if not any(name in h.get("command", "") for h in entry.get("hooks", []))
+            if not any(
+                hooks_dir_str in h.get("command", "")
+                for h in entry.get("hooks", [])
+                if isinstance(h, dict)
+            )
         ]
         if len(filtered) < len(event_hooks):
-            hooks[event] = filtered
+            if not filtered:
+                hooks.pop(event)
+            else:
+                hooks[event] = filtered
             removed_any = True
 
     if removed_any:
