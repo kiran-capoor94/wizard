@@ -12,11 +12,13 @@ src/wizard/
     serve.py                 # wizard-server entry point (installed MCP binary)
     capture.py               # wizard capture — transcript synthesis trigger (called by hooks)
     configure.py             # configure knowledge-store + synthesis backends subcommands
-    doctor.py                # 8-point health checks (wizard doctor)
+    doctor.py                # 8-point health checks (wizard doctor); allowlist check is advisory (non-failing)
     analytics.py             # Session/note/task usage stats (wizard analytics)
     dashboard.py             # Streamlit health dashboard — 5 panels: active session, recent notes, synthesis health, memory utilisation, tool call frequency
+    verify.py                # `wizard verify` — 5-step MCP handshake smoke test
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
   skills.py                  # Skill loader (reads ~/.wizard/skills/ at startup)
+  synthesis_prompt.py        # Transcript filtering and prompt construction for synthesis (`filter_for_synthesis`, `format_prompt`, `KEEP_RESULT_TOOLS`, `ROLE_CHAR_LIMITS`)
   tools/                       # MCP tools package (split by domain)
     __init__.py                # Re-exports all tool functions
     session_tools.py           # session_start, session_end, resume_session
@@ -46,7 +48,7 @@ src/wizard/
   mid_session.py             # Background mid-session synthesis state (MID_SESSION_TASKS dict)
   models.py                  # SQLModel ORM: task, note, meeting, wizardsession, toolcall, task_state
   schemas.py                 # Pydantic response types for all MCP tools (incl. SearchResult, SearchResponse)
-  services.py                # SessionCloser — auto-closes abandoned sessions
+  services.py                # `SessionCloser` (auto-closes abandoned sessions) + `RegistrationService` (agent registration, setup, uninstall)
   security.py                # SecurityService + HeuristicNameFinder + PseudonymStore — PII scrubbing with pseudonymisation
   config.py                  # Pydantic Settings + BackendConfig + ModesSettings + JsonConfigSettingsSource
   database.py                # SQLite session factory (SQLModel engine)
@@ -69,6 +71,7 @@ src/wizard/
 hooks/                       # Hook scripts source (also bundled as src/wizard/hooks/ for installs)
   session-end.sh             # Claude Code SessionEnd hook — calls `wizard capture --close` to synthesise transcript
   session-start.sh           # Claude Code SessionStart hook — personalization refresh (80%) + session boot injection
+  session-start-minimal.sh   # Minimal session-start for Gemini/Codex/Copilot — boot injection only, no 80% gate
 alembic/                     # DB migration scripts (dev use; bundled copy lives in src/wizard/alembic/)
 tests/
   scenarios/                 # ALL tests live here — scenario/behaviour tests only (no unit tests)
