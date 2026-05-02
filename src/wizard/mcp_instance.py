@@ -1,11 +1,24 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+
 from fastmcp import FastMCP
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 
 from .config import settings
 from .middleware import SessionStateMiddleware, ToolLoggingMiddleware
+from .tool_call_buffer import tool_call_buffer
+
+
+@asynccontextmanager
+async def _lifespan(server: Any) -> AsyncIterator[None]:
+    tool_call_buffer.start()
+    yield
+
 
 mcp = FastMCP(
     name=settings.name,
+    lifespan=_lifespan,
     instructions=(
         "Wizard is Kiran's local memory layer. It stores structured context (tasks, notes, "
         "meetings, sessions) in SQLite, scrubs PII, and surfaces intelligence across sessions. "
