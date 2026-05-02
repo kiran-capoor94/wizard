@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from sqlmodel import Session, col, func, select
@@ -30,6 +31,16 @@ class SessionRepository:
         stmt = select(func.count()).select_from(WizardSession)
         if closure_status_filter:
             stmt = stmt.where(WizardSession.closed_by == closure_status_filter)
+        return db.exec(stmt).one()
+
+    def count_today(self, db: Session) -> int:
+        """Return number of WizardSessions created today (local time)."""
+        today_start = datetime.datetime.combine(datetime.date.today(), datetime.time.min)
+        stmt = (
+            select(func.count())
+            .select_from(WizardSession)
+            .where(WizardSession.created_at >= today_start)
+        )
         return db.exec(stmt).one()
 
     def get(self, db: Session, session_id: int) -> WizardSession | None:
