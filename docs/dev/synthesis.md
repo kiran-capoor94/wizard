@@ -21,6 +21,9 @@ accumulate context as you work.
    On success, `WizardSession.is_synthesised` is set to `True`.
    Raw transcript JSONL is persisted to `wizardsession.transcript_raw` before
    synthesis so re-synthesis remains possible after the agent deletes the file.
+   On successful synthesis `transcript_raw` is set to `NULL` immediately to keep
+   the database compact. Run `wizard vacuum` to reclaim space from older sessions
+   or after a partial failure where the blob was not cleared.
 
 **Synthesis is fully decoupled from the MCP server.** It runs at hook time,
 before the next session starts. No `ctx.sample()` involved — no round-trip
@@ -88,6 +91,6 @@ not in the set are set to `None` and the note is anchored to the session instead
 
 **Limitations:**
 
-- Transcript file must exist at synthesis time; if deleted, falls back to `wizardsession.transcript_raw` (persisted at capture time)
+- Transcript file must exist at synthesis time; if deleted, falls back to `wizardsession.transcript_raw` (persisted at capture time, cleared after successful synthesis)
 - Parsers: Claude Code (full), Codex, Gemini, OpenCode, Copilot CLI
 - Ollama backends require a running Ollama server; cloud backends require a valid API key
