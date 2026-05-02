@@ -114,6 +114,7 @@ wizard configure synthesis               # manage LLM backends
 wizard doctor [--all]                    # health check
 wizard analytics [--day|--week]          # session/task/note usage stats
 wizard dashboard                         # launch Streamlit health dashboard (5 panels)
+wizard vacuum                            # clear synthesised transcript blobs, VACUUM db
 wizard update                            # upgrade install, migrate DB, re-register
 wizard uninstall [--yes]                 # clean removal
 wizard capture --close                   # (called by hooks) synthesise transcript
@@ -137,7 +138,7 @@ Notes accumulate per task across sessions. Every time you revisit a task, prior 
 
 **Transcript synthesis**
 
-Synthesis runs outside the MCP server at hook time — no round-trip cost, no dependency on the agent being active. Raw transcript content is persisted to the DB at capture time, so re-synthesis remains possible even after the agent deletes the file. Extracted note types: `investigation`, `decision`, `docs`, `learnings`, and `failure` (failed approaches, dead ends, incorrect assumptions).
+Synthesis runs outside the MCP server at hook time — no round-trip cost, no dependency on the agent being active. Raw transcript content is persisted to the DB at capture time, so re-synthesis remains possible even after the agent deletes the file. The raw blob is cleared immediately after successful synthesis to keep the database compact — run `wizard vacuum` to reclaim space from older sessions. Extracted note types: `investigation`, `decision`, `docs`, `learnings`, and `failure` (failed approaches, dead ends, incorrect assumptions).
 
 **Work triage**
 
