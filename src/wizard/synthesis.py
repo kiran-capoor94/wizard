@@ -357,7 +357,7 @@ class Synthesiser:
             ).all()
             task_artifact_ids = {tid: aid for tid, aid in rows if aid is not None}
 
-        count = 0
+        notes_to_save: list[Note] = []
         for nd in notes_data:
             clean_content = self._security.scrub(nd.content).clean
             clean_model = (
@@ -369,9 +369,6 @@ class Synthesiser:
                 and (valid_task_ids is None or nd.task_id in valid_task_ids)
                 else None
             )
-            # Artifact identity (v3): single anchor per attribution decision tree.
-            # 1. task_id set -> use task.artifact_id (pre-loaded above)
-            # 2. session only -> use session.artifact_id
             if matched_task_id is not None and matched_task_id in task_artifact_ids:
                 artifact_id: str | None = task_artifact_ids[matched_task_id]
                 artifact_type: str | None = "task"
@@ -381,7 +378,7 @@ class Synthesiser:
             else:
                 artifact_id = None
                 artifact_type = None
-            note = Note(
+            notes_to_save.append(Note(
                 note_type=NOTE_TYPE_MAP.get(nd.note_type, NoteType.INVESTIGATION),
                 content=clean_content,
                 mental_model=clean_model,
@@ -389,10 +386,9 @@ class Synthesiser:
                 session_id=wizard_session.id,
                 artifact_id=artifact_id,
                 artifact_type=artifact_type,
-            )
-            self._note_repo.save(db, note)
-            count += 1
-        return count
+            ))
+        self._note_repo.save_all(db, notes_to_save)
+        return len(notes_to_save)
 
     def _refresh_rolling_summaries(
         self, db: Session, wizard_session: WizardSession

@@ -108,3 +108,33 @@ async def test_jira_upsert_path_pseudonymises_name(mcp_client, security_with_sto
     read_result = await mcp_client.call_tool("get_task", {"task_id": task_id})
     stored_name = read_result.structured_content["task"]["name"]
     assert "James Wong" not in stored_name
+
+
+@pytest.mark.asyncio
+async def test_save_all_inserts_multiple_notes_in_one_flush(mcp_client, seed_task):
+    """save_all must persist N notes and return them all with assigned IDs."""
+    from wizard.database import get_session
+    from wizard.models import Note, NoteType, WizardSession
+    from wizard.repositories import NoteRepository
+
+    task = await seed_task(name="Batch insert task")
+
+    with get_session() as db:
+        session = WizardSession()
+        db.add(session)
+        db.flush()
+        db.refresh(session)
+
+        notes = [
+            Note(
+                note_type=NoteType.INVESTIGATION,
+                content=f"Note {i}",
+                task_id=task.id,
+                session_id=session.id,
+            )
+            for i in range(5)
+        ]
+        repo = NoteRepository()
+        saved = repo.save_all(db, notes)
+        assert len(saved) == 5
+        assert all(n.id is not None for n in saved)
