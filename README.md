@@ -1,6 +1,6 @@
 # Wizard
 
-[![Version](https://img.shields.io/badge/version-2.2.9-blue)](https://github.com/kiran-capoor94/wizard)
+[![Version](https://img.shields.io/badge/version-2.2.10-blue)](https://github.com/kiran-capoor94/wizard)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Built with FastMCP](https://img.shields.io/badge/built%20with-FastMCP-purple)](https://github.com/jlowin/fastmcp)
