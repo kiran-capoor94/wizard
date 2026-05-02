@@ -7,8 +7,9 @@ from fastmcp.tools.base import ToolResult
 from sqlmodel import select as sa_select
 
 from .database import get_session
-from .models import Note, ToolCall, WizardSession
+from .models import Note, WizardSession
 from .schemas import SessionState
+from .tool_call_buffer import tool_call_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,7 @@ class ToolLoggingMiddleware(Middleware):
             if agent_session_id:
                 span.set_tag("wizard.agent_session_id", agent_session_id)
 
-            with get_session() as db:
-                db.add(ToolCall(tool_name=tool_name, session_id=session_id))
-                db.flush()
+            tool_call_buffer.enqueue(tool_name=tool_name, session_id=session_id)
 
             try:
                 result = await call_next(context)
@@ -56,31 +55,27 @@ class ToolLoggingMiddleware(Middleware):
 
 
 class SessionStateMiddleware(Middleware):
-    """Middleware that snapshots session state on every tool call.
+    """Middleware that snapshots session state on allowlisted tool calls.
 
     Updates WizardSession.last_active_at and incrementally builds
     a partial SessionState (working_set from notes) so that abandoned
     sessions have recoverable state.
     """
 
-    _SKIP_TOOLS = frozenset({"session_start", "session_end"})
+    _SNAPSHOT_TOOLS = frozenset({"task_start", "session_end"})
 
     async def on_call_tool(self, context: MiddlewareContext, call_next) -> ToolResult:
         result = await call_next(context)
 
         tool_name = context.message.name
-        if tool_name in self._SKIP_TOOLS:
-            return result
-
         try:
             if context.fastmcp_context is not None:
-                session_id = await context.fastmcp_context.get_state(
-                    "current_session_id"
-                )
+                session_id = await context.fastmcp_context.get_state("current_session_id")
                 if session_id is not None:
                     sentry_sdk.set_user({"id": str(session_id)})
-                    with get_session() as db:
-                        self.snapshot_session_state(db, session_id)
+                    if tool_name in self._SNAPSHOT_TOOLS:
+                        with get_session() as db:
+                            self.snapshot_session_state(db, session_id)
         except Exception as e:
             logger.warning("SessionStateMiddleware failed: %s", e)
 
