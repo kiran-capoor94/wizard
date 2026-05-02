@@ -198,6 +198,8 @@ def _persist_results(
         result = synthesiser.persist(
             db, total_notes_data, session, valid_task_ids, terminal=True
         )
+        session.transcript_raw = None
+        db.add(session)
         typer.echo(
             f"Session {session.id}: {result.notes_created} note(s) via {result.synthesised_via}."
         )

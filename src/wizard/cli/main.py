@@ -346,6 +346,37 @@ def dashboard() -> None:
 
 
 @app.command()
+def vacuum() -> None:
+    """Clear synthesised transcript blobs and compact the database."""
+    import sqlite3 as _sqlite3
+
+    db_path = Path(os.environ.get("WIZARD_DB", settings.db))
+    if not db_path.exists():
+        typer.echo("Database not found. Run 'wizard setup' first.", err=True)
+        raise typer.Exit(1)
+
+    size_before = db_path.stat().st_size
+    with _sqlite3.connect(str(db_path)) as conn:
+        cur = conn.execute(
+            "UPDATE wizardsession SET transcript_raw = NULL"
+            " WHERE is_synthesised = 1 AND synthesis_status = 'complete'"
+            " AND transcript_raw IS NOT NULL"
+        )
+        cleared = cur.rowcount
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(FULL)")
+        conn.execute("VACUUM")
+
+    size_after = db_path.stat().st_size
+    freed_mb = (size_before - size_after) / 1_048_576
+    typer.echo(
+        f"Cleared {cleared} transcript blob(s). "
+        f"Database: {size_before // 1_048_576} MB → {size_after // 1_048_576} MB "
+        f"(freed {freed_mb:.1f} MB)."
+    )
+
+
+@app.command()
 def update() -> None:
     """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
     from wizard.database import run_migrations
