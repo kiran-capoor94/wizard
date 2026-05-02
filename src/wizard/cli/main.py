@@ -350,7 +350,16 @@ def update() -> None:
     """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
     from wizard.database import run_migrations
 
-    skills_dest = _reg_service.WIZARD_HOME / "skills"
+    # 1. Identify currently registered agents to ensure we clean up their envs
+    registered = agent_registration.read_registered_agents()
+    if not registered:
+        registered = agent_registration.scan_all_registered()
+
+    if registered:
+        typer.echo("  unlinking old skills/hooks... ", nl=False)
+        # deregister_agents removes skills and hooks based on the CURRENT (old) mirrored assets.
+        _reg_service.deregister_agents(registered)
+        typer.echo("ok")
 
     if is_editable_install():
         # Dev mode: git pull + uv sync
@@ -390,23 +399,23 @@ def update() -> None:
         typer.echo(f"FAILED\n{exc}", err=True)
         raise typer.Exit(1) from exc
 
+    # 2. Refresh internal mirrored assets from the NEW package content
     agent_registration.refresh_hooks()
     _reg_service.refresh_skills()
 
-    registered = agent_registration.read_registered_agents()
-    if not registered:
-        registered = agent_registration.scan_all_registered()
-
+    # 3. Re-register agents to install the NEW skills and hooks
     if registered:
-        typer.echo("\nAgents:")
+        typer.echo("  re-linking skills/hooks... ", nl=False)
         results = _reg_service.register_agents(registered)
+        typer.echo("ok")
         _display_agent_registration(results)
     else:
         typer.echo("\nNo registered agents found — run: wizard setup --agent <agent>")
 
     rprint(Panel(
-        f"Skills cache: [dim]{skills_dest}[/dim]\n"
-        f"Agents updated: [bold]{', '.join(registered) if registered else 'none'}[/bold]",
+        f"Skills cache: [dim]{_reg_service.WIZARD_HOME / 'skills'}[/dim]\n"
+        "  ✅  Update complete\n"
+        "  Obsolete skills and hooks have been removed from agent environments.",
         title="[green]Wizard updated[/green]",
         border_style="green",
     ))

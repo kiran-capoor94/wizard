@@ -99,7 +99,6 @@ class SessionRepository:
         return session
 
 
-
 def find_latest_session_with_notes(db: Session) -> WizardSession | None:
     """Most recent WizardSession that has at least one associated Note."""
     subq = select(Note).where(Note.session_id == WizardSession.id).exists()

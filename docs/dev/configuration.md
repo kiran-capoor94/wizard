@@ -1,4 +1,5 @@
 # Configuration Schema — Wizard Developer Reference
+
 > Full reference: part of the Wizard developer docs. See CLAUDE.md for the navigational index.
 
 ## Configuration Schema
