@@ -55,31 +55,27 @@ class ToolLoggingMiddleware(Middleware):
 
 
 class SessionStateMiddleware(Middleware):
-    """Middleware that snapshots session state on every tool call.
+    """Middleware that snapshots session state on allowlisted tool calls.
 
     Updates WizardSession.last_active_at and incrementally builds
     a partial SessionState (working_set from notes) so that abandoned
     sessions have recoverable state.
     """
 
-    _SKIP_TOOLS = frozenset({"session_start", "session_end"})
+    _SNAPSHOT_TOOLS = frozenset({"task_start", "session_end"})
 
     async def on_call_tool(self, context: MiddlewareContext, call_next) -> ToolResult:
         result = await call_next(context)
 
         tool_name = context.message.name
-        if tool_name in self._SKIP_TOOLS:
-            return result
-
         try:
             if context.fastmcp_context is not None:
-                session_id = await context.fastmcp_context.get_state(
-                    "current_session_id"
-                )
+                session_id = await context.fastmcp_context.get_state("current_session_id")
                 if session_id is not None:
                     sentry_sdk.set_user({"id": str(session_id)})
-                    with get_session() as db:
-                        self.snapshot_session_state(db, session_id)
+                    if tool_name in self._SNAPSHOT_TOOLS:
+                        with get_session() as db:
+                            self.snapshot_session_state(db, session_id)
         except Exception as e:
             logger.warning("SessionStateMiddleware failed: %s", e)
 
