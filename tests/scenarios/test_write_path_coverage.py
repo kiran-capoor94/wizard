@@ -190,3 +190,36 @@ async def test_session_state_only_written_on_allowlisted_tools(mcp_client, seed_
     assert state_before == state_after, (
         "SessionState was written by save_note — should only write on task_start/session_end"
     )
+
+
+@pytest.mark.asyncio
+async def test_session_end_prunes_old_tool_calls(mcp_client, db_session):
+    """session_end must delete ToolCall rows older than 90 days."""
+    import datetime as dt_module
+
+    stale_date = dt_module.datetime.utcnow() - dt_module.timedelta(days=91)
+    old_call = ToolCall(tool_name="old_tool", session_id=None)
+    old_call.called_at = stale_date
+    db_session.add(old_call)
+    db_session.flush()
+    old_id = old_call.id
+
+    r = await mcp_client.call_tool("session_start", {})
+    assert not r.is_error, r
+    session_id = r.structured_content["session_id"]
+
+    r = await mcp_client.call_tool("session_end", {
+        "session_id": session_id,
+        "summary": "test session",
+        "intent": "testing",
+        "working_set": [],
+        "state_delta": "",
+        "open_loops": [],
+        "next_actions": [],
+        "closure_status": "clean",
+    })
+    assert not r.is_error, r
+
+    db_session.expire_all()
+    gone = db_session.get(ToolCall, old_id)
+    assert gone is None, "ToolCall row older than 90 days was not pruned by session_end"
