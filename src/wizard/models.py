@@ -3,7 +3,7 @@ import uuid as _uuid
 from enum import Enum
 
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, ForeignKey, Integer, Text
+from sqlalchemy import Column, ForeignKey, Index, Integer, Text
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -245,6 +245,19 @@ class ToolCall(SQLModel, table=True):
     called_at: datetime.datetime = Field(
         default_factory=datetime.datetime.now, index=True
     )
+
+
+class PseudonymMap(SQLModel, table=True):
+    __tablename__ = "pseudonym_map"  # pyright: ignore[reportAssignmentType, reportIncompatibleVariableOverride]
+    # unique=True on original_hash emits an anonymous unique index; the migration also
+    # created a separately named non-unique index that the DB still holds.
+    __table_args__ = (Index("ix_pseudonym_map_original_hash", "original_hash"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    original_hash: str = Field(sa_column=Column(Text(), nullable=False, unique=True))
+    entity_type: str = Field(sa_column=Column(Text(), nullable=False))
+    fake_value: str = Field(sa_column=Column(Text(), nullable=False))
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
 
 
 class TaskState(TimestampMixin, table=True):
