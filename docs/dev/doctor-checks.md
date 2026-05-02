@@ -10,9 +10,22 @@
 | --- | ----------------- | --------------------------------------------- |
 | 1   | DB file           | `settings.db` path exists                     |
 | 2   | Config file       | `~/.wizard/config.json` exists                |
-| 3   | DB tables         | All 6 required tables present                 |
+| 3   | DB tables         | All 7 required tables present                 |
 | 4   | Allowlist file    | `~/.wizard/allowlist.txt` exists              |
 | 5   | Agent registered  | ≥1 agent in registered_agents.json or scanned |
 | 6   | Migration current | Alembic revision matches DB                   |
 | 7   | Skills installed  | `~/.wizard/skills/` is non-empty              |
 | 8   | Knowledge store   | KS type configured (INFO only)                |
+
+**Required tables (check #3):** `task`, `note`, `meeting`, `wizardsession`,
+`toolcall`, `task_state`, `pseudonym_map`.
+
+**Allowlist file (check #4):** This check always returns `True` — it is
+advisory only. A missing allowlist is reported as a warning message but does
+not fail the check or block subsequent checks. Run `wizard setup` to create
+the file.
+
+---
+
+> **Related:** `wizard verify` runs these same checks plus an actual MCP
+> handshake subprocess test. See `docs/dev/verify.md`.
