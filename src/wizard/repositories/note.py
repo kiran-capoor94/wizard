@@ -18,8 +18,6 @@ class NoteRepository:
     def save_all(self, db: Session, notes: list[Note]) -> list[Note]:
         db.add_all(notes)
         db.flush()
-        for note in notes:
-            db.refresh(note)
         return notes
 
     def get_by_content_hash(
