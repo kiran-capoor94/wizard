@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 from typing import Literal
 
@@ -7,6 +8,8 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from pydantic import ValidationError
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import text
 from sqlmodel import Session
 
 from ..config import settings
@@ -21,7 +24,7 @@ from ..deps import (
 )
 from ..mcp_instance import mcp
 from ..mid_session import cancel_mid_session_synthesis, register_mid_session_task
-from ..models import Note, NoteType, WizardSession
+from ..models import Note, NoteType, ToolCall, WizardSession
 from ..repositories import (
     MeetingRepository,
     NoteRepository,
@@ -45,6 +48,7 @@ from ..skills import (
     SKILL_SESSION_RESUME,
     load_skill_post,
 )
+from ..tool_call_buffer import tool_call_buffer
 from .formatting import try_notify
 from .mode_tools import build_available_modes
 from .session_helpers import (
@@ -299,7 +303,12 @@ async def _persist_session_end(
             f"{len(open_loops)} open loop(s), {len(next_actions)} next action(s)."
         ))
 
-        return SessionEndResponse(
+        await tool_call_buffer.flush_now(db)
+
+        cutoff = datetime.datetime.now() - datetime.timedelta(days=90)
+        db.execute(sa_delete(ToolCall).where(ToolCall.called_at < cutoff))
+
+        response = SessionEndResponse(
             note_id=saved.id,
             session_state_saved=session_state_saved,
             closure_status=closure_status,
@@ -308,6 +317,15 @@ async def _persist_session_end(
             intent=clean_intent,
             skill_instructions=load_skill_post(SKILL_SESSION_END),
         )
+
+    with get_session() as maint_db:
+        try:
+            maint_db.execute(text("PRAGMA incremental_vacuum(100)"))
+            maint_db.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+        except Exception as e:
+            logger.warning("session_end: maintenance PRAGMAs skipped: %s", e)
+
+    return response
 
 
 async def session_end(
