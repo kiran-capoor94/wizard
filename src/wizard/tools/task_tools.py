@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 from typing import Annotated
@@ -7,10 +8,12 @@ from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from pydantic import BeforeValidator
+from sqlalchemy import text as _sa_text
 
 from ..compression import compress as compress_text
-from ..database import get_session
+from ..database import engine, get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
+from ..embedding import embed, serialize_float32
 from ..mcp_instance import mcp
 from ..models import (
     Note,
@@ -250,6 +253,25 @@ def _persist_note(
         )
 
 
+async def _write_embedding(note_id: int, content: str) -> None:
+    vec = embed(content)
+    if vec is None:
+        return
+    blob = serialize_float32(vec)
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                _sa_text(
+                    "INSERT OR REPLACE INTO vec_note_embeddings(note_id, embedding)"
+                    " VALUES (:note_id, :blob)"
+                ),
+                {"note_id": note_id, "blob": blob},
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning("embedding write failed for note %d: %s", note_id, e)
+
+
 async def save_note(
     ctx: Context,
     task_id: int,
@@ -288,6 +310,8 @@ async def save_note(
             n_repo, t_state_repo, note_type, clean, mental_model,
             task_db_id, session_id, task_artifact_id, content_hash,
         )
+        if not result.was_duplicate:
+            asyncio.create_task(_write_embedding(result.note_id, clean))
         await try_notify(ctx.report_progress(1, 2))
         await try_notify(ctx.report_progress(2, 2))
         await try_notify(ctx.info(f"Note {result.note_id} saved ({note_type.value})."))
