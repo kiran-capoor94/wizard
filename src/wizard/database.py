@@ -3,7 +3,7 @@ import logging
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlmodel import Session, create_engine
 
 from .config import settings
@@ -32,7 +32,34 @@ def _set_sqlite_pragmas(dbapi_conn, _connection_record) -> None:
     cursor.close()
 
 
+@event.listens_for(engine, "connect")
+def _load_sqlite_vec(dbapi_conn, _connection_record) -> None:
+    try:
+        import sqlite_vec
+        dbapi_conn.enable_load_extension(True)
+        sqlite_vec.load(dbapi_conn)
+        dbapi_conn.enable_load_extension(False)
+    except Exception as e:
+        logger.warning("sqlite-vec extension not loaded: %s", e)
+
+
 logger.info("Database engine created: %s", settings.db)
+
+
+def create_vec_tables() -> None:
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS vec_note_embeddings "
+                "USING vec0(note_id INTEGER PRIMARY KEY, "
+                "embedding float[384] distance_metric=cosine)"
+            ))
+            conn.commit()
+    except Exception as e:
+        logger.warning("vec_note_embeddings table not created: %s", e)
+
+
+create_vec_tables()
 
 
 @contextmanager
