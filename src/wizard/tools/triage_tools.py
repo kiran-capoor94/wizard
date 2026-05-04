@@ -37,6 +37,7 @@ _MODE_WEIGHTS: dict[str, dict[str, float]] = {
 }
 
 _MAX_SAMPLE_COUNT = 4  # sample reasons for top N tasks only
+_CROSS_TASK_CONTEXT_COUNT = 8  # tasks fed into cross-task reasoning pass
 
 
 def _classify_momentum(
@@ -104,6 +105,38 @@ def _fallback_reason(task: TaskContext, dominant_signal: str) -> str:
     if dominant_signal == "recency":
         return f"Active {stale}d ago — good time to resume where you left off"
     return f"Building momentum ({task.note_count} notes) — context is warm"
+
+
+async def _cross_task_insight(ctx: Context, tasks: list[TaskContext]) -> str | None:
+    if not tasks:
+        return None
+    lines = []
+    for t in tasks:
+        lines.append(
+            f"- [{t.id}] {t.name!r} | {t.priority.value} | {t.status.value} |"
+            f" {t.stale_days}d stale | {t.note_count} notes"
+            + (f" | last: {t.last_note_preview[:120]}" if t.last_note_preview else "")
+        )
+    task_block = "\n".join(lines)
+    prompt = (
+        "You are reviewing an engineer's open task list. Identify the highest-value "
+        "insight across ALL tasks — not a per-task summary. Focus on:\n"
+        "- Dependency clusters (tasks that share a root cause or unblock each other)\n"
+        "- Avoidance patterns (high-priority tasks that keep getting skipped)\n"
+        "- Blocked cascade (which blocked task, if unblocked, frees the most work)\n"
+        "- Cognitive gaps (what context is missing that could cause a bad decision)\n\n"
+        f"Tasks:\n{task_block}\n\n"
+        "Output 2-3 sentences max. Be specific — name task IDs and patterns. "
+        "Do not summarise every task. Surface only what a per-task view would miss."
+    )
+    try:
+        result = await ctx.sample(prompt, max_tokens=120)
+        return result.result.strip()
+    except ValueError:
+        return None
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        return None
 
 
 async def _sample_reason(
@@ -188,11 +221,12 @@ async def what_should_i_work_on(
         ),
     )
 
-    await try_notify(ctx.report_progress(1, 3))
+    await try_notify(ctx.report_progress(1, 4))
     shortlist = scored[:_MAX_SAMPLE_COUNT]
+    context_window = scored[:_CROSS_TASK_CONTEXT_COUNT]
     msg = f"Scored {len(tasks)} tasks; shortlisted {len(shortlist)} for sampling."
     await try_notify(ctx.debug(msg))
-    await try_notify(ctx.report_progress(2, 3))
+    await try_notify(ctx.report_progress(2, 4))
 
     # Build recommendations with LLM-sampled reasons
     recs: list[TaskRecommendation] = []
@@ -211,7 +245,10 @@ async def what_should_i_work_on(
             )
         )
 
-    await try_notify(ctx.report_progress(3, 3))
+    await try_notify(ctx.report_progress(3, 4))
+    insight = await _cross_task_insight(ctx, context_window)
+
+    await try_notify(ctx.report_progress(4, 4))
     skill_content = load_skill(SKILL_TRIAGE)
     if skill_content:
         await try_notify(ctx.info(f"[wizard skill]\n{skill_content}"))
@@ -220,4 +257,5 @@ async def what_should_i_work_on(
         recommended_task=recs[0],
         alternatives=recs[1:],
         skipped_blocked=skipped_blocked,
+        cross_task_insight=insight,
     )

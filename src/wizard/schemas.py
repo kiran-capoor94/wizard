@@ -426,6 +426,7 @@ class WorkRecommendationResponse(BaseModel):
     alternatives: list[TaskRecommendation]
     skipped_blocked: int
     message: str | None = None
+    cross_task_insight: str | None = None
 
 
 class SearchResult(BaseModel):
