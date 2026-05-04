@@ -374,6 +374,50 @@ def vacuum() -> None:
 
 
 @app.command()
+def compress(
+    path: Optional[Path] = typer.Argument(None, help="Text file to compress"),
+    inplace: bool = typer.Option(False, "--inplace", help="Overwrite file; saves .original backup"),
+    backfill: bool = typer.Option(False, "--backfill", help="Backfill embeddings for all notes"),
+) -> None:
+    """Compress a text file or backfill note embeddings in the database."""
+    from wizard.cli.compress import run_backfill
+    from wizard.compression import compress as _compress_text
+
+    if backfill and path is not None:
+        typer.echo("--backfill and <path> are mutually exclusive", err=True)
+        raise typer.Exit(1)
+    if not backfill and path is None:
+        typer.echo("Provide a <path> or --backfill", err=True)
+        raise typer.Exit(1)
+    if backfill:
+        run_backfill()
+        return
+
+    assert path is not None
+    if not path.exists():
+        typer.echo(f"File not found: {path}", err=True)
+        raise typer.Exit(1)
+    raw = path.read_bytes()
+    if b"\x00" in raw[:512]:
+        typer.echo("Not a text file", err=True)
+        raise typer.Exit(1)
+    original = raw.decode("utf-8", errors="replace")
+    if not original.strip():
+        typer.echo(original, nl=False)
+        typer.echo("0 chars → 0 chars (0% reduction)", err=True)
+        return
+    compressed = _compress_text(original)
+    orig_len, comp_len = len(original), len(compressed)
+    pct = round((1 - comp_len / orig_len) * 100) if orig_len > 0 else 0
+    if inplace:
+        path.with_suffix(path.suffix + ".original").write_text(original)
+        path.write_text(compressed)
+    else:
+        typer.echo(compressed, nl=False)
+    typer.echo(f"{orig_len} chars → {comp_len} chars ({pct}% reduction)", err=True)
+
+
+@app.command()
 def update() -> None:
     """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
     from wizard.database import run_migrations
