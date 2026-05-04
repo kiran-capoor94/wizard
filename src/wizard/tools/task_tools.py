@@ -8,6 +8,7 @@ from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
 from pydantic import BeforeValidator
 
+from ..compression import compress as compress_text
 from ..database import get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
@@ -182,30 +183,15 @@ async def task_start(
         raise
 
 
-async def _compress_note_content(ctx: Context, content: str) -> str:
-    """Compress content to under 1000 chars via LLM, preserving technical specifics."""
-    result = await ctx.sample(
-        f"Compress the following note to under 1000 characters. "
-        f"Preserve all file paths, function names, line numbers, error messages, "
-        f"decisions, and technical specifics exactly. Remove filler words and "
-        f"redundant phrasing only. Return only the compressed note, no preamble.\n\n"
-        f"{content}"
-    )
-    compressed = result.text.strip()
-    return compressed[:1000] if len(compressed) > 1000 else compressed
-
-
-async def _prepare_note_fields(
-    ctx: Context,
+def _prepare_note_fields(
     sec: SecurityService,
     content: str,
     mental_model: str | None,
 ) -> tuple[str, str | None, str]:
-    """Compress (if needed), scrub PII, and hash content. Returns (clean, mental_model, hash)."""
-    if len(content) > 1000:
-        content = await _compress_note_content(ctx, content)
-    if mental_model is not None and len(mental_model) > 1000:
-        mental_model = await _compress_note_content(ctx, mental_model)
+    """Compress, scrub PII, and hash content. Returns (clean, mental_model, hash)."""
+    content = compress_text(content)
+    if mental_model is not None:
+        mental_model = compress_text(mental_model)
     scrub_result = sec.scrub(content)
     if scrub_result.was_modified:
         logger.info("PII scrubbed from note content")
@@ -295,8 +281,8 @@ async def save_note(
             raise ToolError("Content exceeds 100k character limit")
 
         # Phase 3: compress, scrub, dedup, and write.
-        clean, mental_model, content_hash = await _prepare_note_fields(
-            ctx, sec, content, mental_model
+        clean, mental_model, content_hash = _prepare_note_fields(
+            sec, content, mental_model
         )
         result = _persist_note(
             n_repo, t_state_repo, note_type, clean, mental_model,

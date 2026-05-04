@@ -12,6 +12,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import text
 from sqlmodel import Session
 
+from ..compression import compress
 from ..config import settings
 from ..database import get_session
 from ..deps import (
@@ -23,7 +24,6 @@ from ..deps import (
     get_task_state_repo,
 )
 from ..mcp_instance import mcp
-from ..mid_session import cancel_mid_session_synthesis, register_mid_session_task
 from ..models import Note, NoteType, ToolCall, WizardSession
 from ..repositories import (
     MeetingRepository,
@@ -55,7 +55,6 @@ from .session_helpers import (
     build_prior_summaries,
     build_wizard_context,
     find_previous_session_id,
-    mid_session_synthesis_loop,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,7 +102,7 @@ async def _detect_skill_candidate(ctx: Context, summary: str, intent: str) -> st
         "If no reusable pattern is present, return exactly: null"
     )
     result = await ctx.sample(prompt)
-    text = result.text.strip()
+    text = (result.text or "").strip()
     if not text or text.lower() == "null":
         return None
     return text
@@ -204,15 +203,6 @@ async def session_start(
     # Background task dispatched AFTER db context closes so it gets its own clean session
     asyncio.create_task(session_closer.close_abandoned_background(response.session_id))
 
-    if agent_session_id and settings.synthesis.enabled:
-        mid_task = asyncio.create_task(
-            mid_session_synthesis_loop(
-                agent_session_id=agent_session_id,
-                wizard_session_id=response.session_id,
-            )
-        )
-        await register_mid_session_task(agent_session_id, mid_task)
-
     return response
 
 
@@ -229,11 +219,14 @@ def _scrub_session_state(
     """Scrub PII from session state fields and return state + clean intent."""
 
     state = SessionState(
-        intent=_scrub_field(sec, intent, "session intent"),
+        intent=compress(_scrub_field(sec, intent, "session intent") or ""),
         working_set=working_set,
-        state_delta=_scrub_field(sec, state_delta, "state_delta"),
-        open_loops=[_scrub_field(sec, loop, "open_loop") for loop in open_loops],
-        next_actions=[_scrub_field(sec, action, "next_action") for action in next_actions],
+        state_delta=compress(_scrub_field(sec, state_delta, "state_delta") or ""),
+        open_loops=[compress(_scrub_field(sec, loop, "open_loop") or loop) for loop in open_loops],
+        next_actions=[
+            compress(_scrub_field(sec, action, "next_action") or action)
+            for action in next_actions
+        ],
         closure_status=closure_status,
         tool_registry=tool_registry,
     )
@@ -266,10 +259,6 @@ async def _persist_session_end(
             await ctx.error(f"Session {session_id} not found")
             raise ToolError(f"Session {session_id} not found")
 
-        agent_id = session.agent_session_id
-        if agent_id:
-            cancel_mid_session_synthesis(agent_id)
-
         session_state_saved = False
         try:
             session.session_state = state.model_dump_json()
@@ -288,7 +277,7 @@ async def _persist_session_end(
 
         note = Note(
             note_type=NoteType.SESSION_SUMMARY,
-            content=clean_summary,
+            content=clean_summary or "",
             session_id=session.id,
             artifact_id=session.artifact_id,
             artifact_type="session",
