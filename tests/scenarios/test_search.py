@@ -74,7 +74,7 @@ class TestSearchRepository:
         fts_db.add(note)
         fts_db.flush()
 
-        results = SearchRepository().search(fts_db, "monkey-patch", limit=10)
+        results = SearchRepository().hybrid_search(fts_db, "monkey-patch", limit=10)
         assert len(results) == 1
         assert results[0].entity_type == "note"
         assert results[0].entity_id == note.id
@@ -87,9 +87,9 @@ class TestSearchRepository:
         fts_db.add(task)
         fts_db.flush()
 
-        all_results = SearchRepository().search(fts_db, "Redis", limit=10)
-        note_results = SearchRepository().search(fts_db, "Redis", limit=10, entity_type="note")
-        task_results = SearchRepository().search(fts_db, "Redis", limit=10, entity_type="task")
+        all_results = SearchRepository().hybrid_search(fts_db, "Redis", limit=10)
+        note_results = SearchRepository().hybrid_search(fts_db, "Redis", limit=10, entity_type="note")
+        task_results = SearchRepository().hybrid_search(fts_db, "Redis", limit=10, entity_type="task")
 
         assert len(all_results) == 2
         assert len(note_results) == 1
@@ -105,7 +105,7 @@ class TestSearchRepository:
         fts_db.add(meeting)
         fts_db.flush()
 
-        results = SearchRepository().search(fts_db, "Kafka", limit=10)
+        results = SearchRepository().hybrid_search(fts_db, "Kafka", limit=10)
         assert len(results) == 1
         assert results[0].entity_type == "meeting"
 
@@ -114,7 +114,7 @@ class TestSearchRepository:
         fts_db.add(session)
         fts_db.flush()
 
-        results = SearchRepository().search(fts_db, "Redis", limit=10, entity_type="session")
+        results = SearchRepository().hybrid_search(fts_db, "Redis", limit=10, entity_type="session")
         assert len(results) == 1
         assert results[0].entity_type == "session"
         assert "Redis" in results[0].snippet or "redis" in results[0].snippet.lower()
