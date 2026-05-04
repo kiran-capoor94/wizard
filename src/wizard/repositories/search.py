@@ -1,4 +1,4 @@
-"""SearchRepository — FTS5 full-text search across notes, sessions, meetings, tasks."""
+"""SearchRepository — hybrid BM25+cosine search across notes, sessions, meetings, tasks."""
 
 from __future__ import annotations
 
@@ -10,32 +10,44 @@ from typing import Literal
 from sqlalchemy import text
 from sqlmodel import Session
 
+from ..embedding import embed, serialize_float32
 from ..schemas import SearchResult
 
 logger = logging.getLogger(__name__)
 
 EntityType = Literal["note", "session", "meeting", "task"]
 
+_ALPHA = 0.5  # weight for BM25; (1-_ALPHA) for cosine
+
+
+def _bm25_score(rank: float) -> float:
+    """Convert FTS5 rank (negative, lower=better) to 0-1 score (higher=better)."""
+    return 1.0 / (1.0 - rank)
+
+
+def _cosine_score(distance: float) -> float:
+    """Convert vec0 cosine distance (0-2) to 0-1 score (higher=better)."""
+    return 1.0 - distance / 2.0
+
 
 class SearchRepository:
-    def search(
+    def hybrid_search(
         self,
         db: Session,
         query: str,
         limit: int = 10,
         entity_type: EntityType | None = None,
     ) -> list[SearchResult]:
-        """Fan out across FTS5 tables, merge, sort by rank, return top results."""
-        # Wrap in double-quotes so FTS5 treats the whole phrase literally,
-        # avoiding mis-parsing of hyphens and special characters as operators.
+        """Hybrid BM25+cosine search. Notes blend both; other entities use BM25 only."""
         sanitised = query.replace('"', "").replace("*", "").strip()
         if not sanitised:
             return []
         fts_query = f'"{sanitised}"'
+        query_vec = embed(query)
         results: list[tuple[float, SearchResult]] = []
 
         if entity_type is None or entity_type == "note":
-            results.extend(self._search_notes(db, fts_query, limit))
+            results.extend(self._search_notes(db, fts_query, query_vec, limit))
         if entity_type is None or entity_type == "session":
             results.extend(self._search_sessions(db, fts_query, limit))
         if entity_type is None or entity_type == "meeting":
@@ -43,13 +55,18 @@ class SearchRepository:
         if entity_type is None or entity_type == "task":
             results.extend(self._search_tasks(db, fts_query, limit))
 
-        results.sort(key=lambda x: x[0])  # FTS5 rank: lower = better match
+        results.sort(key=lambda x: x[0], reverse=True)  # higher score = better
         return [r for _, r in results[:limit]]
 
     def _search_notes(
-        self, db: Session, query: str, limit: int
+        self,
+        db: Session,
+        fts_query: str,
+        query_vec: list[float] | None,
+        limit: int,
     ) -> list[tuple[float, SearchResult]]:
-        rows = db.execute(  # type: ignore[call-overload]
+        # BM25 lane
+        bm25_rows = db.execute(  # type: ignore[call-overload]
             text(
                 "SELECT note_fts.rowid AS entity_id, note_fts.content AS content, "
                 "note_fts.note_type AS note_type, note.task_id AS task_id, "
@@ -59,20 +76,50 @@ class SearchRepository:
                 "WHERE note_fts MATCH :q "
                 "ORDER BY note_fts.rank LIMIT :lim"
             ),
-            {"q": query, "lim": limit},
+            {"q": fts_query, "lim": limit},
         ).mappings().fetchall()
+
+        bm25_scores: dict[int, float] = {
+            row["entity_id"]: _bm25_score(row["rank"]) for row in bm25_rows
+        }
+        bm25_meta: dict[int, dict] = {
+            row["entity_id"]: dict(row) for row in bm25_rows
+        }
+
+        # Cosine lane (only when embedding is available)
+        cosine_scores: dict[int, float] = {}
+        if query_vec is not None:
+            blob = serialize_float32(query_vec)
+            with contextlib.suppress(Exception):
+                vec_rows = db.execute(  # type: ignore[call-overload]
+                    text(
+                        "SELECT note_id, distance "
+                        "FROM vec_note_embeddings "
+                        "WHERE embedding MATCH :blob "
+                        "ORDER BY distance LIMIT :lim"
+                    ),
+                    {"blob": blob, "lim": limit},
+                ).mappings().fetchall()
+                cosine_scores = {
+                    row["note_id"]: _cosine_score(row["distance"]) for row in vec_rows
+                }
+
+        # BM25 anchors candidate set; cosine re-ranks but cannot surface new notes
         out = []
-        for row in rows:
-            snippet = (row["content"] or "")[:200]
+        for note_id, b in bm25_scores.items():
+            c = cosine_scores.get(note_id, 0.0)
+            score = _ALPHA * b + (1.0 - _ALPHA) * c
+            meta = bm25_meta[note_id]
+            snippet = (meta.get("content") or "")[:200]
             out.append((
-                row["rank"],
+                score,
                 SearchResult(
                     entity_type="note",
-                    entity_id=row["entity_id"],
-                    title=row["note_type"] or "note",
+                    entity_id=note_id,
+                    title=meta.get("note_type") or "note",
                     snippet=snippet,
-                    created_at=row["created_at"],
-                    task_id=row["task_id"],
+                    created_at=meta.get("created_at"),
+                    task_id=meta.get("task_id"),
                 ),
             ))
         return out
@@ -100,7 +147,7 @@ class SearchRepository:
                 with contextlib.suppress(ValueError):
                     title = f"Session {datetime.fromisoformat(str(created)).strftime('%Y-%m-%d')}"
             out.append((
-                row["rank"],
+                _bm25_score(row["rank"]),
                 SearchResult(
                     entity_type="session",
                     entity_id=row["entity_id"],
@@ -130,7 +177,7 @@ class SearchRepository:
         for row in rows:
             snippet = (row["content"] or "")[:200]
             out.append((
-                row["rank"],
+                _bm25_score(row["rank"]),
                 SearchResult(
                     entity_type="meeting",
                     entity_id=row["entity_id"],
@@ -158,7 +205,7 @@ class SearchRepository:
         out = []
         for row in rows:
             out.append((
-                row["rank"],
+                _bm25_score(row["rank"]),
                 SearchResult(
                     entity_type="task",
                     entity_id=row["entity_id"],

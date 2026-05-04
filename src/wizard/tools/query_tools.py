@@ -244,12 +244,12 @@ async def search(
 ) -> SearchResponse:
     """Search across notes, sessions, meetings, and tasks by keyword.
 
-    Uses SQLite FTS5. Results ranked by relevance (BM25).
+    Uses hybrid BM25+cosine search. Results ranked by relevance.
     entity_type: optional filter — 'note', 'session', 'meeting', or 'task'.
     """
     if not query.strip():
         raise ToolError("query must not be empty")
-    results = s_repo.search(db, query, limit=limit, entity_type=entity_type)
+    results = s_repo.hybrid_search(db, query, limit=limit, entity_type=entity_type)
     return SearchResponse(results=results, total=len(results))
 
 
