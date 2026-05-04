@@ -2,10 +2,9 @@
 from wizard.embedding import embed, serialize_float32
 
 
-def test_serialize_float32_produces_correct_byte_length():
-    vec = [0.1, 0.2, 0.3, 0.4]
-    result = serialize_float32(vec)
-    assert len(result) == 16  # 4 floats * 4 bytes each
+def test_serialize_float32_length_matches_vector():
+    # 4-element vector → 16 bytes (4 bytes per float32)
+    assert len(serialize_float32([0.1, 0.2, 0.3, 0.4])) == 16
 
 
 def test_serialize_float32_roundtrips():
@@ -13,7 +12,6 @@ def test_serialize_float32_roundtrips():
     vec = [1.0, 2.0, 3.0]
     result = serialize_float32(vec)
     unpacked = list(struct.unpack("3f", result))
-    assert len(unpacked) == 3
     for a, b in zip(unpacked, vec, strict=True):
         assert abs(a - b) < 1e-5
 
@@ -25,6 +23,9 @@ def test_embed_returns_384_dims_or_none():
         assert all(isinstance(x, float) for x in result)
 
 
-def test_embed_empty_string_returns_none_or_list():
-    result = embed("")
-    assert result is None or isinstance(result, list)
+def test_embed_empty_string_returns_none():
+    assert embed("") is None
+
+
+def test_embed_whitespace_returns_none():
+    assert embed("   ") is None
