@@ -77,7 +77,7 @@ class Synthesiser:
                 "api_key": b.api_key or None,
             }
             if probe_backend_health(config["base_url"]):
-                logger.info("Synthesiser: selected backend: %s", config["model"])
+                logger.info("Synthesiser: selected backend")
                 return config
         return {
             "model": synthesis_settings.model,
