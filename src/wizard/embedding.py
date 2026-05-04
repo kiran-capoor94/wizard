@@ -28,23 +28,25 @@ def serialize_float32(vec: list[float]) -> bytes:
 def embed(text: str) -> list[float] | None:
     """Return a 384-dim float32 embedding, or None if model is unavailable."""
     global _model, _model_unavailable
-    if _model_unavailable:
-        return None
     if not text or not text.strip():
         return None
     with _model_lock:
         if _model is None and not _model_unavailable:
             try:
                 from sentence_transformers import SentenceTransformer
-
                 _model = SentenceTransformer(_MODEL_NAME)
                 logger.info("Loaded embedding model: %s", _MODEL_NAME)
             except Exception as e:
                 logger.warning("Embedding model unavailable: %s", e)
                 _model_unavailable = True
                 return None
+        if _model_unavailable:
+            return None
     try:
         vec = _model.encode(text, convert_to_numpy=True).tolist()
+        if len(vec) != _DIMS:
+            logger.warning("Unexpected embedding dims: %d", len(vec))
+            return None
         return vec
     except Exception as e:
         logger.warning("embed() failed: %s", e)
