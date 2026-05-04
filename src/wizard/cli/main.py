@@ -18,8 +18,6 @@ from rich.table import Table
 
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
-from wizard.cli.capture import capture
-from wizard.cli.configure import synthesis_app
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.cli.verify import verify
 from wizard.config import settings
@@ -35,7 +33,6 @@ app = typer.Typer(
 )
 
 app.command()(doctor)
-app.command()(capture)
 app.command()(verify)
 
 configure_app = typer.Typer(help="Configure wizard settings.")
@@ -203,9 +200,6 @@ def configure_knowledge_store() -> None:
     typer.echo(f"Knowledge store configured: {ks_type or 'none'}")
 
 
-configure_app.add_typer(synthesis_app, name="synthesis")
-
-
 def _confirm_uninstall(
     registered: list[str],
     existing_files: list[tuple[str, str | None]],
@@ -359,10 +353,13 @@ def vacuum() -> None:
     with _sqlite3.connect(str(db_path)) as conn:
         cur = conn.execute(
             "UPDATE wizardsession SET transcript_raw = NULL"
-            " WHERE is_synthesised = 1 AND synthesis_status = 'complete'"
-            " AND transcript_raw IS NOT NULL"
+            " WHERE transcript_raw IS NOT NULL"
         )
         cleared = cur.rowcount
+        orphan_cur = conn.execute(
+            "DELETE FROM vec_note_embeddings WHERE note_id NOT IN (SELECT id FROM note)"
+        )
+        orphaned = orphan_cur.rowcount
         conn.commit()
         conn.execute("PRAGMA wal_checkpoint(FULL)")
         conn.execute("VACUUM")
@@ -370,7 +367,7 @@ def vacuum() -> None:
     size_after = db_path.stat().st_size
     freed_mb = (size_before - size_after) / 1_048_576
     typer.echo(
-        f"Cleared {cleared} transcript blob(s). "
+        f"Cleared {cleared} transcript blob(s), {orphaned} orphaned embedding(s). "
         f"Database: {size_before // 1_048_576} MB → {size_after // 1_048_576} MB "
         f"(freed {freed_mb:.1f} MB)."
     )
