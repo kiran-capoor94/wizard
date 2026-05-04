@@ -14,10 +14,14 @@ import streamlit as st
 from wizard.config import settings
 from wizard.database import get_session
 from wizard.repositories.analytics import AnalyticsRepository
+from wizard.repositories.note import NoteRepository
+from wizard.repositories.search import SearchRepository
 from wizard.repositories.session import SessionRepository
 from wizard.repositories.task import TaskRepository
 
 _analytics = AnalyticsRepository()
+_notes = NoteRepository()
+_search = SearchRepository()
 _sessions = SessionRepository()
 _tasks = TaskRepository()
 
@@ -296,6 +300,95 @@ def _render_health_tab(data: dict) -> None:
     col3.metric("Superseded Notes", ns["superseded"])
 
 
+def _render_search_tab() -> None:
+    st.subheader("Search Memory")
+    query = st.text_input("Query", placeholder="e.g. auth middleware error")
+    entity_options = ["All", "note", "task", "session", "meeting"]
+    entity_choice = st.selectbox("Entity type", entity_options, index=0)
+    _valid = {"note", "task", "session", "meeting"}
+    entity_type = entity_choice if entity_choice in _valid else None
+
+    if not query.strip():
+        st.info("Enter a query to search across notes, tasks, sessions, and meetings.")
+        return
+
+    with get_session() as db:
+        results = _search.hybrid_search(db, query.strip(), limit=20, entity_type=entity_type)  # type: ignore[arg-type]
+
+    if not results:
+        st.warning("No results found.")
+        return
+
+    for result in results:
+        badge = f"`{result.entity_type}`"
+        date_str = ""
+        if result.created_at:
+            try:
+                date_str = result.created_at.strftime("%Y-%m-%d")
+            except AttributeError:
+                date_str = str(result.created_at)[:10]
+        label = f"{badge} **{result.title}** — {date_str}"
+        with st.expander(label, expanded=False):
+            st.write(result.snippet or "_no preview_")
+            if result.task_id:
+                st.caption(f"Task ID: {result.task_id}")
+
+
+def _render_timeline_tab() -> None:
+    st.subheader("Session Timeline")
+
+    with get_session() as db:
+        sessions = _sessions.list_paginated(db, limit=_SESSIONS_LIMIT)
+
+    if not sessions:
+        st.info("No sessions recorded yet.")
+        return
+
+    session_labels = [
+        f"Session {s.id} — {s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else 'unknown'}"
+        for s in sessions
+    ]
+    choice = st.selectbox("Select session", ["— select —"] + session_labels)
+    if choice == "— select —":
+        st.info("Select a session above to browse its observations.")
+        return
+
+    selected_idx = session_labels.index(choice)
+    selected_session = sessions[selected_idx]
+
+    session_id = selected_session.id
+    if session_id is None:
+        st.error("Session has no ID.")
+        return
+    with get_session() as db:
+        all_notes = _notes.list_for_session(db, session_id)
+        task_ids = list({n.task_id for n in all_notes if n.task_id is not None})
+        task_contexts = {
+            tc.id: tc
+            for tc in _tasks.get_task_contexts_by_ids(db, task_ids)
+        }
+
+    if not all_notes:
+        st.info("No notes recorded for this session.")
+        return
+
+    by_task: dict = {}
+    for note in all_notes:
+        by_task.setdefault(note.task_id, []).append(note)
+
+    for task_id, notes in by_task.items():
+        tc = task_contexts.get(task_id) if task_id else None
+        task_label = tc.name if tc else "No task"
+        st.markdown(f"**{task_label}**")
+        for note in notes:
+            ts = note.created_at.strftime("%H:%M:%S") if note.created_at else ""
+            with st.expander(f"`{note.note_type.value}` {ts}", expanded=True):
+                st.write(note.content or "_empty_")
+                if note.mental_model:
+                    st.caption(f"Mental model: {note.mental_model}")
+        st.divider()
+
+
 def main() -> None:
     st.set_page_config(page_title="Wizard Dashboard", layout="wide")
     st.title("Wizard Dashboard")
@@ -309,8 +402,8 @@ def main() -> None:
         st.stop()
     _render_kpi_strip(data)
     st.divider()
-    today_tab, week_tab, tasks_tab, health_tab = st.tabs(
-        ["Today", "This Week", "Tasks", "Health"]
+    today_tab, week_tab, tasks_tab, health_tab, search_tab, timeline_tab = st.tabs(
+        ["Today", "This Week", "Tasks", "Health", "Search", "Timeline"]
     )
     with today_tab:
         _render_today_tab(data)
@@ -320,6 +413,10 @@ def main() -> None:
         _render_tasks_tab(data)
     with health_tab:
         _render_health_tab(data)
+    with search_tab:
+        _render_search_tab()
+    with timeline_tab:
+        _render_timeline_tab()
     time.sleep(60)
     st.rerun()
 
