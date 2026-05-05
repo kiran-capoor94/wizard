@@ -272,6 +272,28 @@ async def write_embedding(note_id: int, content: str) -> None:
         logger.warning("embedding write failed for note %d: %s", note_id, e)
 
 
+async def _sample_mental_model(
+    ctx: Context, content: str, note_type: NoteType
+) -> str | None:
+    """Sample a mental model summarizing task understanding via LLM.
+
+    Returns None if the LLM returns 'null', if content is empty, or on any exception.
+    """
+    prompt = (
+        f"Note type: {note_type.value}\n"
+        f"Content: {content}\n\n"
+        "Write 2-3 sentences capturing current understanding of this task: "
+        "what the problem is, what is known, what is uncertain. "
+        "For future-session orientation only. If insufficient context, return: null"
+    )
+    try:
+        result = await ctx.sample(prompt, max_tokens=80)
+        text = (result.text or "").strip()
+        return None if not text or text.lower() == "null" else text
+    except Exception:
+        return None
+
+
 async def save_note(
     ctx: Context,
     task_id: int,
@@ -285,7 +307,7 @@ async def save_note(
 ) -> SaveNoteResponse:
     """Scrub and persist a note.
 
-    Types: investigation|decision|docs|learnings|session_summary|failure.
+    Types: investigation|decision|docs|learnings|session_summary|failure|observation.
     """
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
@@ -312,6 +334,19 @@ async def save_note(
         )
         if not result.was_duplicate:
             asyncio.create_task(write_embedding(result.note_id, clean))
+
+        # Phase 4: synthesise mental model if agent omitted it and note count warrants it.
+        if mental_model is None and not result.was_duplicate:
+            with get_session() as db:
+                note_count = n_repo.count_for_task(db, task_db_id)
+                should_synthesise = note_count >= 2 and not n_repo.has_mental_model(db, task_db_id)
+            if should_synthesise:
+                synthesised = await _sample_mental_model(ctx, clean, note_type)
+                if synthesised:
+                    with get_session() as db:
+                        n_repo.set_mental_model(db, result.note_id, synthesised)
+                    result.mental_model_saved = True
+
         await try_notify(ctx.report_progress(1, 2))
         await try_notify(ctx.report_progress(2, 2))
         await try_notify(ctx.info(f"Note {result.note_id} saved ({note_type.value})."))
