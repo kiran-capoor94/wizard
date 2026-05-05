@@ -19,21 +19,23 @@ def run_stop_hook(agent_session_id: str, last_message: str) -> None:
     """Write last assistant message as OBSERVATION note. <150ms, no LLM."""
     if len(last_message) < _MIN_CONTENT_LEN:
         return
+    try:
+        wizard_session_id = _resolve_wizard_session_id(agent_session_id)
+        if wizard_session_id is None:
+            return
 
-    wizard_session_id = _resolve_wizard_session_id(agent_session_id)
-    if wizard_session_id is None:
-        return
+        db_path = Path(settings.db)
+        if not db_path.exists():
+            return
 
-    db_path = Path(settings.db)
-    if not db_path.exists():
-        return
+        task_id = _resolve_active_task_id(db_path, wizard_session_id)
+        if task_id is None:
+            return
 
-    task_id = _resolve_active_task_id(db_path, wizard_session_id)
-    if task_id is None:
-        return
-
-    compressed = compress_text(last_message)
-    _write_observation(db_path, task_id, wizard_session_id, compressed)
+        compressed = compress_text(last_message)
+        _write_observation(db_path, task_id, wizard_session_id, compressed)
+    except Exception as e:
+        logger.debug("hook: run_stop_hook failed: %s", e)
 
 
 def _resolve_wizard_session_id(agent_session_id: str) -> int | None:
@@ -63,7 +65,7 @@ def _write_observation(
     db_path: Path, task_id: int, session_id: int, content: str
 ) -> None:
     """Insert OBSERVATION note and update task_state counts."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now().isoformat()
     try:
         with sqlite3.connect(str(db_path), timeout=5) as conn:
             conn.execute(
