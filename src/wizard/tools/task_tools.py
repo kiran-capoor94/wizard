@@ -345,6 +345,7 @@ async def save_note(
                 if synthesised:
                     with get_session() as db:
                         n_repo.set_mental_model(db, result.note_id, synthesised)
+                        t_state_repo.recompute_for_task(db, task_db_id)
                     result = SaveNoteResponse(
                         note_id=result.note_id,
                         was_duplicate=result.was_duplicate,

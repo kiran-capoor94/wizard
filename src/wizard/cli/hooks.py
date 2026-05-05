@@ -52,7 +52,9 @@ def _resolve_active_task_id(db_path: Path, wizard_session_id: int) -> int | None
     try:
         with sqlite3.connect(str(db_path), timeout=5) as conn:
             row = conn.execute(
-                "SELECT task_id FROM note WHERE session_id = ? ORDER BY created_at DESC LIMIT 1",
+                "SELECT task_id FROM note"
+                " WHERE session_id = ? AND task_id IS NOT NULL"
+                " ORDER BY created_at DESC LIMIT 1",
                 (wizard_session_id,),
             ).fetchone()
         return row[0] if row else None
