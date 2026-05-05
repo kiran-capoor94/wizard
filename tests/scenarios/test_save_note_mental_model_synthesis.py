@@ -29,20 +29,20 @@ def _make_task(db) -> Task:
 
 @pytest.mark.asyncio
 async def test_sample_mental_model_returns_none_on_exception():
-    """_sample_mental_model silently swallows exceptions and returns None."""
-    from wizard.tools.task_tools import _sample_mental_model
+    """sample_mental_model silently swallows exceptions and returns None."""
+    from wizard.tools.task_tools import sample_mental_model
 
     ctx = MagicMock()
     ctx.sample = AsyncMock(side_effect=RuntimeError("transport broken"))
 
-    result = await _sample_mental_model(ctx, "some content", NoteType.INVESTIGATION)
+    result = await sample_mental_model(ctx, "some content", NoteType.INVESTIGATION)
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_sample_mental_model_returns_none_for_null_response():
-    """_sample_mental_model returns None when LLM returns the literal string 'null'."""
-    from wizard.tools.task_tools import _sample_mental_model
+    """sample_mental_model returns None when LLM returns the literal string 'null'."""
+    from wizard.tools.task_tools import sample_mental_model
 
     mock_result = MagicMock()
     mock_result.text = "null"
@@ -50,7 +50,7 @@ async def test_sample_mental_model_returns_none_for_null_response():
     ctx = MagicMock()
     ctx.sample = AsyncMock(return_value=mock_result)
 
-    result = await _sample_mental_model(ctx, "too short", NoteType.OBSERVATION)
+    result = await sample_mental_model(ctx, "too short", NoteType.OBSERVATION)
     assert result is None
 
 
