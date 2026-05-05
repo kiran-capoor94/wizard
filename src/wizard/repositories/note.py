@@ -84,6 +84,24 @@ class NoteRepository:
         )
         return db.exec(stmt).first() is not None
 
+    def count_for_task(self, db: Session, task_id: int) -> int:
+        """Count all notes for a task regardless of type."""
+        stmt = (
+            select(func.count())
+            .select_from(Note)
+            .where(Note.task_id == task_id)
+        )
+        return db.exec(stmt).one()
+
+    def set_mental_model(self, db: Session, note_id: int, mental_model: str) -> None:
+        """Patch mental_model onto an existing note."""
+        note = db.get(Note, note_id)
+        if note is None:
+            return
+        note.mental_model = mental_model
+        db.add(note)
+        db.flush()
+
     def list_for_session(self, db: Session, session_id: int) -> list[Note]:
         stmt = (
             select(Note)
