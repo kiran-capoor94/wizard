@@ -1,6 +1,7 @@
 ---
 name: wizard-playground
-description: Use when the user asks for any architecture diagram, sequence diagram, ERD, flowchart, state machine, or visual system diagram. Also use when a mode's trigger table routes a diagram request here.
+description: Use when the engineer asks for any diagram — architecture, sequence, ERD, flowchart, state machine — or a mode's routing table directs a visual request here
+allowed-tools: Write Bash Read
 ---
 
 # Wizard Playground — Mermaid Diagram Workbench

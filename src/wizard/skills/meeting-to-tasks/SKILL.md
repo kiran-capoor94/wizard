@@ -1,6 +1,7 @@
 ---
 name: meeting-to-tasks
-description: Use when the engineer wants to turn meeting action items into wizard tasks, asks "create tasks from this meeting", or after reviewing a meeting summary and wanting to track their own follow-ups
+description: Use when the engineer says 'create tasks from this meeting', 'turn these action items into tasks', or wants to track their follow-ups from a meeting
+allowed-tools: mcp__wizard__get_meeting mcp__wizard__get_tasks mcp__wizard__create_task ToolSearch
 ---
 
 # Meeting to Tasks
@@ -43,6 +44,8 @@ You are an **action-item filter**. Your job: read a meeting transcript or summar
 
 ## Hard Gates
 
+Complete in order. Do not advance past a failed gate.
+
 1. **Session active**
    - ✅ You have a `session_id`
    - 🛑 If not: call `session_start` first.
@@ -61,7 +64,7 @@ You are an **action-item filter**. Your job: read a meeting transcript or summar
 
 ### Step 0 — Fetch Tool Schemas (if not already loaded)
 
-If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__get_meeting,mcp__wizard__get_tasks,mcp__wizard__create_task"` before proceeding.
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ### Step 1 — Load the Meeting
 

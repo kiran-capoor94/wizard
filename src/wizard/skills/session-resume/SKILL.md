@@ -1,6 +1,7 @@
 ---
 name: session-resume
-description: Use when the engineer says "continue where I left off", "pick up from yesterday", "what was I working on", or opens a new thread mid-task
+description: Use when the engineer says 'continue', 'pick up where I left off', 'what was I working on', 'resume session', or opens a new thread mid-task
+allowed-tools: mcp__wizard__resume_session mcp__wizard__task_start mcp__wizard__save_note mcp__wizard__what_am_i_missing mcp__wizard__update_task mcp__wizard__session_start ToolSearch Read
 ---
 
 # Session Resume
@@ -26,7 +27,7 @@ You are **picking up a dropped thread**. A prior session exists with state, note
 
 ### Step 0 — Fetch Wizard Tool Schemas (if not already loaded)
 
-If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__resume_session,mcp__wizard__task_start,mcp__wizard__save_note,mcp__wizard__what_am_i_missing,mcp__wizard__rewind_task,mcp__wizard__update_task,mcp__wizard__session_end"` before proceeding.
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ### Step 1 — Call `resume_session`
 

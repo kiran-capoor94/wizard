@@ -1,6 +1,7 @@
 ---
 name: note
-description: Use when you have findings, decisions, documentation, or learnings to preserve — after any investigation, architecture decision, debugging session, or non-obvious discovery
+description: Use after any investigation, debugging session, architecture decision, or non-obvious discovery — whenever there's a finding worth preserving for the next session
+allowed-tools: mcp__wizard__save_note ToolSearch
 ---
 
 # Save Note
@@ -185,7 +186,7 @@ The `mental_model` parameter is a snapshot of your current understanding of the 
 
 ### Step 0 — Fetch Tool Schema (if not already loaded)
 
-If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__save_note"` before proceeding.
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ### Step 1 — Identify the Note Type
 
