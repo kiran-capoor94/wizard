@@ -238,6 +238,7 @@ _HOOK_SCRIPTS: dict[str, dict[str, Path]] = {
     "claude-code": {
         "SessionEnd": _WIZARD_HOOKS_DIR / "session-end.sh",
         "SessionStart": _WIZARD_HOOKS_DIR / "session-start.sh",
+        "Stop": _WIZARD_HOOKS_DIR / "stop.sh",
     },
     "codex": {
         "Stop": _WIZARD_HOOKS_DIR / "session-end.sh",
