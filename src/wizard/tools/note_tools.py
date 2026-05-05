@@ -85,7 +85,7 @@ async def what_am_i_missing(
             raise ToolError(f"TaskState missing for task {task_id}")
 
         signals: list[Signal] = []
-        nc = task_state.note_count
+        nc = task_state.note_count - (task_state.observation_count or 0)
         dc = task_state.decision_count
         sd = task_state.stale_days
 

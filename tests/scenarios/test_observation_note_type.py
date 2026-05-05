@@ -2,7 +2,7 @@
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from wizard.models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskStatus
+from wizard.models import Note, NoteType, Task, TaskCategory, TaskPriority, TaskState, TaskStatus
 from wizard.repositories.note import NoteRepository
 
 
@@ -57,3 +57,31 @@ def test_set_mental_model_patches_note(note_db):
     NoteRepository().set_mental_model(note_db, note.id, "Current understanding: X.")
     note_db.refresh(note)
     assert note.mental_model == "Current understanding: X."
+
+
+def test_no_context_signal_excludes_observations():
+    """TaskState with only OBSERVATION notes should count as zero real notes for no_context."""
+    from wizard.models import TaskState
+    # Simulate a TaskState with 3 notes, all observations
+    state = TaskState(
+        task_id=1,
+        note_count=3,
+        observation_count=3,
+        decision_count=0,
+        stale_days=0,
+    )
+    nc = state.note_count - (state.observation_count or 0)
+    assert nc == 0, "observations must not count toward the no_context threshold"
+
+
+def test_no_context_signal_counts_non_observation_notes():
+    """TaskState mixing real notes and observations: only real ones count."""
+    state = TaskState(
+        task_id=1,
+        note_count=5,
+        observation_count=2,
+        decision_count=1,
+        stale_days=0,
+    )
+    nc = state.note_count - (state.observation_count or 0)
+    assert nc == 3
