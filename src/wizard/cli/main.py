@@ -120,49 +120,61 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
 
 @hook_app.command("stop")
 def hook_stop() -> None:
-    """Handle Claude Code Stop hook — write last assistant message as OBSERVATION note.
-
-    Reads JSON from stdin: {"session_id": "...", "transcript_path": "/path/to/transcript.jsonl"}.
-    Exits 0 always — hook failures must never interrupt the agent.
-    """
+    """Handle Claude Code Stop hook — write last assistant message as OBSERVATION note."""
     try:
         data = json.loads(sys.stdin.read())
         agent_session_id: str = data.get("session_id", "")
-        transcript_path: str = data.get("transcript_path", "")
-        if not agent_session_id or not transcript_path:
+        if not agent_session_id:
             return
-        last_message = _extract_last_assistant_message(Path(transcript_path))
+        last_message: str = data.get("last_assistant_message", "")
+        if not last_message:
+            transcript_path: str = data.get("transcript_path", "")
+            if transcript_path:
+                last_message = _extract_last_assistant_message(Path(transcript_path))
         if last_message:
             run_stop_hook(agent_session_id, last_message)
     except Exception:
         pass  # hook failures must never interrupt the agent
 
 
+@hook_app.command("after-agent")
+def hook_after_agent() -> None:
+    """Handle Gemini CLI AfterAgent hook — write last response as OBSERVATION note."""
+    try:
+        data = json.loads(sys.stdin.read())
+        agent_session_id: str = data.get("session_id", "")
+        last_message: str = data.get("prompt_response", "")
+        if agent_session_id and last_message:
+            run_stop_hook(agent_session_id, last_message)
+    except Exception:
+        pass  # hook failures must never interrupt the agent
+
+
 def _extract_last_assistant_message(transcript_path: Path) -> str:
-    """Parse a JSONL transcript file and return the last assistant message text."""
+    """Fallback: parse Claude Code JSONL transcript and return last assistant text."""
     if not transcript_path.exists():
         return ""
     lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
     for line in reversed(lines):
-        line = line.strip()
-        if not line:
+        if not (line := line.strip()):
             continue
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(entry, dict) or entry.get("role") != "assistant":
+        message = entry.get("message", entry)
+        if not isinstance(entry, dict) or message.get("role") != "assistant":
             continue
-        content = entry.get("content", "")
+        content = message.get("content", "")
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            texts = [
-                part.get("text", "")
-                for part in content
-                if isinstance(part, dict) and part.get("type") == "text"
-            ]
-            return " ".join(t for t in texts if t)
+            text = " ".join(
+                p.get("text", "") for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+            if text:
+                return text
     return ""
 
 
@@ -421,7 +433,6 @@ def compress(
 @app.command()
 def update() -> None:
     """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
-    # 1. Identify currently registered agents to ensure we clean up their envs
     registered = agent_registration.read_registered_agents()
     if not registered:
         registered = agent_registration.scan_all_registered()
@@ -470,11 +481,9 @@ def update() -> None:
         typer.echo(f"FAILED\n{exc}", err=True)
         raise typer.Exit(1) from exc
 
-    # 2. Refresh internal mirrored assets from the NEW package content
     agent_registration.refresh_hooks()
     _reg_service.refresh_skills()
 
-    # 3. Re-register agents to install the NEW skills and hooks
     if registered:
         typer.echo("  re-linking skills/hooks... ", nl=False)
         results = _reg_service.register_agents(registered)
