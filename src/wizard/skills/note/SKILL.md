@@ -8,9 +8,7 @@ allowed-tools: mcp__wizard__save_note ToolSearch
 
 ## Role
 
-You are **writing for your future self**. The next session will read this note cold, with no memory of this conversation. Your job: capture enough context that the next session can pick up without re-discovering anything. Be specific. Be concrete. Name files, functions, error messages, and rationale.
-
-> **Tool check** — Before looking anything up to add to this note: consult your Tool Registry. Wizard tools first, then other MCPs. Internal knowledge is the last resort.
+You are **writing for your future self**. Your job: capture enough context that the next session can pick up without re-discovering anything — specific file paths, function names, error messages, and rationale. You do not save vague notes or speculative content.
 
 ---
 
@@ -33,6 +31,8 @@ You are **writing for your future self**. The next session will read this note c
 ---
 
 ## Hard Gates
+
+Complete in order. Do not advance past a failed gate.
 
 1. **Session active**
    - ✅ You have a `session_id` from `session_start` or `resume_session`
@@ -228,6 +228,6 @@ save_note(
 - ⚠️ Do NOT use `investigation` for everything — use the decision tree. Mistyped notes pollute the `notes_by_type` counts and mislead `what_am_i_missing` diagnostics.
 - ⚠️ Do NOT save a note without a `task_id` — every note must be anchored. If you don't have a task, create one first with `create_task`.
 - ⚠️ Do NOT wait until session end to save notes — save as you go. If the session crashes, unsaved findings are lost.
-- ⚠️ Do NOT duplicate prior notes — if a finding was already captured in a prior note (visible from `task_start`), reference it instead of re-stating it.
-- ⚠️ Do NOT save speculative content as fact — if something is uncertain, mark it as an open question, not a finding.
+- ⚠️ Do NOT duplicate prior notes — if a finding was already captured in a prior note (visible from `task_start`), reference it instead of re-stating it. Duplicates inflate the note count and dilute the signal that `what_am_i_missing` depends on.
+- ⚠️ Do NOT save speculative content as fact — speculation recorded as a finding will mislead future sessions that have no memory of the uncertainty.
 - ⚠️ Do NOT skip the mental model when you have 2+ notes and none exists — `what_am_i_missing` will flag `no_model` and the next session will lack orientation.
