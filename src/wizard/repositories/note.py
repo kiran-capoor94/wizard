@@ -20,14 +20,11 @@ class NoteRepository:
         db.flush()
         return notes
 
-    def get_by_content_hash(
-        self, db: Session, task_id: int, content_hash: str
-    ) -> Note | None:
-        """Return the first active note on task_id matching content_hash, or None."""
+    def get_by_content_hash(self, db: Session, task_id: int, content_hash: str) -> Note | None:
         stmt = (
             select(Note)
             .where(Note.task_id == task_id)
-            .where(Note.synthesis_content_hash == content_hash)
+            .where(Note.content_hash == content_hash)
             .where(Note.status == "active")
             .limit(1)
         )
@@ -127,19 +124,6 @@ class NoteRepository:
         if limit is not None:
             stmt = stmt.limit(limit)
         return list(db.exec(stmt).all())
-
-    def get_artifact_id_hashes(self, db: Session, artifact_id: str) -> set[str]:
-        """Return synthesis_content_hash values for notes on this artifact.
-
-        Used by synthesis to pre-filter exact duplicate candidates before LLM calls.
-        Returns only non-null hashes.
-        """
-        stmt = (
-            select(Note.synthesis_content_hash)
-            .where(Note.artifact_id == artifact_id)
-            .where(Note.synthesis_content_hash.is_not(None))  # type: ignore[union-attr]
-        )
-        return set(db.exec(stmt).all())
 
     def get_recent(self, db: Session, days: int) -> list[Note]:
         """Return active notes created in the last `days` days, newest first."""

@@ -125,24 +125,6 @@ class TestNoteStatus:
         assert old.status == "superseded"
         assert new.supersedes_note_id == old.id
 
-    def test_unclassified_status_for_synthesis_failures(self, db_session):
-        s = WizardSession()
-        db_session.add(s)
-        db_session.flush()
-        note = Note(
-            note_type=NoteType.INVESTIGATION,
-            content="Synthesis failed for session 1.",
-            session_id=s.id,
-            artifact_id=s.artifact_id,
-            artifact_type="session",
-            synthesis_confidence=0.0,
-            status="unclassified",
-        )
-        db_session.add(note)
-        db_session.flush()
-        assert note.status == "unclassified"
-        assert note.synthesis_confidence == 0.0
-
 
 class TestGetNotesByArtifactId:
     def test_returns_notes_for_artifact(self, db_session):
@@ -195,32 +177,6 @@ class TestGetNotesByArtifactId:
         result_ids = [n.id for n in results]
         assert result_ids.index(n2.id) < result_ids.index(n1.id)
 
-    def test_get_artifact_id_hashes_returns_non_null_hashes(self, db_session):
-        task = Task(name="hash test")
-        db_session.add(task)
-        db_session.flush()
-        note_with_hash = Note(
-            note_type=NoteType.INVESTIGATION,
-            content="hashed finding",
-            task_id=task.id,
-            artifact_id=task.artifact_id,
-            artifact_type="task",
-            synthesis_content_hash="abc123",
-        )
-        note_without_hash = Note(
-            note_type=NoteType.DECISION,
-            content="unhashed decision",
-            task_id=task.id,
-            artifact_id=task.artifact_id,
-            artifact_type="task",
-        )
-        db_session.add(note_with_hash)
-        db_session.add(note_without_hash)
-        db_session.flush()
-        repo = NoteRepository()
-        hashes = repo.get_artifact_id_hashes(db_session, task.artifact_id)
-        assert "abc123" in hashes
-        assert None not in hashes
 
 
 

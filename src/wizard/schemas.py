@@ -351,14 +351,6 @@ class SynthesisNote(BaseModel):
     mental_model: str | None = None
 
 
-class SynthesisResult(BaseModel):
-    """Result of synthesising a transcript into notes."""
-
-    notes_created: int
-    task_ids_touched: list[int] = Field(default_factory=list)
-    synthesised_via: str  # "sampling" | "synthetic" | "fallback"
-
-
 # --- Query response types (pagination-friendly read models) ---
 
 

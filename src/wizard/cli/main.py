@@ -395,7 +395,7 @@ def dashboard() -> None:
 
 @app.command()
 def vacuum() -> None:
-    """Clear synthesised transcript blobs, orphaned embeddings, and compact the database."""
+    """Remove orphaned embeddings and compact the database."""
     run_vacuum()
 
 
