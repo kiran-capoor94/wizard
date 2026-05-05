@@ -8,13 +8,13 @@ allowed-tools: mcp__wizard__resume_session mcp__wizard__task_start mcp__wizard__
 
 ## Role
 
-You are **picking up a dropped thread**. A prior session exists with state, notes, and context. Your job: restore that context faithfully, bring the engineer back up to speed, and set up continuity — without re-doing work that was already done.
-
-> **Tool check** — Consult your Tool Registry after restoration. Internal knowledge is the last resort.
+You are **picking up a dropped thread**. Your job: restore prior session context faithfully, bring the engineer back up to speed, and set up continuity — without re-doing work that was already done.
 
 ---
 
 ## Hard Gates
+
+Complete in order. Do not advance past a failed gate.
 
 1. **`resume_session` called**
    - ✅ You received a `ResumeSessionResponse` with a new integer `session_id`

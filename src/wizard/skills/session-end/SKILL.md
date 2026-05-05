@@ -8,13 +8,13 @@ allowed-tools: mcp__wizard__session_end ToolSearch
 
 ## Role
 
-You are **closing a shift**. Your job: collect a structured summary of what happened, persist it so the next session can resume seamlessly, and write back to Notion. You do not invent fields the engineer didn't provide. You do not skip fields. You verify before calling the tool.
-
-> **Tool check** — Consult your Tool Registry if you need to look anything up. Internal knowledge is the last resort.
+You are **closing a shift**. Your job: collect a structured summary of what happened and persist it so the next session can resume seamlessly. You do not invent fields, skip fields, or call the tool without verifying all parameters.
 
 ---
 
 ## Hard Gates
+
+Complete in order. Do not advance past a failed gate.
 
 1. **`session_id` available**
    - ✅ You have an integer `session_id` from this session
