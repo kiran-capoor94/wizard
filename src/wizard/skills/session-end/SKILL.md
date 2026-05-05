@@ -1,6 +1,7 @@
 ---
 name: session-end
-description: Use when the engineer says "let's wrap up", "end session", "I'm done for today", "closing time", or conversation is ending
+description: Use when the engineer says 'wrap up', 'end session', 'done for today', 'closing time', 'let's stop here', or the conversation is ending
+allowed-tools: mcp__wizard__session_end ToolSearch
 ---
 
 # Session End
@@ -33,7 +34,7 @@ You are **closing a shift**. Your job: collect a structured summary of what happ
 
 ### Step 0 — Fetch Tool Schema (if not already loaded)
 
-If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__session_end"` before proceeding.
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ### Step 1 — Draft from Context
 

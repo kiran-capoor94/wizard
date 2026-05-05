@@ -1,6 +1,7 @@
 ---
 name: what-should-i-work-on
-description: Use when the user asks what to work on, what's next, mentions available time, or wants a quick win. Infers mode and time_budget from user language, calls what_should_i_work_on, and presents the result as a direct recommendation.
+description: Use when the engineer says 'what should I work on', 'what's next', 'I have 30 minutes', 'quick win', 'what's blocked', or wants a prioritised recommendation
+allowed-tools: mcp__wizard__what_should_i_work_on mcp__wizard__task_start mcp__wizard__session_start ToolSearch
 ---
 
 # What Should I Work On
@@ -16,7 +17,7 @@ Trigger this skill when the user says:
 
 ## Step 0 — Fetch Tool Schemas (if not already loaded)
 
-If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__what_should_i_work_on,mcp__wizard__task_start,mcp__wizard__session_start"` before proceeding.
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ## Step 1 — Infer parameters
 

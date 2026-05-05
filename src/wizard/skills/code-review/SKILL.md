@@ -1,6 +1,7 @@
 ---
 name: code-review
-description: Use when reviewing code changes, PRs, or diffs for a task — especially when prior wizard context (investigations, decisions) exists that should inform the review
+description: Use when the engineer says 'review this', 'check my changes', 'look at this PR', or asks for feedback on a diff or code change
+allowed-tools: mcp__wizard__task_start mcp__wizard__what_am_i_missing mcp__wizard__save_note mcp__wizard__update_task ToolSearch Bash Read Grep Glob
 ---
 
 # Code Review
@@ -35,6 +36,8 @@ You are a **context-aware reviewer**. Unlike a generic code reviewer, you have a
 
 ## Hard Gates
 
+Complete in order. Do not advance past a failed gate.
+
 1. **Task context loaded**
    - ✅ You called `task_start` and have the prior notes and mental model
    - 🛑 If not: load task context before reviewing. Reviewing without prior context means you'll miss decisions that inform the code.
@@ -53,7 +56,7 @@ You are a **context-aware reviewer**. Unlike a generic code reviewer, you have a
 
 ### Step 0 — Fetch Tool Schemas (if not already loaded)
 
-If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__task_start,mcp__wizard__what_am_i_missing,mcp__wizard__save_note,mcp__wizard__update_task"` before proceeding.
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ### Step 1 — Load Task Context
 

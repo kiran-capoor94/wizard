@@ -1,6 +1,7 @@
 ---
 name: session-start
-description: Use when beginning a coding session, opening a new conversation, or the engineer says "let's start", "good morning", "what's on my plate"
+description: Use when the engineer opens a new conversation, says 'good morning', 'let's start', 'what's on my plate', 'fresh session', or a new Claude Code window opens
+allowed-tools: mcp__wizard__session_start mcp__wizard__create_task mcp__wizard__get_tasks mcp__wizard__update_task mcp__plugin_atlassian_atlassian__* mcp__claude_ai_Notion__* ToolSearch Bash Read
 ---
 
 # Session Start
@@ -53,7 +54,7 @@ For each open task, call `wizard:create_task`:
 
 Before calling any tool:
 
-- **Fetch all wizard tool schemas** by calling `ToolSearch` with `"select:mcp__wizard__session_start,mcp__wizard__session_end,mcp__wizard__task_start,mcp__wizard__save_note,mcp__wizard__create_task,mcp__wizard__update_task,mcp__wizard__get_tasks,mcp__wizard__get_task,mcp__wizard__resume_session,mcp__wizard__rewind_task,mcp__wizard__what_am_i_missing,mcp__wizard__get_meeting,mcp__wizard__save_meeting_summary,mcp__wizard__ingest_meeting,mcp__wizard__get_sessions,mcp__wizard__get_session,mcp__wizard__what_should_i_work_on,mcp__wizard__get_modes,mcp__wizard__set_mode"`. This pre-fetches all schemas so tools are callable throughout the session without additional ToolSearch calls.
+- Before calling any tool, call `ToolSearch` to fetch all wizard tool schemas needed for this session.
 - **List all other MCP servers** grouped by provider, noting what each does and when to prefer it over internal knowledge
 - **Hold this registry in context** — reference it every time you would otherwise answer from memory
 

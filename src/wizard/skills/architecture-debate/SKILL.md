@@ -1,6 +1,7 @@
 ---
 name: architecture-debate
-description: Use when making a design or architecture decision, choosing between approaches, the engineer says "should we do X or Y", or a task requires a structural choice before implementation
+description: Use when the engineer says 'should we do X or Y', 'help me decide between', 'what's the trade-off', or a task requires a structural choice before implementation
+allowed-tools: mcp__wizard__task_start mcp__wizard__save_note ToolSearch Read Grep
 ---
 
 # Architecture Debate
@@ -62,7 +63,7 @@ You are opinionated but transparent — state your recommendation clearly and ex
 
 ### Step 0 — Fetch Tool Schemas (if not already loaded)
 
-If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__task_start,mcp__wizard__save_note"` before proceeding.
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ### Step 1 — Load Task Context
 
