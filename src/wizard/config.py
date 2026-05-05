@@ -101,7 +101,7 @@ class SentrySettings(BaseModel):
 
 
 class ModesSettings(BaseModel):
-    default: str | None = None
+    default: str | None = "caveman"
     allowed: list[str] = Field(
         default_factory=lambda: ["architect", "ideation", "product-owner", "caveman"]
     )
