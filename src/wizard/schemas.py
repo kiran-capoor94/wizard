@@ -438,6 +438,15 @@ class SearchResult(BaseModel):
     task_id: int | None = None
 
 
+class FeedItem(BaseModel):
+    item_type: Literal["session", "note", "task_event"]
+    timestamp: datetime.datetime
+    title: str
+    subtitle: str
+    detail: str | None = None
+    entity_id: int | None = None
+
+
 class SearchResponse(BaseModel):
     results: list[SearchResult]
     total: int
