@@ -1,7 +1,6 @@
 """Home page — KPI left panel + activity feed with inline search."""
 
 import datetime
-import time
 
 import pandas as pd
 import streamlit as st
@@ -125,7 +124,7 @@ def _render_activity_items(items, offset: int) -> None:
             if item.detail:
                 st.write(item.detail)
 
-    if len(items) == offset + _FEED_PAGE_SIZE and st.button("Load more"):
+    if len(items) == _FEED_PAGE_SIZE and st.button("Load more"):
         st.session_state["feed_offset"] += _FEED_PAGE_SIZE
         st.rerun()
 
@@ -165,6 +164,3 @@ def render() -> None:
             )
             etype = None if entity_type == "All" else entity_type
             _render_feed(db, query, etype)
-
-    time.sleep(60)
-    st.rerun()
