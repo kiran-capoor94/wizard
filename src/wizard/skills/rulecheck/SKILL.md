@@ -1,6 +1,7 @@
 ---
 name: rulecheck
-description: Scan the Wizard codebase for CLAUDE.md rule violations, fix the highest-impact ones in an isolated worktree, and open a PR. Invoke when the user asks to audit code quality or check for rule violations.
+description: Use when the engineer says 'rulecheck', 'audit code quality', 'check for violations', or wants a CLAUDE.md compliance scan
+allowed-tools: mcp__wizard__task_start mcp__wizard__save_note ToolSearch Bash Read Grep Glob Agent Write
 ---
 
 # Rulecheck

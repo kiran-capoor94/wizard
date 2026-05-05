@@ -1,3 +1,10 @@
+---
+name: architect/sub-skills/constraints-designer
+description: Design constraints, invariants, and rules before building a system or component
+disable-model-invocation: true
+allowed-tools: mcp__wizard__task_start mcp__wizard__save_note ToolSearch Read
+---
+
 # constraints-designer
 
 **Purpose:** Use when the user asks "what are the rules here?", "let's figure out constraints first", or when starting a new component/system design. Unnamed invariants get re-debated every session.
@@ -9,6 +16,10 @@ An invariant that exists in someone's head but not in a document will be violate
 ## Protocol
 
 Complete both steps in order. Do not proceed to schema or implementation until Step 2 output exists and the user has agreed to it.
+
+### Step 0 — Fetch Wizard Tool Schemas
+
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ### Step 1 — Elicit Constraints (one question at a time)
 
