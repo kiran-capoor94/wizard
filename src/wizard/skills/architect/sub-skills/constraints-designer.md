@@ -1,3 +1,10 @@
+---
+name: architect/sub-skills/constraints-designer
+description: Design constraints, invariants, and rules before building a system or component
+disable-model-invocation: true
+allowed-tools: mcp__wizard__task_start mcp__wizard__save_note ToolSearch Read
+---
+
 # constraints-designer
 
 **Purpose:** Use when the user asks "what are the rules here?", "let's figure out constraints first", or when starting a new component/system design. Unnamed invariants get re-debated every session.

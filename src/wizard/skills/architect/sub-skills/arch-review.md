@@ -1,3 +1,10 @@
+---
+name: architect/sub-skills/arch-review
+description: Audit existing architecture for structural problems, coupling violations, or design debt
+disable-model-invocation: true
+allowed-tools: mcp__wizard__task_start mcp__wizard__save_note ToolSearch Read Grep Glob Bash
+---
+
 # arch-review
 
 **Purpose:** Structured audit protocol for existing architecture. Use when user asks "what's wrong with X", "review this architecture", or "audit this system".
