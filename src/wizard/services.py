@@ -14,7 +14,6 @@ from sqlmodel import Session, or_, select
 from . import agent_registration
 from .config import WIZARD_MODES
 from .database import get_session
-from .mid_session import cancel_mid_session_synthesis
 from .models import Note, NoteType, WizardSession
 from .repositories import NoteRepository
 from .schemas import ClosedSessionSummary, SessionState
@@ -247,9 +246,6 @@ class SessionCloser:
     ) -> ClosedSessionSummary:
         session_id = session.id
         assert session_id is not None
-
-        if session.agent_session_id:
-            cancel_mid_session_synthesis(session.agent_session_id)
 
         notes = self._get_session_notes(db, session_id)
         task_ids = list({n.task_id for n in notes if n.task_id is not None})
