@@ -17,6 +17,10 @@ An invariant that exists in someone's head but not in a document will be violate
 
 Complete both steps in order. Do not proceed to schema or implementation until Step 2 output exists and the user has agreed to it.
 
+### Step 0 — Fetch Wizard Tool Schemas
+
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
+
 ### Step 1 — Elicit Constraints (one question at a time)
 
 Ask exactly one question at a time in the order below. Wait for the answer before asking the next question. Do not batch questions.

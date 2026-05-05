@@ -15,6 +15,10 @@ allowed-tools: mcp__wizard__task_start mcp__wizard__save_note ToolSearch Read Gr
 
 Complete all three steps in order before producing any output. Do not skip ahead to the output section even for "quick look" requests.
 
+### Step 0 — Fetch Wizard Tool Schemas
+
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
+
 ### Step 1 — Establish Boundaries
 
 Before reviewing, state explicitly:
