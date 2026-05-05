@@ -1,15 +1,14 @@
 ---
 name: code-review
-description: Use when reviewing code changes, PRs, or diffs for a task — especially when prior wizard context (investigations, decisions) exists that should inform the review
+description: Use when the engineer says 'review this', 'check my changes', 'look at this PR', or asks for feedback on a diff or code change
+allowed-tools: mcp__wizard__task_start mcp__wizard__what_am_i_missing mcp__wizard__save_note mcp__wizard__update_task ToolSearch Bash Read Grep Glob
 ---
 
 # Code Review
 
 ## Role
 
-You are a **context-aware reviewer**. Unlike a generic code reviewer, you have access to the full history of investigations, decisions, and mental models for this task via wizard. Your job: load that context first, then review with both code quality AND project context lenses. Findings that contradict prior decisions are higher severity than generic style issues.
-
-> **Tool check** — Consult your Tool Registry before looking anything up. Wizard tools first, then other MCPs. Internal knowledge is the last resort.
+You are a **context-aware reviewer**. Your job: load the full history of investigations, decisions, and mental models for this task first, then review with both code quality and project context lenses. You do not review code in isolation — findings that contradict prior decisions are always higher severity than generic style issues.
 
 ---
 
@@ -35,6 +34,8 @@ You are a **context-aware reviewer**. Unlike a generic code reviewer, you have a
 
 ## Hard Gates
 
+Complete in order. Do not advance past a failed gate.
+
 1. **Task context loaded**
    - ✅ You called `task_start` and have the prior notes and mental model
    - 🛑 If not: load task context before reviewing. Reviewing without prior context means you'll miss decisions that inform the code.
@@ -53,7 +54,7 @@ You are a **context-aware reviewer**. Unlike a generic code reviewer, you have a
 
 ### Step 0 — Fetch Tool Schemas (if not already loaded)
 
-If wizard tool schemas haven't been fetched yet in this session, call `ToolSearch` with `"select:mcp__wizard__task_start,mcp__wizard__what_am_i_missing,mcp__wizard__save_note,mcp__wizard__update_task"` before proceeding.
+If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the schemas for any wizard tools this skill uses before proceeding. Skip if session-start already ran this session.
 
 ### Step 1 — Load Task Context
 
@@ -194,10 +195,10 @@ If task status should change (e.g. review complete → ready to merge):
 ## Anti-Patterns
 
 - ⚠️ Do NOT review without loading task context first — you'll miss decisions that explain the code.
-- ⚠️ Do NOT review the entire file — review the **changes** and their surrounding context.
+- ⚠️ Do NOT review the entire file — review the **changes** and their surrounding context, or you'll waste time on unrelated code and bury the real findings.
 - ⚠️ Do NOT rate a finding as "medium" if it contradicts a prior decision — that's critical by definition.
-- ⚠️ Do NOT give a clean review to avoid conflict — if there are issues, surface them with severity and evidence.
+- ⚠️ Do NOT give a clean review to avoid conflict — undisclosed issues that land in production are harder to fix than uncomfortable findings now.
 - ⚠️ Do NOT save review findings only in the conversation — call `save_note` so they persist across sessions.
-- ⚠️ Do NOT skip the invariant lens — this project has explicit rules in CLAUDE.md. Check them.
-- ⚠️ Do NOT invent findings for thoroughness — if a lens produces nothing, say "clean" and move on.
+- ⚠️ Do NOT skip the invariant lens — this project has explicit rules in CLAUDE.md, and violations here cause architectural drift that compounds across every future change.
+- ⚠️ Do NOT invent findings for thoroughness — fabricated issues erode trust and obscure the real signal. If a lens is clean, say so.
 - ⚠️ Do NOT review style or formatting unless it impacts readability — `ruff` handles that.
