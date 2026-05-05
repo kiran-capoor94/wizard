@@ -253,7 +253,7 @@ def _persist_note(
         )
 
 
-async def _write_embedding(note_id: int, content: str) -> None:
+async def write_embedding(note_id: int, content: str) -> None:
     vec = embed(content)
     if vec is None:
         return
@@ -311,7 +311,7 @@ async def save_note(
             task_db_id, session_id, task_artifact_id, content_hash,
         )
         if not result.was_duplicate:
-            asyncio.create_task(_write_embedding(result.note_id, clean))
+            asyncio.create_task(write_embedding(result.note_id, clean))
         await try_notify(ctx.report_progress(1, 2))
         await try_notify(ctx.report_progress(2, 2))
         await try_notify(ctx.info(f"Note {result.note_id} saved ({note_type.value})."))

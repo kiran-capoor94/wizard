@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import logging
+import os
+import sqlite3 as _sqlite3
 from pathlib import Path
 
 import typer
+
+try:
+    import sqlite_vec as _sqlite_vec
+except ImportError:
+    _sqlite_vec = None  # type: ignore[assignment]
 
 from wizard.config import settings
 from wizard.embedding import embed, serialize_float32
@@ -17,10 +24,9 @@ _BATCH = 50
 
 def run_backfill() -> None:
     """Backfill embeddings for all notes without an entry in vec_note_embeddings."""
-    import os
-    import sqlite3 as _sqlite3
-
-    import sqlite_vec
+    if _sqlite_vec is None:
+        typer.echo("sqlite-vec not installed — run: uv add sqlite-vec", err=True)
+        raise typer.Exit(1)
 
     db_path = Path(os.environ.get("WIZARD_DB", settings.db))
     if not db_path.exists():
@@ -34,7 +40,7 @@ def run_backfill() -> None:
 
     with _sqlite3.connect(str(db_path)) as conn:
         conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
+        _sqlite_vec.load(conn)
         conn.enable_load_extension(False)
 
         rows = conn.execute(

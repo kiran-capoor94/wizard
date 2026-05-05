@@ -20,12 +20,12 @@ EntityType = Literal["note", "session", "meeting", "task"]
 _ALPHA = 0.5  # weight for BM25; (1-_ALPHA) for cosine
 
 
-def _bm25_score(rank: float) -> float:
+def bm25_score(rank: float) -> float:
     """Convert FTS5 rank (negative, lower=better) to 0-1 score (higher=better)."""
     return 1.0 / (1.0 - rank)
 
 
-def _cosine_score(distance: float) -> float:
+def cosine_score(distance: float) -> float:
     """Convert vec0 cosine distance (0-2) to 0-1 score (higher=better)."""
     return 1.0 - distance / 2.0
 
@@ -80,7 +80,7 @@ class SearchRepository:
         ).mappings().fetchall()
 
         bm25_scores: dict[int, float] = {
-            row["entity_id"]: _bm25_score(row["rank"]) for row in bm25_rows
+            row["entity_id"]: bm25_score(row["rank"]) for row in bm25_rows
         }
         bm25_meta: dict[int, dict] = {
             row["entity_id"]: dict(row) for row in bm25_rows
@@ -101,7 +101,7 @@ class SearchRepository:
                     {"blob": blob, "lim": limit},
                 ).mappings().fetchall()
                 cosine_scores = {
-                    row["note_id"]: _cosine_score(row["distance"]) for row in vec_rows
+                    row["note_id"]: cosine_score(row["distance"]) for row in vec_rows
                 }
 
         # BM25 anchors candidate set; cosine re-ranks but cannot surface new notes
@@ -147,7 +147,7 @@ class SearchRepository:
                 with contextlib.suppress(ValueError):
                     title = f"Session {datetime.fromisoformat(str(created)).strftime('%Y-%m-%d')}"
             out.append((
-                _bm25_score(row["rank"]),
+                bm25_score(row["rank"]),
                 SearchResult(
                     entity_type="session",
                     entity_id=row["entity_id"],
@@ -177,7 +177,7 @@ class SearchRepository:
         for row in rows:
             snippet = (row["content"] or "")[:200]
             out.append((
-                _bm25_score(row["rank"]),
+                bm25_score(row["rank"]),
                 SearchResult(
                     entity_type="meeting",
                     entity_id=row["entity_id"],
@@ -205,7 +205,7 @@ class SearchRepository:
         out = []
         for row in rows:
             out.append((
-                _bm25_score(row["rank"]),
+                bm25_score(row["rank"]),
                 SearchResult(
                     entity_type="task",
                     entity_id=row["entity_id"],
