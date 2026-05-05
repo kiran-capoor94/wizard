@@ -25,16 +25,16 @@ def main() -> None:
                 st.Page(home.render, title="Home", icon="🏠", default=True),
             ],
             "Data": [
-                st.Page(_coming_soon, title="Tasks", icon="✅"),
-                st.Page(_coming_soon, title="Notes", icon="📝"),
-                st.Page(_coming_soon, title="Sessions", icon="🕐"),
-                st.Page(_coming_soon, title="Meetings", icon="🗓"),
-                st.Page(_coming_soon, title="Artifacts", icon="📦"),
-                st.Page(_coming_soon, title="Search", icon="🔍"),
+                st.Page(_coming_soon, title="Tasks", icon="✅", url_path="tasks"),
+                st.Page(_coming_soon, title="Notes", icon="📝", url_path="notes"),
+                st.Page(_coming_soon, title="Sessions", icon="🕐", url_path="sessions"),
+                st.Page(_coming_soon, title="Meetings", icon="🗓", url_path="meetings"),
+                st.Page(_coming_soon, title="Artifacts", icon="📦", url_path="artifacts"),
+                st.Page(_coming_soon, title="Search", icon="🔍", url_path="search"),
             ],
             "System": [
                 st.Page(health.render, title="Health", icon="❤️"),
-                st.Page(_coming_soon, title="Raw Query", icon="🗄️"),
+                st.Page(_coming_soon, title="Raw Query", icon="🗄️", url_path="raw-query"),
             ],
         }
     )
