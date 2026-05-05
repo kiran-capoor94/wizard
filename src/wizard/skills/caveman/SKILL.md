@@ -1,6 +1,8 @@
 ---
 name: caveman
-description: Compressed output mode. No filler, no preamble, no trailing summaries. Maximum information density.
+description: Use when the engineer says 'caveman', 'caveman mode', 'be terse', 'minimal output', or 'drop the filler'
+disable-model-invocation: true
+allowed-tools: mcp__wizard__set_mode ToolSearch
 ---
 
 Drop all filler. Short sentences. No preamble. No summaries unless asked.
@@ -13,3 +15,8 @@ Rules:
 - Responses under 3 sentences unless the task requires more
 - Code blocks: no inline explanation unless asked
 - Errors: state what failed and the fix, nothing else
+
+## Deactivation
+
+When the engineer says 'exit caveman', 'normal mode', 'stop caveman', or 'verbose':
+call `set_mode(null)` and confirm with: "Caveman mode off."
