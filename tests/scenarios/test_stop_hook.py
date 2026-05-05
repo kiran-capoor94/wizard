@@ -1,4 +1,5 @@
 """Scenario: wizard hook stop writes OBSERVATION notes from Stop hook input."""
+import json
 import sqlite3
 from unittest.mock import patch
 
@@ -10,6 +11,7 @@ from wizard.cli.hooks import (
     _resolve_wizard_session_id,
     run_stop_hook,
 )
+from wizard.cli.main import _extract_last_assistant_message
 
 
 @pytest.fixture
@@ -51,7 +53,8 @@ def test_resolve_active_task_id_returns_none_when_no_notes(tmp_path):
 
 
 def test_resolve_active_task_id_returns_most_recent(tmp_path):
-    """_resolve_active_task_id returns the task_id of the most recently saved note."""
+    """_resolve_active_task_id returns the task_id of the most recently saved note,
+    skipping NULL task_ids (session-level notes)."""
     db_path = tmp_path / "wizard.db"
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -65,10 +68,53 @@ def test_resolve_active_task_id_returns_most_recent(tmp_path):
             "INSERT INTO note (task_id, session_id, created_at) VALUES (?, ?, ?)",
             (9, 42, "2026-05-05T11:00:00"),
         )
+        # Most recent note has NULL task_id (session-level) — should be skipped
+        conn.execute(
+            "INSERT INTO note (task_id, session_id, created_at) VALUES (?, ?, ?)",
+            (None, 42, "2026-05-05T12:00:00"),
+        )
         conn.commit()
 
     result = _resolve_active_task_id(db_path, wizard_session_id=42)
-    assert result == 9
+    assert result == 9  # null-task note skipped, returns last non-null
+
+
+def test_extract_last_assistant_message_from_jsonl(tmp_path):
+    """_extract_last_assistant_message reads the last assistant entry from a JSONL file."""
+    transcript = tmp_path / "transcript.jsonl"
+    entries = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "short"},
+        {"role": "user", "content": "do more"},
+        {"role": "assistant", "content": "I investigated the cache invalidation path."},
+    ]
+    transcript.write_text("\n".join(json.dumps(e) for e in entries))
+
+    result = _extract_last_assistant_message(transcript)
+    assert result == "I investigated the cache invalidation path."
+
+
+def test_extract_last_assistant_message_handles_list_content(tmp_path):
+    """_extract_last_assistant_message joins text parts from list-content entries."""
+    transcript = tmp_path / "transcript.jsonl"
+    entry = {
+        "role": "assistant",
+        "content": [
+            {"type": "text", "text": "Part one."},
+            {"type": "tool_use", "id": "x"},
+            {"type": "text", "text": "Part two."},
+        ],
+    }
+    transcript.write_text(json.dumps(entry))
+
+    result = _extract_last_assistant_message(transcript)
+    assert result == "Part one. Part two."
+
+
+def test_extract_last_assistant_message_returns_empty_for_missing_file(tmp_path):
+    """_extract_last_assistant_message returns empty string when file doesn't exist."""
+    result = _extract_last_assistant_message(tmp_path / "nonexistent.jsonl")
+    assert result == ""
 
 
 def test_run_stop_hook_exits_silently_with_no_wizard_id(tmp_sessions_dir, tmp_path):

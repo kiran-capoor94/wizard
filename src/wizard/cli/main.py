@@ -122,31 +122,48 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
 def hook_stop() -> None:
     """Handle Claude Code Stop hook — write last assistant message as OBSERVATION note.
 
-    Reads JSON from stdin: {"session_id": "...", "transcript": [...]}.
+    Reads JSON from stdin: {"session_id": "...", "transcript_path": "/path/to/transcript.jsonl"}.
     Exits 0 always — hook failures must never interrupt the agent.
     """
     try:
         data = json.loads(sys.stdin.read())
         agent_session_id: str = data.get("session_id", "")
-        transcript: list = data.get("transcript", [])
-        last_message = ""
-        for entry in reversed(transcript):
-            if isinstance(entry, dict) and entry.get("role") == "assistant":
-                content = entry.get("content", "")
-                if isinstance(content, str):
-                    last_message = content
-                elif isinstance(content, list):
-                    texts = [
-                        part.get("text", "")
-                        for part in content
-                        if isinstance(part, dict) and part.get("type") == "text"
-                    ]
-                    last_message = " ".join(t for t in texts if t)
-                break
-        if agent_session_id and last_message:
+        transcript_path: str = data.get("transcript_path", "")
+        if not agent_session_id or not transcript_path:
+            return
+        last_message = _extract_last_assistant_message(Path(transcript_path))
+        if last_message:
             run_stop_hook(agent_session_id, last_message)
     except Exception:
         pass  # hook failures must never interrupt the agent
+
+
+def _extract_last_assistant_message(transcript_path: Path) -> str:
+    """Parse a JSONL transcript file and return the last assistant message text."""
+    if not transcript_path.exists():
+        return ""
+    lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict) or entry.get("role") != "assistant":
+            continue
+        content = entry.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts = [
+                part.get("text", "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            ]
+            return " ".join(t for t in texts if t)
+    return ""
 
 
 @app.command()
