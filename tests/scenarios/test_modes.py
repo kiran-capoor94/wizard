@@ -19,7 +19,7 @@ from wizard.tools.mode_tools import build_available_modes, get_modes, set_mode
 def test_modes_settings_defaults():
     """ModesSettings has sane defaults when not configured."""
     m = ModesSettings()
-    assert m.default is None
+    assert m.default == "caveman"
     assert m.allowed == ["architect", "ideation", "product-owner", "caveman"]
 
 
