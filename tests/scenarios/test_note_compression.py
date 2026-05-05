@@ -1,44 +1,39 @@
-"""Scenario: save_note compresses content > 1000 chars before writing."""
-from unittest.mock import AsyncMock, patch
+"""Scenario: save_note always compresses content via compress_text before writing."""
+from unittest.mock import MagicMock, patch
 
 
-async def test_long_note_is_compressed(mcp_client, seed_task):
+async def test_note_content_is_compressed(mcp_client, seed_task):
     task = await seed_task(name="Compression task")
     await mcp_client.call_tool("session_start", {})
 
-    long_content = "x" * 1001
-    compressed = "Compressed: found issue in auth.py:42 — token expiry not checked."
+    content = "The authentication middleware should check the database connection."
+    compressed = "auth middleware→check DB conn."
 
-    mock_compress = AsyncMock(return_value=compressed)
-    with patch(
-        "wizard.tools.task_tools._compress_note_content",
-        new=mock_compress,
-    ):
+    mock_compress = MagicMock(return_value=compressed)
+    with patch("wizard.tools.task_tools.compress_text", new=mock_compress):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
             "note_type": "investigation",
-            "content": long_content,
+            "content": content,
         })
 
     assert not r.is_error, r
     assert r.structured_content["note_id"] > 0
-    mock_compress.assert_called_once()
+    mock_compress.assert_called()
 
 
-async def test_short_note_skips_compression(mcp_client, seed_task):
-    task = await seed_task(name="No compression task")
+async def test_compressed_content_is_stored(mcp_client, seed_task):
+    task = await seed_task(name="Storage task")
     await mcp_client.call_tool("session_start", {})
 
-    short_content = "Token expiry bug at auth.py:42."
+    content = "The authentication middleware should check the database connection."
+    compressed = "auth middleware→check DB conn."
 
-    with patch(
-        "wizard.tools.task_tools._compress_note_content",
-        new=AsyncMock(side_effect=AssertionError("should not compress")),
-    ):
+    with patch("wizard.tools.task_tools.compress_text", return_value=compressed):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
             "note_type": "investigation",
-            "content": short_content,
+            "content": content,
         })
 
     assert not r.is_error, r
