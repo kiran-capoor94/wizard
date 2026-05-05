@@ -86,4 +86,4 @@ def run_migrations() -> None:
     cfg = Config()
     cfg.set_main_option("script_location", alembic_dir)
     cfg.set_main_option("sqlalchemy.url", str(engine.url))
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "heads")
