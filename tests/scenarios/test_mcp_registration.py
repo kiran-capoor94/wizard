@@ -170,7 +170,7 @@ async def test_get_tasks_via_mcp_client(mcp_app, _db_session):
     def _get_db() -> Generator:
         yield _db_session
 
-    with patch("wizard.tools.query_tools._get_db_session", _get_db):
+    with patch("wizard.deps._get_db_session_impl", _get_db):
         async with Client(mcp_app) as client:
             result = await client.call_tool("get_tasks", {})
 

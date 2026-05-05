@@ -35,7 +35,7 @@ def run_compress_file(path: Path, *, inplace: bool) -> None:
         raise typer.Exit(1)
     raw = path.read_bytes()
     if b"\x00" in raw[:512]:
-        rprint("[red]Error:[/red] Not a text file.")
+        _err_console.print("[red]Error:[/red] Not a text file.")
         raise typer.Exit(1)
     original = raw.decode("utf-8", errors="replace")
     if not original.strip():
