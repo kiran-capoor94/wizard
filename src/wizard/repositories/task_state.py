@@ -58,6 +58,8 @@ class TaskStateRepository:
         state.note_count = (state.note_count or 0) + 1
         if note_type == NoteType.DECISION:
             state.decision_count = (state.decision_count or 0) + 1
+        if note_type == NoteType.OBSERVATION:
+            state.observation_count = (state.observation_count or 0) + 1
         state.last_note_at = ts
         state.last_touched_at = ts
         state.stale_days = 0

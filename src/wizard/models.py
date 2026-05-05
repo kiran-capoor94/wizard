@@ -72,6 +72,7 @@ class NoteType(str, Enum):
     LEARNINGS = "learnings"
     SESSION_SUMMARY = "session_summary"
     FAILURE = "failure"
+    OBSERVATION = "observation"
 
 
 class MeetingTasks(SQLModel, table=True):
@@ -281,6 +282,7 @@ class TaskState(TimestampMixin, table=True):
         ),
     )
     note_count: int = Field(default=0, nullable=False)
+    observation_count: int = Field(default=0, nullable=False)
     decision_count: int = Field(default=0, nullable=False)
     last_note_at: datetime.datetime | None = Field(default=None)
     last_status_change_at: datetime.datetime | None = Field(default=None)
