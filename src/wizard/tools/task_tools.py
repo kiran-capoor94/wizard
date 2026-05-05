@@ -272,7 +272,7 @@ async def write_embedding(note_id: int, content: str) -> None:
         logger.warning("embedding write failed for note %d: %s", note_id, e)
 
 
-async def _sample_mental_model(
+async def sample_mental_model(
     ctx: Context, content: str, note_type: NoteType
 ) -> str | None:
     """Sample a mental model summarizing task understanding via LLM.
@@ -341,11 +341,15 @@ async def save_note(
                 note_count = n_repo.count_for_task(db, task_db_id)
                 should_synthesise = note_count >= 2 and not n_repo.has_mental_model(db, task_db_id)
             if should_synthesise:
-                synthesised = await _sample_mental_model(ctx, clean, note_type)
+                synthesised = await sample_mental_model(ctx, clean, note_type)
                 if synthesised:
                     with get_session() as db:
                         n_repo.set_mental_model(db, result.note_id, synthesised)
-                    result.mental_model_saved = True
+                    result = SaveNoteResponse(
+                        note_id=result.note_id,
+                        was_duplicate=result.was_duplicate,
+                        mental_model_saved=True,
+                    )
 
         await try_notify(ctx.report_progress(1, 2))
         await try_notify(ctx.report_progress(2, 2))
