@@ -142,7 +142,7 @@ def _render_feed(db, query: str, entity_type: str | None) -> None:
         return
 
     offset = st.session_state["feed_offset"]
-    items = _analytics.get_feed_items(db, offset=0, limit=offset + _FEED_PAGE_SIZE)
+    items = _analytics.get_feed_items(db, offset=offset, limit=_FEED_PAGE_SIZE)
     _render_activity_items(items, offset)
 
 
