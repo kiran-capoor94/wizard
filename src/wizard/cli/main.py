@@ -20,6 +20,7 @@ from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
 from wizard.cli.compress import run_backfill, run_compress_file
 from wizard.cli.doctor import db_is_healthy, doctor
+from wizard.cli.hooks import run_stop_hook
 from wizard.cli.vacuum import run_vacuum
 from wizard.cli.verify import verify
 from wizard.config import settings
@@ -124,8 +125,6 @@ def hook_stop() -> None:
     Reads JSON from stdin: {"session_id": "...", "transcript": [...]}.
     Exits 0 always — hook failures must never interrupt the agent.
     """
-    from wizard.cli.hooks import run_stop_hook
-
     try:
         data = json.loads(sys.stdin.read())
         agent_session_id: str = data.get("session_id", "")
