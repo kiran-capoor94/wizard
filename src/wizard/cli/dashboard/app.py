@@ -4,7 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from wizard.cli.dashboard.pages import health, home
+from wizard.cli.dashboard._pages import health, home
 from wizard.cli.dashboard.sidebar import render as render_sidebar
 from wizard.config import settings
 
