@@ -3,10 +3,11 @@
 import datetime
 import logging
 
-from sqlalchemy import case
+from sqlalchemy import case, text
 from sqlmodel import Session, col, func, select
 
 from ..models import Note, NoteType, Task, TaskState, ToolCall, WizardSession
+from ..schemas import FeedItem
 
 logger = logging.getLogger(__name__)
 
@@ -289,3 +290,62 @@ class AnalyticsRepository:
             .order_by(func.count().desc())
         ).all()
         return {tool_name: cnt for tool_name, cnt in rows}
+
+    def get_feed_items(self, db: Session, offset: int = 0, limit: int = 50) -> list[FeedItem]:
+        """Reverse-chronological feed of sessions, notes, and task_start events."""
+        sql = text("""
+            SELECT 'session' AS item_type,
+                   s.created_at AS timestamp,
+                   'Session #' || s.id AS title,
+                   COALESCE(
+                       ROUND(
+                           (JULIANDAY(COALESCE(
+                               CASE WHEN s.closed_by IN ('user','hook') THEN s.updated_at
+                                    WHEN s.closed_by = 'auto' THEN s.last_active_at
+                               END,
+                               s.last_active_at,
+                               s.updated_at
+                           )) - JULIANDAY(s.created_at)) * 1440
+                       ) || ' min',
+                       '?'
+                   ) || ' · ' || COALESCE(s.closed_by, 'open') AS subtitle,
+                   NULL AS detail,
+                   s.id AS entity_id
+            FROM wizardsession s
+
+            UNION ALL
+
+            SELECT 'note' AS item_type,
+                   n.created_at AS timestamp,
+                   '[' || n.note_type || '] ' || SUBSTR(n.content, 1, 60) AS title,
+                   COALESCE('mental model: ' || n.mental_model, '') AS subtitle,
+                   n.content AS detail,
+                   n.id AS entity_id
+            FROM note n
+
+            UNION ALL
+
+            SELECT 'task_event' AS item_type,
+                   tc.called_at AS timestamp,
+                   'Task started' AS title,
+                   '' AS subtitle,
+                   NULL AS detail,
+                   tc.id AS entity_id
+            FROM toolcall tc
+            WHERE tc.tool_name = 'task_start'
+
+            ORDER BY timestamp DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = db.exec(sql.bindparams(limit=limit, offset=offset)).all()  # type: ignore[arg-type]
+        return [
+            FeedItem(
+                item_type=row[0],
+                timestamp=row[1],
+                title=row[2],
+                subtitle=row[3] or "",
+                detail=row[4],
+                entity_id=row[5],
+            )
+            for row in rows
+        ]
