@@ -349,3 +349,22 @@ class AnalyticsRepository:
             )
             for row in rows
         ]
+
+    def get_session_durations(self, db: Session, limit: int = 30) -> list[float]:
+        """Per-session durations in minutes for the last `limit` closed sessions."""
+        closed_at_expr = case(
+            (col(WizardSession.closed_by).in_(["user", "hook"]), WizardSession.updated_at),
+            (WizardSession.closed_by == "auto", WizardSession.last_active_at),
+        )
+        rows = db.exec(
+            select(
+                (func.julianday(closed_at_expr) - func.julianday(WizardSession.created_at)) * 1440
+            )
+            .where(
+                col(WizardSession.closed_by).in_(["user", "hook", "auto"]),
+                closed_at_expr.is_not(None),
+            )
+            .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
+            .limit(limit)
+        ).all()
+        return [round(float(r), 1) for r in rows if r is not None]
