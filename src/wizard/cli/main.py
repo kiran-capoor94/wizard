@@ -382,7 +382,7 @@ def analytics(
 def dashboard() -> None:
     """Launch the Streamlit health dashboard."""
     dashboard_path = str(
-        importlib.resources.files("wizard").joinpath("cli").joinpath("dashboard.py")
+        importlib.resources.files("wizard").joinpath("cli").joinpath("dashboard").joinpath("app.py")
     )
     streamlit_bin = Path(sys.executable).parent / "streamlit"
     result = subprocess.run(
