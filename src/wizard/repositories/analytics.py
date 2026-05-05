@@ -61,31 +61,12 @@ class AnalyticsRepository:
             )
         ).one()
 
-        synthesis_status_rows = db.exec(
-            select(WizardSession.id, WizardSession.synthesis_status, WizardSession.closed_by)
-            .where(*window)
-            .where(
-                col(WizardSession.synthesis_status).in_(["partial_failure", "pending"])
-            )
-        ).all()
-        synthesis_failure_ids = [
-            sid for sid, status, _ in synthesis_status_rows
-            if status == "partial_failure" and sid is not None
-        ]
-        pending_synthesis = sum(
-            1 for _, status, closed_by in synthesis_status_rows
-            if status == "pending" and closed_by is not None
-        )
-
         return {
             "session_count": session_count,
             "avg_duration_minutes": avg_duration,
             "total_tool_calls": total_tool_calls,
             "abandoned_count": abandoned_count,
             "abandoned_rate": abandoned_rate,
-            "synthesis_failures": len(synthesis_failure_ids),
-            "synthesis_failure_ids": synthesis_failure_ids,
-            "pending_synthesis": pending_synthesis,
         }
 
     def get_note_stats(self, db: Session, start: datetime.date, end: datetime.date) -> dict:

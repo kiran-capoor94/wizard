@@ -1,4 +1,4 @@
-"""Health page — synthesis failures, session breakdown, tool frequency, note quality."""
+"""Health page — session breakdown, tool frequency, note quality."""
 
 import datetime
 
@@ -27,25 +27,6 @@ def render() -> None:
         tool_freq = _analytics.get_tool_call_frequency(db, days=_TOOL_WINDOW_DAYS)
         note_stats = _analytics.get_note_stats(db, week_ago, today)
         durations = _analytics.get_session_durations(db, limit=_SESSIONS_LIMIT)
-
-        st.subheader("Synthesis Failures (last 30 sessions)")
-        failures = [s for s in recent_sessions if s.synthesis_status == "partial_failure"]
-        if failures:
-            fail_df = pd.DataFrame([
-                {
-                    "Session ID": s.id,
-                    "Date": s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "—",
-                    "Closed By": s.closed_by or "open",
-                }
-                for s in failures
-            ])
-            st.dataframe(fail_df, use_container_width=True, hide_index=True)
-        else:
-            st.success("No synthesis failures in the last 30 sessions.")
-
-        pending = [s for s in recent_sessions if s.synthesis_status == "pending" and s.closed_by]
-        if pending:
-            st.warning(f"{len(pending)} closed session(s) with pending synthesis.")
 
         st.subheader("Session Close Method Breakdown")
         close_methods: dict[str, int] = {}

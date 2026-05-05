@@ -7,7 +7,6 @@ from pathlib import Path
 import sentry_sdk
 from pythonjsonlogger import json as jsonlogger
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
-from sentry_sdk.integrations.litellm import LiteLLMIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.mcp import MCPIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
@@ -60,7 +59,6 @@ if __name__ == "__main__":
             enable_logs=True,
             integrations=[
                 AsyncioIntegration(),
-                LiteLLMIntegration(),
                 MCPIntegration(),
                 SqlalchemyIntegration(),
                 LoggingIntegration(

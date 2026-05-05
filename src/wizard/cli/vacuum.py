@@ -22,7 +22,7 @@ _console = Console()
 
 
 def run_vacuum() -> None:
-    """Clear synthesised transcript blobs, orphaned embeddings, and compact the database."""
+    """Remove orphaned embeddings and compact the database."""
     db_path = Path(os.environ.get("WIZARD_DB", settings.db))
     if not db_path.exists():
         rprint("[red]Database not found.[/red] Run [bold]wizard setup[/bold] first.")
@@ -33,12 +33,6 @@ def run_vacuum() -> None:
         _console.status("Vacuuming database..."),
         _sqlite3.connect(str(db_path)) as conn,
     ):
-        cur = conn.execute(
-            "UPDATE wizardsession SET transcript_raw = NULL"
-            " WHERE is_synthesised = 1 AND synthesis_status = 'complete'"
-            " AND transcript_raw IS NOT NULL"
-        )
-        cleared = cur.rowcount
         orphaned = 0
         try:
             if _sqlite_vec is not None:
@@ -60,7 +54,6 @@ def run_vacuum() -> None:
     mb_before = size_before / 1_048_576
     mb_after = size_after / 1_048_576
     rprint(Panel(
-        f"  [green]✓[/green]  Cleared [bold]{cleared}[/bold] transcript blob(s)\n"
         f"  [green]✓[/green]  Removed [bold]{orphaned}[/bold] orphaned embedding(s)\n"
         f"  [green]✓[/green]  Database: [dim]{mb_before:.1f} MB[/dim]"
         f" → [bold]{mb_after:.1f} MB[/bold]"

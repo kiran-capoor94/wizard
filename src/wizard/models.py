@@ -150,10 +150,6 @@ class WizardSession(TimestampMixin, table=True):
             "'auto' (SessionCloser), or None (still open/abandoned)"
         ),
     )
-    transcript_path: str | None = Field(
-        default=None,
-        description="Absolute path to the agent's conversation transcript file.",
-    )
     agent: str | None = Field(
         default=None,
         description=(
@@ -174,31 +170,11 @@ class WizardSession(TimestampMixin, table=True):
         default=None,
         description="Skill name of the active mode for this session, e.g. 'socratic-mentor'.",
     )
-    is_synthesised: bool = Field(
-        default=False,
-        description="True once Synthesiser has processed transcript_path into notes.",
-    )
     artifact_id: str | None = Field(
         default_factory=lambda: str(_uuid.uuid4()), unique=True, index=True
     )
     persistence: str = Field(default="ephemeral")
     workspace: str | None = Field(default=None)
-    synthesis_status: str = Field(
-        default="pending",
-        description=(
-            "Synthesis lifecycle: 'pending' | 'complete' | 'partial_failure'. "
-            "partial_failure covers both partial success (some notes saved, some chunks failed) "
-            "and total failure (no notes saved). Retry with wizard capture --close --session-id."
-        ),
-    )
-    transcript_raw: str | None = Field(
-        default=None,
-        sa_type=Text(),
-        description=(
-            "Raw JSONL content of all synthesised transcript files, persisted at capture "
-            "time so re-synthesis remains possible after the agent deletes the file."
-        ),
-    )
     notes: list["Note"] = Relationship(back_populates="session")
 
 
@@ -220,13 +196,7 @@ class Note(TimestampMixin, table=True):
     # Old FKs are kept as a safety net during migration.
     artifact_id: str | None = Field(default=None, index=True)
     artifact_type: str | None = Field(default=None)  # 'task'|'session'|'meeting' — debug only
-    # Synthesis provenance
-    synthesis_content_hash: str | None = Field(default=None, index=True)
-    synthesis_session_id: int | None = Field(default=None)
-    transcript_offset_start: int | None = Field(default=None)
-    transcript_offset_end: int | None = Field(default=None)
-    synthesis_confidence: float | None = Field(default=None)
-    source_note_ids: str | None = Field(default=None)  # JSON array of note IDs
+    content_hash: str | None = Field(default=None, index=True)
     # Conflict / lifecycle state
     supersedes_note_id: int | None = Field(default=None)
     # 'active' | 'superseded' | 'contradicted' | 'archived' | 'invalid' | 'unclassified'

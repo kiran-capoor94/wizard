@@ -146,7 +146,7 @@ def _render_feed(db, query: str, entity_type: str | None) -> None:
 
 
 def render() -> None:
-    left, right = st.columns([1, 3])
+    left, right = st.columns([1, 1])
     with get_session() as db:
         with left:
             _render_left_panel(db)

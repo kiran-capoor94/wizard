@@ -4,11 +4,7 @@ import sqlite3
 
 def _make_db(path: str) -> None:
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            "CREATE TABLE wizardsession ("
-            "id INTEGER PRIMARY KEY, transcript_raw TEXT, "
-            "is_synthesised INTEGER DEFAULT 0, synthesis_status TEXT DEFAULT 'pending')"
-        )
+        conn.execute("CREATE TABLE wizardsession (id INTEGER PRIMARY KEY)")
         conn.execute("CREATE TABLE note (id INTEGER PRIMARY KEY, content TEXT)")
         conn.execute(
             "CREATE TABLE vec_note_embeddings (note_id INTEGER PRIMARY KEY, embedding BLOB)"

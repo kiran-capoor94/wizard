@@ -4,12 +4,18 @@ from pathlib import Path
 
 import streamlit as st
 
-from wizard.cli.dashboard._pages import health, home
+from wizard.cli.dashboard._pages import (
+    artifacts,
+    health,
+    home,
+    meetings,
+    notes,
+    raw_query,
+    search,
+    sessions,
+    tasks,
+)
 from wizard.config import settings
-
-
-def _coming_soon() -> None:
-    st.info("Coming in sub-project 2.")
 
 
 def main() -> None:
@@ -22,19 +28,19 @@ def main() -> None:
     pg = st.navigation(
         {
             "": [
-                st.Page(home.render, title="Home", icon="🏠", default=True),
+                st.Page(home.render, title="Home", icon="🏠", default=True, url_path="home"),
             ],
             "Data": [
-                st.Page(_coming_soon, title="Tasks", icon="✅", url_path="tasks"),
-                st.Page(_coming_soon, title="Notes", icon="📝", url_path="notes"),
-                st.Page(_coming_soon, title="Sessions", icon="🕐", url_path="sessions"),
-                st.Page(_coming_soon, title="Meetings", icon="🗓", url_path="meetings"),
-                st.Page(_coming_soon, title="Artifacts", icon="📦", url_path="artifacts"),
-                st.Page(_coming_soon, title="Search", icon="🔍", url_path="search"),
+                st.Page(tasks.render, title="Tasks", icon="✅", url_path="tasks"),
+                st.Page(notes.render, title="Notes", icon="📝", url_path="notes"),
+                st.Page(sessions.render, title="Sessions", icon="🕐", url_path="sessions"),
+                st.Page(meetings.render, title="Meetings", icon="🗓", url_path="meetings"),
+                st.Page(artifacts.render, title="Artifacts", icon="📦", url_path="artifacts"),
+                st.Page(search.render, title="Search", icon="🔍", url_path="search"),
             ],
             "System": [
-                st.Page(health.render, title="Health", icon="❤️"),
-                st.Page(_coming_soon, title="Raw Query", icon="🗄️", url_path="raw-query"),
+                st.Page(health.render, title="Health", icon="❤️", url_path="health"),
+                st.Page(raw_query.render, title="Raw Query", icon="🗄️", url_path="raw-query"),
             ],
         }
     )

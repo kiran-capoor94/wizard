@@ -9,7 +9,6 @@ def serve() -> None:
 
     import sentry_sdk
     from sentry_sdk.integrations.asyncio import AsyncioIntegration
-    from sentry_sdk.integrations.litellm import LiteLLMIntegration
     from sentry_sdk.integrations.logging import LoggingIntegration
     from sentry_sdk.integrations.mcp import MCPIntegration
     from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
@@ -29,7 +28,6 @@ def serve() -> None:
             enable_logs=True,
             integrations=[
                 AsyncioIntegration(),
-                LiteLLMIntegration(),
                 MCPIntegration(),
                 SqlalchemyIntegration(),
                 LoggingIntegration(level=None, event_level=None),

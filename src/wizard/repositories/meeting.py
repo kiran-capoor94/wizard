@@ -1,6 +1,6 @@
 import logging
 
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, func, select
 
 from ..models import Meeting, MeetingTasks
 from ..schemas import MeetingContext
@@ -9,6 +9,13 @@ logger = logging.getLogger(__name__)
 
 
 class MeetingRepository:
+    def list_paginated(self, db: Session, limit: int = 50, offset: int = 0) -> list[Meeting]:
+        stmt = select(Meeting).order_by(col(Meeting.id).desc()).offset(offset).limit(limit)
+        return list(db.exec(stmt).all())
+
+    def count(self, db: Session) -> int:
+        return db.exec(select(func.count()).select_from(Meeting)).one()
+
     def get_by_source_id(self, db: Session, source_id: str) -> Meeting | None:
         return db.exec(select(Meeting).where(Meeting.source_id == source_id)).first()
 
