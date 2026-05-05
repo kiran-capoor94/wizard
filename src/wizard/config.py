@@ -110,11 +110,15 @@ class ModesSettings(BaseModel):
 class WizardPaths(BaseModel):
     model_config = {"frozen": True}
 
-    installed_skills: Path = Field(default_factory=lambda: Path.home() / ".wizard" / "skills")
+    installed_skills: Path = Field(
+        default_factory=lambda: Path.home() / ".wizard" / "skills"
+    )
     package_skills: Path = Field(
         default_factory=lambda: Path(__file__).resolve().parent / "skills"
     )
-    sessions_dir: Path = Field(default_factory=lambda: Path.home() / ".wizard" / "sessions")
+    sessions_dir: Path = Field(
+        default_factory=lambda: Path.home() / ".wizard" / "sessions"
+    )
 
 
 WIZARD_MODES: list[str] = ["architect", "ideation", "product-owner", "caveman"]

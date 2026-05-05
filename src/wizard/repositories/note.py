@@ -91,9 +91,9 @@ class NoteRepository:
         return db.exec(stmt).one()
 
     def set_mental_model(self, db: Session, note_id: int, mental_model: str) -> None:
-        """Patch mental_model onto an existing note."""
+        """Patch mental_model onto an existing note. No-ops if already set."""
         note = db.get(Note, note_id)
-        if note is None:
+        if note is None or note.mental_model is not None:
             return
         note.mental_model = mental_model
         db.add(note)
