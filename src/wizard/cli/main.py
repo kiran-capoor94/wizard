@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import shutil
-import sqlite3 as _sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -17,17 +16,12 @@ from rich import print as rprint
 from rich.panel import Panel
 from rich.table import Table
 
-try:
-    import sqlite_vec as _sqlite_vec
-except ImportError:
-    _sqlite_vec = None  # type: ignore[assignment]
-
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
-from wizard.cli.compress import run_backfill
+from wizard.cli.compress import run_backfill, run_compress_file
 from wizard.cli.doctor import db_is_healthy, doctor
+from wizard.cli.vacuum import run_vacuum
 from wizard.cli.verify import verify
-from wizard.compression import compress as _compress_text
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
 from wizard.database import run_migrations
@@ -46,6 +40,9 @@ app.command()(verify)
 
 configure_app = typer.Typer(help="Configure wizard settings.")
 app.add_typer(configure_app, name="configure")
+
+hook_app = typer.Typer(help="Wizard hook handlers for agent integrations.")
+app.add_typer(hook_app, name="hook")
 
 _reg_service = RegistrationService(settings)
 
@@ -118,6 +115,39 @@ def _prompt_and_register_agents(agent: str | None) -> list[str]:
     registered = [r["id"] for r in results if r["success"]]
     agent_registration.write_registered_agents(registered)
     return registered
+
+
+@hook_app.command("stop")
+def hook_stop() -> None:
+    """Handle Claude Code Stop hook — write last assistant message as OBSERVATION note.
+
+    Reads JSON from stdin: {"session_id": "...", "transcript": [...]}.
+    Exits 0 always — hook failures must never interrupt the agent.
+    """
+    from wizard.cli.hooks import run_stop_hook
+
+    try:
+        data = json.loads(sys.stdin.read())
+        agent_session_id: str = data.get("session_id", "")
+        transcript: list = data.get("transcript", [])
+        last_message = ""
+        for entry in reversed(transcript):
+            if isinstance(entry, dict) and entry.get("role") == "assistant":
+                content = entry.get("content", "")
+                if isinstance(content, str):
+                    last_message = content
+                elif isinstance(content, list):
+                    texts = [
+                        part.get("text", "")
+                        for part in content
+                        if isinstance(part, dict) and part.get("type") == "text"
+                    ]
+                    last_message = " ".join(t for t in texts if t)
+                break
+        if agent_session_id and last_message:
+            run_stop_hook(agent_session_id, last_message)
+    except Exception:
+        pass  # hook failures must never interrupt the agent
 
 
 @app.command()
@@ -349,43 +379,8 @@ def dashboard() -> None:
 
 @app.command()
 def vacuum() -> None:
-    """Clear synthesised transcript blobs and compact the database."""
-    db_path = Path(os.environ.get("WIZARD_DB", settings.db))
-    if not db_path.exists():
-        typer.echo("Database not found. Run 'wizard setup' first.", err=True)
-        raise typer.Exit(1)
-
-    size_before = db_path.stat().st_size
-    with _sqlite3.connect(str(db_path)) as conn:
-        cur = conn.execute(
-            "UPDATE wizardsession SET transcript_raw = NULL"
-            " WHERE is_synthesised = 1 AND synthesis_status = 'complete'"
-            " AND transcript_raw IS NOT NULL"
-        )
-        cleared = cur.rowcount
-        orphaned = 0
-        try:
-            if _sqlite_vec is not None:
-                conn.enable_load_extension(True)
-                _sqlite_vec.load(conn)
-                conn.enable_load_extension(False)
-            orphan_cur = conn.execute(
-                "DELETE FROM vec_note_embeddings WHERE note_id NOT IN (SELECT id FROM note)"
-            )
-            orphaned = orphan_cur.rowcount
-        except Exception:
-            pass
-        conn.commit()
-        conn.execute("PRAGMA wal_checkpoint(FULL)")
-        conn.execute("VACUUM")
-
-    size_after = db_path.stat().st_size
-    freed_mb = (size_before - size_after) / 1_048_576
-    typer.echo(
-        f"Cleared {cleared} transcript blob(s), {orphaned} orphaned embedding(s). "
-        f"Database: {size_before // 1_048_576} MB → {size_after // 1_048_576} MB "
-        f"(freed {freed_mb:.1f} MB)."
-    )
+    """Clear synthesised transcript blobs, orphaned embeddings, and compact the database."""
+    run_vacuum()
 
 
 @app.command()
@@ -394,38 +389,17 @@ def compress(
     inplace: bool = typer.Option(False, "--inplace", help="Overwrite file; saves .original backup"),
     backfill: bool = typer.Option(False, "--backfill", help="Backfill embeddings for all notes"),
 ) -> None:
-    """Compress a text file or backfill note embeddings in the database."""
+    """Compress a text file using Cavemem abbreviations, or backfill note embeddings."""
     if backfill and path is not None:
-        typer.echo("--backfill and <path> are mutually exclusive", err=True)
+        rprint("[red]Error:[/red] --backfill and <path> are mutually exclusive.")
         raise typer.Exit(1)
     if not backfill and path is None:
-        typer.echo("Provide a <path> or --backfill", err=True)
+        rprint("[red]Error:[/red] Provide a [bold]<path>[/bold] or [bold]--backfill[/bold].")
         raise typer.Exit(1)
     if backfill:
         run_backfill()
         return
-
-    if not path.exists():  # type: ignore[union-attr]
-        typer.echo(f"File not found: {path}", err=True)
-        raise typer.Exit(1)
-    raw = path.read_bytes()
-    if b"\x00" in raw[:512]:
-        typer.echo("Not a text file", err=True)
-        raise typer.Exit(1)
-    original = raw.decode("utf-8", errors="replace")
-    if not original.strip():
-        typer.echo(original, nl=False)
-        typer.echo("0 chars → 0 chars (0% reduction)", err=True)
-        return
-    compressed = _compress_text(original)
-    orig_len, comp_len = len(original), len(compressed)
-    pct = round((1 - comp_len / orig_len) * 100) if orig_len > 0 else 0
-    if inplace:
-        path.with_suffix(path.suffix + ".original").write_text(original)
-        path.write_text(compressed)
-    else:
-        typer.echo(compressed, nl=False)
-    typer.echo(f"{orig_len} chars → {comp_len} chars ({pct}% reduction)", err=True)
+    run_compress_file(path, inplace=inplace)  # type: ignore[arg-type]
 
 
 @app.command()
