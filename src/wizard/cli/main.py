@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3 as _sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -16,12 +17,20 @@ from rich import print as rprint
 from rich.panel import Panel
 from rich.table import Table
 
+try:
+    import sqlite_vec as _sqlite_vec
+except ImportError:
+    _sqlite_vec = None  # type: ignore[assignment]
+
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
+from wizard.cli.compress import run_backfill
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.cli.verify import verify
+from wizard.compression import compress as _compress_text
 from wizard.config import settings
 from wizard.database import get_session as get_db_session
+from wizard.database import run_migrations
 from wizard.services import RegistrationService
 
 logger = logging.getLogger(__name__)
@@ -131,7 +140,6 @@ def setup(
     _wizard_db_env = os.environ.get("WIZARD_DB")
     db_path = Path(_wizard_db_env) if _wizard_db_env else (_reg_service.WIZARD_HOME / "wizard.db")
     if not db_is_healthy(db_path):
-        from wizard.database import run_migrations
         typer.echo("Initialising database...")
         try:
             run_migrations()
@@ -342,8 +350,6 @@ def dashboard() -> None:
 @app.command()
 def vacuum() -> None:
     """Clear synthesised transcript blobs and compact the database."""
-    import sqlite3 as _sqlite3
-
     db_path = Path(os.environ.get("WIZARD_DB", settings.db))
     if not db_path.exists():
         typer.echo("Database not found. Run 'wizard setup' first.", err=True)
@@ -353,13 +359,22 @@ def vacuum() -> None:
     with _sqlite3.connect(str(db_path)) as conn:
         cur = conn.execute(
             "UPDATE wizardsession SET transcript_raw = NULL"
-            " WHERE transcript_raw IS NOT NULL"
+            " WHERE is_synthesised = 1 AND synthesis_status = 'complete'"
+            " AND transcript_raw IS NOT NULL"
         )
         cleared = cur.rowcount
-        orphan_cur = conn.execute(
-            "DELETE FROM vec_note_embeddings WHERE note_id NOT IN (SELECT id FROM note)"
-        )
-        orphaned = orphan_cur.rowcount
+        orphaned = 0
+        try:
+            if _sqlite_vec is not None:
+                conn.enable_load_extension(True)
+                _sqlite_vec.load(conn)
+                conn.enable_load_extension(False)
+            orphan_cur = conn.execute(
+                "DELETE FROM vec_note_embeddings WHERE note_id NOT IN (SELECT id FROM note)"
+            )
+            orphaned = orphan_cur.rowcount
+        except Exception:
+            pass
         conn.commit()
         conn.execute("PRAGMA wal_checkpoint(FULL)")
         conn.execute("VACUUM")
@@ -380,9 +395,6 @@ def compress(
     backfill: bool = typer.Option(False, "--backfill", help="Backfill embeddings for all notes"),
 ) -> None:
     """Compress a text file or backfill note embeddings in the database."""
-    from wizard.cli.compress import run_backfill
-    from wizard.compression import compress as _compress_text
-
     if backfill and path is not None:
         typer.echo("--backfill and <path> are mutually exclusive", err=True)
         raise typer.Exit(1)
@@ -393,8 +405,7 @@ def compress(
         run_backfill()
         return
 
-    assert path is not None
-    if not path.exists():
+    if not path.exists():  # type: ignore[union-attr]
         typer.echo(f"File not found: {path}", err=True)
         raise typer.Exit(1)
     raw = path.read_bytes()
@@ -420,8 +431,6 @@ def compress(
 @app.command()
 def update() -> None:
     """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
-    from wizard.database import run_migrations
-
     # 1. Identify currently registered agents to ensure we clean up their envs
     registered = agent_registration.read_registered_agents()
     if not registered:
@@ -486,8 +495,6 @@ def update() -> None:
 
     rprint(Panel(
         f"Skills cache: [dim]{_reg_service.WIZARD_HOME / 'skills'}[/dim]\n"
-        "  ✅  Update complete\n"
-        "  Obsolete skills and hooks have been removed from agent environments.",
-        title="[green]Wizard updated[/green]",
-        border_style="green",
+        "  ✅  Update complete — obsolete skills and hooks removed.",
+        title="[green]Wizard updated[/green]", border_style="green",
     ))
