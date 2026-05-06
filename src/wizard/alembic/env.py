@@ -18,9 +18,21 @@ target_metadata = SQLModel.metadata
 
 _FTS_SUFFIXES = ("_fts", "_fts_data", "_fts_idx", "_fts_docsize", "_fts_config")
 
+# Virtual tables (sqlite-vec) and unmanaged legacy tables — excluded from autogenerate
+_EXCLUDE_TABLES = frozenset({
+    "code_chunk",
+    "vec_note_embeddings",
+    "vec_note_embeddings_chunks",
+    "vec_note_embeddings_info",
+    "vec_note_embeddings_rowids",
+    "vec_note_embeddings_vector_chunks00",
+})
+
 
 def _include_object(obj, name, type_, reflected, _compare_to):  # noqa: ARG001
-    return not (type_ == "table" and name.endswith(_FTS_SUFFIXES))
+    if type_ == "table":
+        return not (name.endswith(_FTS_SUFFIXES) or name in _EXCLUDE_TABLES)
+    return True
 
 
 def run_migrations_offline() -> None:

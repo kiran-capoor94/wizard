@@ -52,7 +52,7 @@ def _format_notes_section(notes: dict) -> list[str]:
         "Notes",
         f"  Manual notes:         {notes.get('manual_notes', 0)}",
     ]
-    manual_types = {k: v for k, v in notes.get("by_type", {}).items() if k != "session_summary"}
+    manual_types = {k: v for k, v in notes.get("by_type", {}).items() if k != "SESSION_SUMMARY"}
     for note_type, count in sorted(manual_types.items()):
         lines.append(f"    {note_type}: {count}")
     lines += [
@@ -132,7 +132,7 @@ def _build_sessions_col(sessions: dict, session_summaries: int) -> Text:
 
 
 def _build_notes_col(notes: dict) -> Text:
-    by_type = {k: v for k, v in notes.get("by_type", {}).items() if k != "session_summary"}
+    by_type = {k: v for k, v in notes.get("by_type", {}).items() if k != "SESSION_SUMMARY"}
     unclassified = notes.get("unclassified", 0)
     col = Text()
     for note_type, count in sorted(by_type.items(), key=lambda x: -x[1]):

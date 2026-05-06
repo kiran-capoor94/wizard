@@ -66,13 +66,13 @@ class MeetingCategory(str, Enum):
 
 
 class NoteType(str, Enum):
-    INVESTIGATION = "investigation"
-    DECISION = "decision"
-    DOCS = "docs"
-    LEARNINGS = "learnings"
-    SESSION_SUMMARY = "session_summary"
-    FAILURE = "failure"
-    OBSERVATION = "observation"
+    INVESTIGATION = "INVESTIGATION"
+    DECISION = "DECISION"
+    DOCS = "DOCS"
+    LEARNINGS = "LEARNINGS"
+    SESSION_SUMMARY = "SESSION_SUMMARY"
+    FAILURE = "FAILURE"
+    OBSERVATION = "OBSERVATION"
 
 
 class MeetingTasks(SQLModel, table=True):
