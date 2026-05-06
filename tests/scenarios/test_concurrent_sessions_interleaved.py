@@ -17,7 +17,7 @@ async def test_concurrent_sessions(mcp_client, seed_task):
 
     # Save note under session B
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation",
+        "task_id": task.id, "note_type": "INVESTIGATION",
         "content": "Note from session B",
     })
     assert not r.is_error, r

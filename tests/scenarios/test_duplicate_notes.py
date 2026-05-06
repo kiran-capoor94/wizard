@@ -8,11 +8,11 @@ async def test_duplicate_notes(mcp_client, seed_task):
 
     content = "Found the bug in auth"
     r1 = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation", "content": content,
+        "task_id": task.id, "note_type": "INVESTIGATION", "content": content,
     })
     assert not r1.is_error, r1
     r2 = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation", "content": content,
+        "task_id": task.id, "note_type": "INVESTIGATION", "content": content,
     })
     assert not r2.is_error, r2
     # Deduplication: identical content returns the same note_id and was_duplicate=True

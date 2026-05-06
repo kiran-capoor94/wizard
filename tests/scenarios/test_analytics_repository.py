@@ -49,8 +49,8 @@ class TestNoteStats:
         _make_note(db_session, t.id, s.id, NoteType.DECISION)
 
         stats = AnalyticsRepository().get_note_stats(db_session, today, today)
-        assert stats["by_type"]["investigation"] == 1
-        assert stats["by_type"]["decision"] == 2
+        assert stats["by_type"]["INVESTIGATION"] == 1
+        assert stats["by_type"]["DECISION"] == 2
         assert stats["total"] == 3
 
 

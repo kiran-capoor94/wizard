@@ -14,7 +14,7 @@ async def test_auto_close_uses_synthetic_summary(mcp_client, seed_task):
     sid1 = r.structured_content["session_id"]
 
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation",
+        "task_id": task.id, "note_type": "INVESTIGATION",
         "content": "Heap dump shows growing object count",
     })
     assert not r.is_error, r

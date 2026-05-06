@@ -8,7 +8,7 @@ from wizard.repositories.note import NoteRepository
 _notes = NoteRepository()
 
 _DAY_OPTIONS = [7, 14, 30, 90]
-_TYPE_OPTIONS = ["All", "observation", "decision", "blocker", "investigation", "mental_model"]
+_TYPE_OPTIONS = ["All", "OBSERVATION", "DECISION", "blocker", "INVESTIGATION", "mental_model"]
 
 
 def render() -> None:

@@ -12,7 +12,7 @@ async def test_mental_model_synthesised_on_second_note(mcp_client, seed_task):
 
     r1 = await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": "Traced the auth middleware. Token expiry check missing.",
     })
     assert not r1.is_error, r1
@@ -24,7 +24,7 @@ async def test_mental_model_synthesised_on_second_note(mcp_client, seed_task):
     ):
         r2 = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "investigation",
+            "note_type": "INVESTIGATION",
             "content": "Confirmed: jwt.verify() never called on refresh path.",
         })
     assert not r2.is_error, r2
@@ -39,7 +39,7 @@ async def test_mental_model_not_synthesised_when_already_exists(mcp_client, seed
 
     await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": "First note.",
         "mental_model": "Already have a model.",
     })
@@ -50,7 +50,7 @@ async def test_mental_model_not_synthesised_when_already_exists(mcp_client, seed
     ) as mock_sample:
         r2 = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "investigation",
+            "note_type": "INVESTIGATION",
             "content": "Second note — model already present.",
         })
     mock_sample.assert_not_called()
@@ -64,7 +64,7 @@ async def test_mental_model_synthesis_silent_on_failure(mcp_client, seed_task):
     await mcp_client.call_tool("session_start", {})
 
     await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation", "content": "First note.",
+        "task_id": task.id, "note_type": "INVESTIGATION", "content": "First note.",
     })
 
     with patch(
@@ -73,7 +73,7 @@ async def test_mental_model_synthesis_silent_on_failure(mcp_client, seed_task):
     ):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "investigation",
+            "note_type": "INVESTIGATION",
             "content": "Second note — synthesis will fail.",
         })
     assert not r.is_error, r

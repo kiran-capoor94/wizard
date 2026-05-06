@@ -29,7 +29,7 @@ def _data(
             "session_summaries": 10,
             "mental_model_coverage": mental_model_coverage,
             "mental_models_captured": int(manual_notes * mental_model_coverage),
-            "by_type": {"investigation": manual_notes},
+            "by_type": {"INVESTIGATION": manual_notes},
         },
         "tasks": {
             "worked": worked,

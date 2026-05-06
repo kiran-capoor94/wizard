@@ -16,7 +16,7 @@ async def test_multi_session_analytics(mcp_client, seed_task):
         target_task = task1 if i % 2 == 0 else task2
         for j in range(count):
             r = await mcp_client.call_tool("save_note", {
-                "task_id": target_task.id, "note_type": "investigation",
+                "task_id": target_task.id, "note_type": "INVESTIGATION",
                 "content": f"Session {i+1} note {j+1}",
             })
             assert not r.is_error, r
@@ -39,7 +39,7 @@ async def test_multi_session_analytics(mcp_client, seed_task):
         r = await mcp_client.call_tool("get_session", {"session_id": sid})
         assert not r.is_error, r
         notes = r.structured_content["notes"]
-        task_notes = [n for n in notes if n["note_type"] != "session_summary"]
-        summary_notes = [n for n in notes if n["note_type"] == "session_summary"]
+        task_notes = [n for n in notes if n["note_type"] != "SESSION_SUMMARY"]
+        summary_notes = [n for n in notes if n["note_type"] == "SESSION_SUMMARY"]
         assert len(task_notes) == expected_task_notes
         assert len(summary_notes) == 1

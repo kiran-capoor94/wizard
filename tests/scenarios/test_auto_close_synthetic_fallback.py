@@ -10,7 +10,7 @@ async def test_auto_close_synthetic_fallback(mcp_client, seed_task):
     sid1 = r.structured_content["session_id"]
 
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "decision", "content": "Switch to JWT tokens",
+        "task_id": task.id, "note_type": "DECISION", "content": "Switch to JWT tokens",
     })
     assert not r.is_error, r
 

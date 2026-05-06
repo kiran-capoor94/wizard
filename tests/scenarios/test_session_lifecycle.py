@@ -29,7 +29,7 @@ async def test_session_lifecycle(mcp_client, seed_task):
 
     # 3. save_note
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation",
+        "task_id": task.id, "note_type": "INVESTIGATION",
         "content": "Found the root cause in the OAuth flow",
     })
     assert not r.is_error, r
