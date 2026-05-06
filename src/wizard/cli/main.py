@@ -431,7 +431,9 @@ def compress(
 
 
 @app.command()
-def update() -> None:
+def update(
+    dev: bool = typer.Option(False, "--dev", help="Force editable update path (uv sync only)."),
+) -> None:
     """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
     registered = agent_registration.read_registered_agents()
     if not registered:
@@ -443,7 +445,7 @@ def update() -> None:
         _reg_service.deregister_agents(registered)
         typer.echo("ok")
 
-    if is_editable_install():
+    if dev or is_editable_install():
         # Dev mode: git pull + uv sync
         repo_root = Path(__file__).resolve().parents[3]
         sync_args = (
@@ -451,15 +453,10 @@ def update() -> None:
             if shutil.which("uv")
             else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
         )
-        steps = [
-            ("git pull", ["git", "pull"]),
-            ("sync deps", sync_args),
-        ]
-        for label, args in steps:
-            ok, output = _run_update_step(label, args, repo_root)
-            if not ok:
-                typer.echo(output, err=True)
-                raise typer.Exit(1)
+        ok, output = _run_update_step("sync deps", sync_args, repo_root)
+        if not ok:
+            typer.echo(output, err=True)
+            raise typer.Exit(1)
         _reg_service.ensure_editable_pth()
     else:
         # Installed mode: uv tool upgrade
