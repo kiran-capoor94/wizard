@@ -29,7 +29,7 @@ async def test_task_index_note_hint_truncated_to_80_chars(mcp_client, seed_task)
     await mcp_client.call_tool("session_start", {})
     await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": "A" * 200,
     })
 
@@ -49,17 +49,17 @@ async def test_task_index_notes_by_type_counts(mcp_client, seed_task):
 
     await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": "First investigation finding at auth.py:42.",
     })
     await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": "Second investigation finding at config.py:88.",
     })
     await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "decision",
+        "note_type": "DECISION",
         "content": "Decided to use Redis for session storage.",
     })
 
@@ -69,4 +69,4 @@ async def test_task_index_notes_by_type_counts(mcp_client, seed_task):
     open_tasks = r.structured_content["open_tasks"]
     entry = next(e for e in open_tasks if e["id"] == task.id)
     assert entry["note_count"] == 3
-    assert entry["notes_by_type"] == {"investigation": 2, "decision": 1}
+    assert entry["notes_by_type"] == {"INVESTIGATION": 2, "DECISION": 1}

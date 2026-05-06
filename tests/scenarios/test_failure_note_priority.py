@@ -9,14 +9,14 @@ async def test_failure_notes_sort_before_decisions_in_task_start(mcp_client, see
     # Save a decision note first (older)
     await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "decision",
+        "note_type": "DECISION",
         "content": "Decided to use Redis for session storage.",
     })
 
     # Save a failure note second (newer)
     await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "failure",
+        "note_type": "FAILURE",
         "content": "Tried in-memory LRU cache — evicted under load, caused 503s.",
     })
 
@@ -27,7 +27,7 @@ async def test_failure_notes_sort_before_decisions_in_task_start(mcp_client, see
     assert len(prior_notes) == 2
     # failure note must appear before decision note regardless of creation order
     types = [n["note_type"] for n in prior_notes]
-    assert types.index("failure") < types.index("decision")
+    assert types.index("FAILURE") < types.index("DECISION")
 
 
 @pytest.mark.asyncio
@@ -45,13 +45,13 @@ async def test_key_notes_capped_at_five_with_many_high_priority_notes(mcp_client
     for i in range(3):
         await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "failure",
+            "note_type": "FAILURE",
             "content": f"Failure {i}: tried approach {i} and it broke at service.py:{i}.",
         })
     for i in range(3):
         await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "decision",
+            "note_type": "DECISION",
             "content": f"Decision {i}: chose option {i} for module_{i}.py.",
         })
 
@@ -64,8 +64,8 @@ async def test_key_notes_capped_at_five_with_many_high_priority_notes(mcp_client
 
     # Tier priority: failure notes should come before decision notes
     types = [n["note_type"] for n in prior_notes]
-    failure_indices = [i for i, t in enumerate(types) if t == "failure"]
-    decision_indices = [i for i, t in enumerate(types) if t == "decision"]
+    failure_indices = [i for i, t in enumerate(types) if t == "FAILURE"]
+    decision_indices = [i for i, t in enumerate(types) if t == "DECISION"]
     if failure_indices and decision_indices:
         assert max(failure_indices) < min(decision_indices), \
             f"Failure notes should come before decision notes. Got: {types}"

@@ -69,7 +69,7 @@ def upgrade() -> None:
         ).fetchall()
 
         note_count = len(notes)
-        decision_count = sum(1 for n in notes if n.note_type == "decision")
+        decision_count = sum(1 for n in notes if n.note_type in ("decision", "DECISION"))
         note_dts = [_to_dt(n.created_at) for n in notes]
         last_note_at = max(note_dts) if note_dts else None
         task_created_at = _to_dt(t.created_at)

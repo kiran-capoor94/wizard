@@ -8,7 +8,7 @@ async def test_task_start_nonexistent(mcp_client):
 
 async def test_save_note_nonexistent(mcp_client):
     r = await mcp_client.call_tool("save_note", {
-        "task_id": 9999, "note_type": "investigation", "content": "test",
+        "task_id": 9999, "note_type": "INVESTIGATION", "content": "test",
     })
     assert r.is_error
 

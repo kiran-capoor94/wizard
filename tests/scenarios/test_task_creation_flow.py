@@ -23,7 +23,7 @@ async def test_task_creation_flow(mcp_client):
 
     # 3. save_note
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task_id, "note_type": "decision", "content": "Going with OAuth2",
+        "task_id": task_id, "note_type": "DECISION", "content": "Going with OAuth2",
     })
     assert not r.is_error, r
 
@@ -40,4 +40,4 @@ async def test_task_creation_flow(mcp_client):
     d = r.structured_content
     assert d["summary"]["total_notes"] == 1
     assert len(d["timeline"]) == 1
-    assert d["timeline"][0]["note_type"] == "decision"
+    assert d["timeline"][0]["note_type"] == "DECISION"

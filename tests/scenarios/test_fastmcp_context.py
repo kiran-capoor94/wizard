@@ -175,7 +175,7 @@ async def test_save_note_no_elicit_for_investigation_without_mental_model(mcp_cl
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "investigation",
+            "note_type": "INVESTIGATION",
             "content": "Cache entries expire before the TTL we expect.",
         })
 
@@ -199,7 +199,7 @@ async def test_save_note_no_elicit_when_mental_model_provided(mcp_client, seed_t
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "investigation",
+            "note_type": "INVESTIGATION",
             "content": "Slow queries in production.",
             "mental_model": "Unindexed FK column causes full table scans.",
         })
@@ -224,7 +224,7 @@ async def test_save_note_no_elicit_for_decision_without_mental_model(mcp_client,
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "decision",
+            "note_type": "DECISION",
             "content": "Chose Redis over Memcached for its persistence support.",
         })
 
@@ -280,7 +280,7 @@ async def test_save_note_no_elicit_for_docs_type(mcp_client, seed_task):
     with patch("fastmcp.server.context.Context.elicit", new=fake_elicit):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "docs",
+            "note_type": "DOCS",
             "content": "API uses REST with JSON payloads.",
         })
 

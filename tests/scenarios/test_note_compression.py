@@ -13,7 +13,7 @@ async def test_note_content_is_compressed(mcp_client, seed_task):
     with patch("wizard.tools.task_tools.compress_text", new=mock_compress):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "investigation",
+            "note_type": "INVESTIGATION",
             "content": content,
         })
 
@@ -32,7 +32,7 @@ async def test_compressed_content_is_stored(mcp_client, seed_task):
     with patch("wizard.tools.task_tools.compress_text", return_value=compressed):
         r = await mcp_client.call_tool("save_note", {
             "task_id": task.id,
-            "note_type": "investigation",
+            "note_type": "INVESTIGATION",
             "content": content,
         })
 

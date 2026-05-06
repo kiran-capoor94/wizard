@@ -14,7 +14,7 @@ async def test_resume_unclosed_session(mcp_client, seed_task):
     assert not r.is_error, r
 
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation",
+        "task_id": task.id, "note_type": "INVESTIGATION",
         "content": "Partial work before crash",
     })
     assert not r.is_error, r

@@ -10,7 +10,7 @@ async def test_resume_session(mcp_client, seed_task):
     session_1_id = r.structured_content["session_id"]
 
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation",
+        "task_id": task.id, "note_type": "INVESTIGATION",
         "content": "Found a suspicious pattern in the logs",
     })
     assert not r.is_error, r
@@ -51,7 +51,7 @@ async def test_resume_session_caps_prior_notes_per_task(mcp_client, seed_task):
     # Save 5 notes -- more than the 3-note cap
     for i in range(5):
         r = await mcp_client.call_tool("save_note", {
-            "task_id": task.id, "note_type": "investigation", "content": f"Finding {i}",
+            "task_id": task.id, "note_type": "INVESTIGATION", "content": f"Finding {i}",
         })
         assert not r.is_error, r
 

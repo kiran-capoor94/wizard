@@ -15,7 +15,7 @@ async def test_save_note_without_session(mcp_client, seed_task):
     task = await seed_task(name="Orphan task for notes")
 
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation",
+        "task_id": task.id, "note_type": "INVESTIGATION",
         "content": "Working without a session",
     })
     assert not r.is_error, r

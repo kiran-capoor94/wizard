@@ -17,13 +17,13 @@ async def test_decisions_always_included_over_recency(mcp_client, seed_task):
 
     # Save 1 decision early, then 5 low-value investigation notes
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "decision",
+        "task_id": task.id, "note_type": "DECISION",
         "content": "Chose approach X after reviewing options",
     })
     assert not r.is_error, r
     for i in range(5):
         r = await mcp_client.call_tool("save_note", {
-            "task_id": task.id, "note_type": "investigation",
+            "task_id": task.id, "note_type": "INVESTIGATION",
             "content": f"Junk investigation note {i}",
         })
         assert not r.is_error, r
@@ -33,11 +33,11 @@ async def test_decisions_always_included_over_recency(mcp_client, seed_task):
     d = r.structured_content
 
     returned_types = {n["note_type"] for n in d["prior_notes"]}
-    assert "decision" in returned_types, "Decision must be returned despite being oldest"
+    assert "DECISION" in returned_types, "Decision must be returned despite being oldest"
     assert d["total_notes"] == 6
     assert d["older_notes_available"] is True
-    assert d["notes_by_type"].get("investigation", 0) == 5
-    assert d["notes_by_type"].get("decision", 0) == 1
+    assert d["notes_by_type"].get("INVESTIGATION", 0) == 5
+    assert d["notes_by_type"].get("DECISION", 0) == 1
 
 
 async def test_mental_model_notes_included_before_recency_fill(mcp_client, seed_task):
@@ -45,14 +45,14 @@ async def test_mental_model_notes_included_before_recency_fill(mcp_client, seed_
     task = await seed_task(name="Mental model priority task")
 
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation",
+        "task_id": task.id, "note_type": "INVESTIGATION",
         "content": "Root cause is in the auth layer",
         "mental_model": "OAuth token expiry not refreshed — interceptor missing the 401 path.",
     })
     assert not r.is_error, r
     for i in range(5):
         r = await mcp_client.call_tool("save_note", {
-            "task_id": task.id, "note_type": "investigation",
+            "task_id": task.id, "note_type": "INVESTIGATION",
             "content": f"Plain note {i} with no mental model",
         })
         assert not r.is_error, r
@@ -70,7 +70,7 @@ async def test_no_cap_when_all_notes_are_key(mcp_client, seed_task):
 
     for i in range(2):
         r = await mcp_client.call_tool("save_note", {
-            "task_id": task.id, "note_type": "investigation", "content": f"Finding {i}",
+            "task_id": task.id, "note_type": "INVESTIGATION", "content": f"Finding {i}",
         })
         assert not r.is_error, r
 
@@ -87,7 +87,7 @@ async def test_rolling_summary_populated_from_mental_models(mcp_client, seed_tas
 
     # First note without mental_model -- no summary yet
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation",
+        "task_id": task.id, "note_type": "INVESTIGATION",
         "content": "Root cause investigation",
     })
     assert not r.is_error, r
@@ -98,7 +98,7 @@ async def test_rolling_summary_populated_from_mental_models(mcp_client, seed_tas
 
     # Second note with mental_model -- summary should now be present
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "decision",
+        "task_id": task.id, "note_type": "DECISION",
         "content": "Chose approach X",
         "mental_model": "The bug is in the auth middleware — approach X fixes it cleanly.",
     })
@@ -109,7 +109,7 @@ async def test_rolling_summary_populated_from_mental_models(mcp_client, seed_tas
     d = r.structured_content
     assert d["rolling_summary"] is not None
     assert "approach X fixes it cleanly" in d["rolling_summary"]
-    assert "decision" in d["rolling_summary"]
+    assert "DECISION" in d["rolling_summary"]
 
 
 async def test_rewind_task_returns_full_history(mcp_client, seed_task):
@@ -117,7 +117,7 @@ async def test_rewind_task_returns_full_history(mcp_client, seed_task):
 
     for i in range(7):
         r = await mcp_client.call_tool("save_note", {
-            "task_id": task.id, "note_type": "investigation", "content": f"Note {i}",
+            "task_id": task.id, "note_type": "INVESTIGATION", "content": f"Note {i}",
         })
         assert not r.is_error, r
 

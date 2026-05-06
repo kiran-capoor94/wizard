@@ -7,7 +7,7 @@ async def test_duplicate_save_returns_was_duplicate_false_on_first(mcp_client, s
 
     r = await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": "Found race condition in auth middleware at middleware.py:42.",
     })
     assert not r.is_error, r
@@ -22,7 +22,7 @@ async def test_duplicate_save_returns_same_note_id(mcp_client, seed_task):
     content = "Confirmed: config.py:88 reads stale cache on cold start."
     r1 = await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": content,
     })
     assert not r1.is_error, r1
@@ -30,7 +30,7 @@ async def test_duplicate_save_returns_same_note_id(mcp_client, seed_task):
 
     r2 = await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": content,
     })
     assert not r2.is_error, r2

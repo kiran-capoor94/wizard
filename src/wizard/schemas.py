@@ -254,7 +254,7 @@ class SessionStartResponse(BaseModel):
 class TaskStartResponse(BaseModel):
     task: TaskContext
     compounding: bool  # True if prior notes exist for this task
-    notes_by_type: dict[str, int]  # {"investigation": 3, "decision": 1}
+    notes_by_type: dict[str, int]  # {"INVESTIGATION": 3, "DECISION": 1}
     prior_notes: list[NoteDetail]  # up to 5: failure > decision > mental_model > recent
     total_notes: int = 0  # total note count including older notes not returned
     older_notes_available: bool = (
@@ -346,7 +346,7 @@ class SynthesisNote(BaseModel):
     """One note produced by transcript synthesis."""
 
     task_id: int | None = None
-    note_type: str  # "investigation" | "decision" | "docs" | "learnings"
+    note_type: str  # "INVESTIGATION" | "DECISION" | "DOCS" | "LEARNINGS"
     content: str
     mental_model: str | None = None
 

@@ -61,7 +61,7 @@ async def test_save_note_pseudonymises_person_name(mcp_client, security_with_sto
             "save_note",
             {
                 "task_id": task_id,
-                "note_type": "investigation",
+                "note_type": "INVESTIGATION",
                 "content": "Spoke with John Smith about the issue.",
             },
         )
@@ -179,7 +179,7 @@ async def test_session_state_only_written_on_allowlisted_tools(mcp_client, seed_
 
     await mcp_client.call_tool("save_note", {
         "task_id": task.id,
-        "note_type": "investigation",
+        "note_type": "INVESTIGATION",
         "content": "some finding",
     })
 

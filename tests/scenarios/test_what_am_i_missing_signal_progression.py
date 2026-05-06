@@ -16,7 +16,7 @@ async def test_signal_progression(mcp_client, seed_task):
 
     # 2. One investigation -> low_context + no_decisions
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "investigation", "content": "Looking into it",
+        "task_id": task.id, "note_type": "INVESTIGATION", "content": "Looking into it",
     })
     assert not r.is_error, r
 
@@ -29,7 +29,7 @@ async def test_signal_progression(mcp_client, seed_task):
     # 3. 4+ investigations, no decision -> analysis_loop
     for i in range(3):
         r = await mcp_client.call_tool("save_note", {
-            "task_id": task.id, "note_type": "investigation",
+            "task_id": task.id, "note_type": "INVESTIGATION",
             "content": f"Investigation round {i+2}",
         })
         assert not r.is_error, r
@@ -40,7 +40,7 @@ async def test_signal_progression(mcp_client, seed_task):
 
     # 4. Decision with mental model -> analysis_loop and no_decisions gone
     r = await mcp_client.call_tool("save_note", {
-        "task_id": task.id, "note_type": "decision",
+        "task_id": task.id, "note_type": "DECISION",
         "content": "Going with approach B",
         "mental_model": "Root cause is in the auth middleware",
     })
