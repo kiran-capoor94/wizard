@@ -3,7 +3,7 @@ import logging
 
 from sqlmodel import Session, case, col, func, select
 
-from ..models import Note, Task, TaskPriority, TaskState, TaskStatus
+from ..models import Note, NoteType, Task, TaskPriority, TaskState, TaskStatus
 from ..schemas import TaskContext, TaskIndexEntry
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ def _score_open_task(entry: TaskIndexEntry) -> int:
         score += 40
     if entry.status == TaskStatus.IN_PROGRESS:
         score += 30
-    if entry.notes_by_type.get("decision", 0) > 0:
+    if entry.notes_by_type.get(NoteType.DECISION.value, 0) > 0:
         score += 15
     if entry.note_count >= 3:
         score += 15
