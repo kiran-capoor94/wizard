@@ -38,7 +38,9 @@ class RegistrationService:
     def initialize_config(self) -> str:
         config_path = self.WIZARD_HOME / "config.json"
         if not config_path.exists():
-            config_data = self._settings.model_dump(exclude={"name", "version", "db", "sentry"})
+            config_data = self._settings.model_dump(
+                mode="json", exclude={"name", "version", "db", "sentry"}
+            )
             config_data["modes"]["allowed"] = sorted(WIZARD_MODES)
             config_path.write_text(json.dumps(config_data, indent=2))
             return f"Created default config at {config_path}"
