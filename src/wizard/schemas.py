@@ -39,6 +39,9 @@ UTCDateTime = Annotated[
 ]
 
 
+SESSION_FIELD_MAX_CHARS = 2000
+
+
 class SessionState(BaseModel):
     """Structured session state written by session_end (M2)
     and read by resume_session (M3). Stored as JSON in

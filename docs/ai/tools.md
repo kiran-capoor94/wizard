@@ -335,8 +335,8 @@ None. Read-only.
 |---|---|---|---|
 | `task_id` | `int` | required | Task this note belongs to |
 | `note_type` | `NoteType` | required | `"investigation"` \| `"decision"` \| `"docs"` \| `"learnings"` \| `"session_summary"` \| `"failure"` |
-| `content` | `str` | required | Note body. PII scrubbed. Compressed to ≤1000 chars if longer. Hard cap: 100,000 chars. |
-| `mental_model` | `str \| None` | `None` | 2-3 sentence understanding snapshot. PII scrubbed. Compressed if >1000 chars. |
+| `content` | `str` | required | Note body. PII scrubbed, stored verbatim. Hard cap: 100,000 chars. |
+| `mental_model` | `str \| None` | `None` | 2-3 sentence understanding snapshot. PII scrubbed, stored verbatim. Truncated at 1,500 chars. |
 
 ### Outputs (`SaveNoteResponse`)
 
@@ -350,8 +350,7 @@ None. Read-only.
 
 - Inserts a `Note` row (or updates `mental_model` on existing if duplicate).
 - Calls `t_state_repo.on_note_saved(db, task_id, note_type, created_at)` — updates `TaskState.note_count`, `decision_count`, `last_note_at`.
-- PII scrubbed from `content` and `mental_model` before write.
-- Content >1000 chars is LLM-compressed (preserving file paths, function names, error messages).
+- PII scrubbed from `content` and `mental_model` before write; both are otherwise stored verbatim (no compression or paraphrasing).
 
 ### Errors
 

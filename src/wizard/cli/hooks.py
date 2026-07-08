@@ -6,9 +6,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from wizard.compression import compress as compress_text
 from wizard.config import settings
-from wizard.models import NoteType
+from wizard.models import NOTE_CONTENT_MAX_CHARS, NoteType
 from wizard.security import is_safe_session_id
 
 logger = logging.getLogger(__name__)
@@ -36,8 +35,9 @@ def run_stop_hook(agent_session_id: str, last_message: str) -> None:
         if task_id is None:
             return
 
-        compressed = compress_text(last_message)
-        _write_observation(db_path, task_id, wizard_session_id, compressed)
+        _write_observation(
+            db_path, task_id, wizard_session_id, last_message[:NOTE_CONTENT_MAX_CHARS]
+        )
     except Exception as e:
         logger.debug("hook: run_stop_hook failed: %s", e)
 

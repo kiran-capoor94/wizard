@@ -9,9 +9,11 @@ from wizard.cli.hooks import (
     _MIN_CONTENT_LEN,
     _resolve_active_task_id,
     _resolve_wizard_session_id,
+    _write_observation,
     run_stop_hook,
 )
 from wizard.cli.main import _extract_last_assistant_message
+from wizard.models import NOTE_CONTENT_MAX_CHARS
 
 
 @pytest.fixture
@@ -136,3 +138,63 @@ def test_run_stop_hook_ignores_short_messages(tmp_sessions_dir, tmp_path):
     with patch("wizard.cli.hooks._resolve_wizard_session_id") as mock_resolve:
         run_stop_hook("any_session", short)
         mock_resolve.assert_not_called()
+
+
+def test_run_stop_hook_truncates_oversized_message(tmp_sessions_dir, tmp_path):
+    """An assistant message longer than NOTE_CONTENT_MAX_CHARS must be truncated
+    before being written — this hook has no other size guard on stored content."""
+    session_dir = tmp_sessions_dir / "sess_big"
+    session_dir.mkdir(parents=True)
+    (session_dir / "wizard_id").write_text("1")
+
+    db_path = tmp_path / "wizard.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "CREATE TABLE note (id INTEGER PRIMARY KEY, note_type TEXT, content TEXT,"
+            " task_id INTEGER, session_id INTEGER, created_at TEXT, updated_at TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE task_state (task_id INTEGER PRIMARY KEY, note_count INTEGER,"
+            " observation_count INTEGER, last_note_at TEXT, last_touched_at TEXT, stale_days INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO note (task_id, session_id, created_at) VALUES (?, ?, ?)",
+            (7, 1, "2026-05-05T10:00:00"),
+        )
+        conn.execute("INSERT INTO task_state (task_id) VALUES (7)")
+        conn.commit()
+
+    oversized = "x" * (NOTE_CONTENT_MAX_CHARS + 500)
+
+    with patch("wizard.cli.hooks.settings") as mock_settings:
+        mock_settings.paths.sessions_dir = tmp_sessions_dir
+        mock_settings.db = str(db_path)
+        run_stop_hook("sess_big", oversized)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT content FROM note WHERE note_type = 'OBSERVATION'"
+        ).fetchone()
+    assert len(row[0]) == NOTE_CONTENT_MAX_CHARS
+
+
+def test_write_observation_truncated_content_stored_as_is(tmp_path):
+    """_write_observation itself performs no truncation — the caller is responsible."""
+    db_path = tmp_path / "wizard.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "CREATE TABLE note (id INTEGER PRIMARY KEY, note_type TEXT, content TEXT,"
+            " task_id INTEGER, session_id INTEGER, created_at TEXT, updated_at TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE task_state (task_id INTEGER PRIMARY KEY, note_count INTEGER,"
+            " observation_count INTEGER, last_note_at TEXT, last_touched_at TEXT, stale_days INTEGER)"
+        )
+        conn.execute("INSERT INTO task_state (task_id) VALUES (7)")
+        conn.commit()
+
+    _write_observation(db_path, task_id=7, session_id=1, content="already-capped content")
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute("SELECT content FROM note WHERE task_id = 7").fetchone()
+    assert row[0] == "already-capped content"

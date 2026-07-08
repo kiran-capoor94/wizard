@@ -1,4 +1,4 @@
-"""File compression and embedding backfill for wizard compress."""
+"""Embedding backfill for wizard."""
 
 from __future__ import annotations
 
@@ -8,64 +8,18 @@ import sqlite3 as _sqlite3
 from pathlib import Path
 
 import typer
-from rich import print as rprint
-from rich.console import Console
-from rich.panel import Panel
 
 try:
     import sqlite_vec as _sqlite_vec
 except ImportError:
     _sqlite_vec = None  # type: ignore[assignment]
 
-from wizard.compression import compress as _compress_text
 from wizard.config import settings
 from wizard.embedding import embed, serialize_float32
 
 logger = logging.getLogger(__name__)
 
 _BATCH = 50
-_console = Console()
-_err_console = Console(stderr=True)
-
-
-def run_compress_file(path: Path, *, inplace: bool) -> None:
-    """Compress a text file using Cavemem abbreviations."""
-    if not path.exists():
-        rprint(f"[red]File not found:[/red] {path}")
-        raise typer.Exit(1)
-    raw = path.read_bytes()
-    if b"\x00" in raw[:512]:
-        _err_console.print("[red]Error:[/red] Not a text file.")
-        raise typer.Exit(1)
-    original = raw.decode("utf-8", errors="replace")
-    if not original.strip():
-        typer.echo(original, nl=False)
-        _err_console.print("[dim]0 chars → 0 chars (0% reduction)[/dim]")
-        return
-
-    with _console.status(f"Compressing [bold]{path.name}[/bold]..."):
-        compressed = _compress_text(original)
-
-    orig_len, comp_len = len(original), len(compressed)
-    pct = round((1 - comp_len / orig_len) * 100) if orig_len > 0 else 0
-    if inplace:
-        backup = path.with_suffix(path.suffix + ".original")
-        backup.write_text(original)
-        path.write_text(compressed)
-        rprint(Panel(
-            f"  [green]✓[/green]  Backup → [dim]{backup.name}[/dim]\n"
-            f"  [green]✓[/green]  [bold]{orig_len:,}[/bold] →"
-            f" [bold]{comp_len:,}[/bold] chars"
-            f" ([green]{pct}% reduction[/green])",
-            title=f"[green]Compressed {path.name}[/green]",
-            border_style="green",
-        ))
-    else:
-        typer.echo(compressed, nl=False)
-        _err_console.print(
-            f"[dim]{orig_len:,} → {comp_len:,} chars"
-            f" ([green]{pct}% reduction[/green])[/dim]"
-        )
 
 
 def run_backfill() -> None:
