@@ -50,6 +50,59 @@ def _load_sqlite_vec(dbapi_conn, _connection_record) -> None:
 logger.info("Database engine created: %s", settings.db)
 
 
+_FTS_TABLES = (
+    ("note_fts", "content, note_type UNINDEXED", "note"),
+    ("session_fts", "summary", "wizardsession"),
+    ("meeting_fts", "content, title", "meeting"),
+    ("task_fts", "name", "task"),
+)
+
+_FTS_TRIGGER_COLUMNS = {
+    "note_fts": ("content", "note_type"),
+    "session_fts": ("summary",),
+    "meeting_fts": ("content", "title"),
+    "task_fts": ("name",),
+}
+
+
+def create_fts_schema(conn) -> None:
+    """Create the FTS5 search tables and their sync triggers.
+
+    Mirrors what the `a2b3c4d5e6f7`/`restore_fts_triggers` migrations build in
+    a real (migrated) database — used by the test suite's in-memory schema
+    setup, which builds tables from SQLModel.metadata.create_all() and so
+    never sees these raw-SQL virtual tables and triggers otherwise. Idempotent
+    (IF NOT EXISTS throughout) so it's safe to call against an already-migrated
+    engine too.
+    """
+    for fts_table, columns, base_table in _FTS_TABLES:
+        conn.execute(text(
+            f"CREATE VIRTUAL TABLE IF NOT EXISTS {fts_table} USING fts5("
+            f"{columns}, content='{base_table}', content_rowid='id')"
+        ))
+
+    for fts_table, _columns, base_table in _FTS_TABLES:
+        cols = _FTS_TRIGGER_COLUMNS[fts_table]
+        col_list = ", ".join(cols)
+        new_vals = ", ".join(f"new.{c}" for c in cols)
+        old_vals = ", ".join(f"old.{c}" for c in cols)
+        conn.execute(text(
+            f"CREATE TRIGGER IF NOT EXISTS {fts_table}_ai AFTER INSERT ON {base_table} BEGIN "
+            f"INSERT INTO {fts_table}(rowid, {col_list}) VALUES (new.id, {new_vals}); END"
+        ))
+        conn.execute(text(
+            f"CREATE TRIGGER IF NOT EXISTS {fts_table}_ad AFTER DELETE ON {base_table} BEGIN "
+            f"INSERT INTO {fts_table}({fts_table}, rowid, {col_list}) "
+            f"VALUES ('delete', old.id, {old_vals}); END"
+        ))
+        conn.execute(text(
+            f"CREATE TRIGGER IF NOT EXISTS {fts_table}_au AFTER UPDATE ON {base_table} BEGIN "
+            f"INSERT INTO {fts_table}({fts_table}, rowid, {col_list}) "
+            f"VALUES ('delete', old.id, {old_vals});"
+            f"INSERT INTO {fts_table}(rowid, {col_list}) VALUES (new.id, {new_vals}); END"
+        ))
+
+
 def create_vec_tables() -> None:
     try:
         with engine.connect() as conn:

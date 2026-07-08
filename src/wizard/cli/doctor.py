@@ -133,6 +133,39 @@ def check_skills_installed() -> tuple[bool, str]:
     )
 
 
+REQUIRED_FTS_TRIGGERS = {
+    "note_fts_ai", "note_fts_ad", "note_fts_au",
+    "session_fts_ai", "session_fts_ad", "session_fts_au",
+    "meeting_fts_ai", "meeting_fts_ad", "meeting_fts_au",
+    "task_fts_ai", "task_fts_ad", "task_fts_au",
+}
+
+
+def _check_fts_triggers() -> tuple[bool, str]:
+    """A batch_alter_table (SQLite's only way to drop/modify columns) recreates
+    the table under the hood and silently drops any trigger defined on it —
+    this already happened once to note/wizardsession's FTS sync triggers via
+    drop_synthesis_columns, leaving search() returning zero results for note
+    and session content with no error. Check they're still all present."""
+    db_path = Path(os.environ.get("WIZARD_DB", settings.db))
+    if not db_path.exists():
+        return True, "Database not found — skipping FTS trigger check"
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            triggers = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='trigger'"
+                ).fetchall()
+            }
+        missing = REQUIRED_FTS_TRIGGERS - triggers
+        if missing:
+            return False, f"Missing FTS sync triggers (search silently broken): {missing}"
+        return True, "All FTS sync triggers present"
+    except Exception as exc:
+        return False, f"Could not inspect triggers: {exc}"
+
+
 def _check_db_size() -> tuple[bool, str]:
     db_path = Path(os.environ.get("WIZARD_DB", settings.db))
     if not db_path.exists():
@@ -160,6 +193,7 @@ def run_checks(stop_on_failure: bool = True) -> list[tuple[str, bool, str]]:
         ("DB file exists", check_db_file),
         ("Config file", check_config_file),
         ("DB tables", check_db_tables),
+        ("FTS triggers", _check_fts_triggers),
         ("DB size", _check_db_size),
         ("Allowlist file", _check_allowlist_file),
         ("Agent registered", _check_agent_registrations),
