@@ -18,8 +18,8 @@ from rich.table import Table
 
 from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
-from wizard.cli.compress import run_backfill, run_compress_file
 from wizard.cli.doctor import db_is_healthy, doctor
+from wizard.cli.embeddings import run_backfill
 from wizard.cli.hooks import run_stop_hook
 from wizard.cli.vacuum import run_vacuum
 from wizard.cli.verify import verify
@@ -412,23 +412,10 @@ def vacuum() -> None:
     run_vacuum()
 
 
-@app.command()
-def compress(
-    path: Optional[Path] = typer.Argument(None, help="Text file to compress"),
-    inplace: bool = typer.Option(False, "--inplace", help="Overwrite file; saves .original backup"),
-    backfill: bool = typer.Option(False, "--backfill", help="Backfill embeddings for all notes"),
-) -> None:
-    """Compress a text file using Cavemem abbreviations, or backfill note embeddings."""
-    if backfill and path is not None:
-        rprint("[red]Error:[/red] --backfill and <path> are mutually exclusive.")
-        raise typer.Exit(1)
-    if not backfill and path is None:
-        rprint("[red]Error:[/red] Provide a [bold]<path>[/bold] or [bold]--backfill[/bold].")
-        raise typer.Exit(1)
-    if backfill:
-        run_backfill()
-        return
-    run_compress_file(path, inplace=inplace)  # type: ignore[arg-type]
+@app.command(name="backfill-embeddings")
+def backfill_embeddings() -> None:
+    """Backfill embeddings for all notes missing a vec_note_embeddings entry."""
+    run_backfill()
 
 
 @app.command()
