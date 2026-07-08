@@ -228,3 +228,9 @@ docs/superpowers/
 .worktrees/
 .serena/
 memory/
+
+# Generated artifacts
+.DS_Store
+test-results.txt
+*.html
+.superpowers/

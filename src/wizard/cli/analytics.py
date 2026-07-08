@@ -29,6 +29,26 @@ def query_compounding(db, start: datetime.date, end: datetime.date) -> float:
     return _repo.get_compounding_score(db, start, end)
 
 
+def query_harness_metrics(db, start: datetime.date, end: datetime.date) -> dict:
+    return {
+        "failure_note_load_rate": _repo.get_failure_note_load_rate(db, start, end),
+        "context_restoration_seconds": _repo.get_context_restoration_time(db, start, end),
+        "decision_note_coverage": _repo.get_decision_note_coverage(db, start, end),
+    }
+
+
+def _format_harness_section(harness: dict) -> list[str]:
+    failure_rate = harness.get("failure_note_load_rate", 0.0)
+    restoration = harness.get("context_restoration_seconds", 0.0)
+    coverage = harness.get("decision_note_coverage", 0.0)
+    return [
+        "Harness",
+        f"  FAILURE note load rate:{failure_rate:.0%}",
+        f"  Context restoration:   {restoration:.1f}s",
+        f"  Decision coverage:     {coverage:.0%}",
+    ]
+
+
 def _format_sessions_section(sessions: dict) -> list[str]:
     lines = [
         "Sessions",
@@ -90,6 +110,7 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
     notes = data.get("notes", {})
     tasks = data.get("tasks", {})
     compounding = data.get("compounding", 0.0)
+    harness = data.get("harness", {})
 
     lines = [f"Wizard Analytics  {start} \u2192 {end}", "=" * 50, ""]
     lines += _format_sessions_section(sessions)
@@ -105,6 +126,8 @@ def format_table(data: dict, start: datetime.date, end: datetime.date) -> str:
         "Compounding",
         f"  Sessions with context:{compounding:.0%}",
     ]
+    if harness:
+        lines += [""] + _format_harness_section(harness)
     health_messages = _format_health_messages(sessions, notes, tasks)
     if health_messages:
         lines += ["", "Health"]
@@ -161,23 +184,40 @@ def _build_tasks_col(tasks: dict, compounding: float) -> Text:
     return col
 
 
+def _build_harness_col(harness: dict) -> Text:
+    failure_rate = harness.get("failure_note_load_rate", 0.0)
+    restoration = harness.get("context_restoration_seconds", 0.0)
+    coverage = harness.get("decision_note_coverage", 0.0)
+    col = Text()
+    col.append(f"{failure_rate:.0%}", style="bold")
+    col.append(" failure load\n")
+    col.append(f"{restoration:.1f}s", style="bold")
+    col.append(" restore\n")
+    col.append(f"{coverage:.0%}", style="bold")
+    col.append(" decision cov")
+    return col
+
+
 def print_analytics(data: dict, start: datetime.date, end: datetime.date) -> None:
     """Render analytics to the terminal using a compact 3-column Rich layout."""
     sessions = data.get("sessions", {})
     notes = data.get("notes", {})
     tasks = data.get("tasks", {})
     compounding = data.get("compounding", 0.0)
+    harness = data.get("harness", {})
 
     session_summaries = notes.get("session_summaries", 0)
     sess_col = _build_sessions_col(sessions, session_summaries)
     notes_col = _build_notes_col(notes)
     tasks_col = _build_tasks_col(tasks, compounding)
+    harness_col = _build_harness_col(harness)
 
     grid = Table(box=None, show_header=True, header_style="bold", padding=(0, 3))
     grid.add_column("Sessions", min_width=18)
     grid.add_column("Notes", min_width=22)
     grid.add_column("Tasks", min_width=18)
-    grid.add_row(sess_col, notes_col, tasks_col)
+    grid.add_column("Harness", min_width=18)
+    grid.add_row(sess_col, notes_col, tasks_col, harness_col)
 
     console = Console()
     date_label = str(start) if start == end else f"{start} → {end}"
