@@ -94,15 +94,20 @@ One-to-one with `Task`. Updated synchronously by `TaskStateRepository` on note s
 
 ---
 
-## Note compression in `save_note`
+## Note storage in `save_note`
 
 | Condition | Behaviour |
 |---|---|
-| `len(content) > 100_000` | Raises `ToolError("Content exceeds 100k character limit")` — hard limit |
-| `len(content) > 1000` | Calls `_compress_note_content()` via `ctx.sample()` — LLM compression to <1000 chars |
-| `len(mental_model) > 1000` | Same compression applied to `mental_model` field |
+| `len(content) > NOTE_CONTENT_MAX_CHARS` (100,000) | Raises `ToolError` — hard limit |
+| `len(mental_model) > MENTAL_MODEL_MAX_CHARS` (1,500) | Truncated in `_prepare_note_fields` |
 
-**`_compress_note_content()` prompt contract**: preserve all file paths, function names, line numbers, error messages, decisions, and technical specifics exactly; remove filler and redundant phrasing only. Output truncated to 1000 chars if LLM returns more.
+Content is scrubbed for PII and stored **verbatim** otherwise — no compression or
+paraphrasing is applied. A prior deterministic regex compressor was removed after
+it silently corrupted stored text (mishandled multi-segment dotted tokens like
+version strings, ate whitespace adjacent to protected spans). A verified,
+LLM-based compaction layer — preserving file paths, function names, error
+messages, and other technical specifics exactly, gated on a byte-for-byte
+verification pass — is a candidate follow-up, not yet built.
 
 **Note deduplication**: SHA-256 hash of clean content stored as `synthesis_content_hash`. Duplicate detected via `NoteRepository.get_by_content_hash()`. If duplicate exists and new note has a `mental_model` but existing does not, the `mental_model` is patched onto the existing note; `SaveNoteResponse.was_duplicate = True` returned.
 
