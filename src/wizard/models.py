@@ -4,7 +4,19 @@ from enum import Enum
 
 from pydantic import ConfigDict, field_validator
 from sqlalchemy import Column, ForeignKey, Index, Integer, Text
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, Relationship, SQLModel
+
+
+def _value_enum(enum_cls: type[Enum]) -> SAEnum:
+    """SQLAlchemy Enum type that binds/reads by the member's .value, not its
+    .name. SQLAlchemy's default Enum column maps by .name — for a member
+    like TaskStatus.TODO = "todo" that means it silently binds/reads the
+    string "TODO", not "todo". Every filter in this codebase (and every row
+    written before this fix, and the CHECK-constraint-era migrations) uses
+    the lowercase .value, so without this every status/priority/category
+    written through the ORM was invisible to those filters."""
+    return SAEnum(enum_cls, values_callable=lambda x: [e.value for e in x])
 
 
 class TimestampMixin(SQLModel):
@@ -75,6 +87,15 @@ class NoteType(str, Enum):
     OBSERVATION = "OBSERVATION"
 
 
+class NoteStatus(str, Enum):
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    CONTRADICTED = "contradicted"
+    ARCHIVED = "archived"
+    INVALID = "invalid"
+    UNCLASSIFIED = "unclassified"
+
+
 class MeetingTasks(SQLModel, table=True):
     meeting_id: int = Field(foreign_key="meeting.id", primary_key=True)
     task_id: int = Field(foreign_key="task.id", primary_key=True)
@@ -84,9 +105,15 @@ class Task(TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str
     due_date: datetime.datetime | None = None
-    priority: TaskPriority = TaskPriority.MEDIUM
-    category: TaskCategory = TaskCategory.ISSUE
-    status: TaskStatus = TaskStatus.TODO
+    priority: TaskPriority = Field(
+        default=TaskPriority.MEDIUM, sa_column=Column(_value_enum(TaskPriority), nullable=False)
+    )
+    category: TaskCategory = Field(
+        default=TaskCategory.ISSUE, sa_column=Column(_value_enum(TaskCategory), nullable=False)
+    )
+    status: TaskStatus = Field(
+        default=TaskStatus.TODO, sa_column=Column(_value_enum(TaskStatus), nullable=False)
+    )
     meetings: list["Meeting"] = Relationship(
         back_populates="tasks", link_model=MeetingTasks
     )
@@ -109,7 +136,10 @@ class Meeting(TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str
     content: str
-    category: MeetingCategory = MeetingCategory.GENERAL
+    category: MeetingCategory = Field(
+        default=MeetingCategory.GENERAL,
+        sa_column=Column(_value_enum(MeetingCategory), nullable=False),
+    )
     summary: str | None = None
     tasks: list[Task] = Relationship(back_populates="meetings", link_model=MeetingTasks)
     source_id: str | None = Field(
@@ -170,6 +200,14 @@ class WizardSession(TimestampMixin, table=True):
         default=None,
         description="Skill name of the active mode for this session, e.g. 'socratic-mentor'.",
     )
+    pid: int | None = Field(
+        default=None,
+        description=(
+            "OS pid of the wizard-server process that created this session. "
+            "Used by SessionCloser to detect a still-live concurrent session "
+            "before synthetically auto-closing it."
+        ),
+    )
     artifact_id: str | None = Field(
         default_factory=lambda: str(_uuid.uuid4()), unique=True, index=True
     )
@@ -180,7 +218,7 @@ class WizardSession(TimestampMixin, table=True):
 
 class Note(TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    note_type: NoteType = Field(index=True)
+    note_type: NoteType = Field(sa_column=Column(_value_enum(NoteType), nullable=False, index=True))
     content: str
     mental_model: str | None = Field(
         default=None,
@@ -199,8 +237,9 @@ class Note(TimestampMixin, table=True):
     content_hash: str | None = Field(default=None, index=True)
     # Conflict / lifecycle state
     supersedes_note_id: int | None = Field(default=None)
-    # 'active' | 'superseded' | 'contradicted' | 'archived' | 'invalid' | 'unclassified'
-    status: str = Field(default="active")
+    status: NoteStatus = Field(
+        default=NoteStatus.ACTIVE, sa_column=Column(_value_enum(NoteStatus), nullable=False)
+    )
     reference_count: int = Field(default=0)
     session: WizardSession | None = Relationship(back_populates="notes")
 

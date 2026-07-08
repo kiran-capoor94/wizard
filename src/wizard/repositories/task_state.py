@@ -155,11 +155,17 @@ class TaskStateRepository:
         staleness rather than the value frozen at last note-save.
 
         Uses a single bulk UPDATE via SQLite's julianday() to avoid loading
-        all TaskState rows into Python objects."""
+        all TaskState rows into Python objects.
+
+        SQLite's julianday('now') is UTC, but last_touched_at is stamped with
+        local time everywhere else in this module — mixing the two skews
+        stale_days by the server's UTC offset. Pass local now() explicitly
+        instead of relying on SQLite's 'now'."""
+        now_literal = _dt.datetime.now().isoformat(sep=" ")
         db.execute(
             _sql_update(TaskState).values(
                 stale_days=func.cast(
-                    func.julianday("now") - func.julianday(TaskState.last_touched_at),
+                    func.julianday(now_literal) - func.julianday(TaskState.last_touched_at),
                     Integer,
                 )
             )

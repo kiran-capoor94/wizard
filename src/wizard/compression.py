@@ -112,15 +112,30 @@ def compress(text: str) -> str:
     Splits text on protected regions (code, paths, URLs, identifiers),
     compresses only the prose segments, then re-joins. Truncates at a
     word boundary if the result exceeds _CHAR_LIMIT.
+
+    Truncation stops adding segments once the limit is reached rather than
+    slicing the final joined string blindly — a protected segment (e.g. a
+    fenced code block) is only ever included whole or dropped entirely,
+    never cut mid-way, so the trailing word-boundary trim below always lands
+    inside prose, not inside a code fence or URL.
     """
     parts = _PROTECTED.split(text)
     protected = _PROTECTED.findall(text)
 
     compressed_parts: list[str] = []
+    total_len = 0
     for i, part in enumerate(parts):
-        compressed_parts.append(_compress_prose(part))
+        compressed = _compress_prose(part)
+        compressed_parts.append(compressed)
+        total_len += len(compressed)
+        if total_len > _CHAR_LIMIT:
+            break
         if i < len(protected):
-            compressed_parts.append(protected[i])
+            segment = protected[i]
+            if total_len + len(segment) > _CHAR_LIMIT:
+                break
+            compressed_parts.append(segment)
+            total_len += len(segment)
 
     result = "".join(compressed_parts)
     if len(result) <= _CHAR_LIMIT:

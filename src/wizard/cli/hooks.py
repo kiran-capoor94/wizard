@@ -9,6 +9,7 @@ from pathlib import Path
 from wizard.compression import compress as compress_text
 from wizard.config import settings
 from wizard.models import NoteType
+from wizard.security import is_safe_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,9 @@ _MIN_CONTENT_LEN = 50  # ignore trivially short messages
 def run_stop_hook(agent_session_id: str, last_message: str) -> None:
     """Write last assistant message as OBSERVATION note. <150ms, no LLM."""
     if len(last_message) < _MIN_CONTENT_LEN:
+        return
+    if not is_safe_session_id(agent_session_id):
+        logger.debug("hook: unsafe agent_session_id %r — ignoring", agent_session_id)
         return
     try:
         wizard_session_id = _resolve_wizard_session_id(agent_session_id)

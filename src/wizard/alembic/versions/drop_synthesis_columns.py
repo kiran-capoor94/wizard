@@ -37,4 +37,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    pass
+    raise NotImplementedError(
+        "drop_synthesis_columns is irreversible: the dropped columns and their "
+        "data are gone. Restore from a backup taken before this migration ran."
+    )

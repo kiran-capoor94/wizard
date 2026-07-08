@@ -17,9 +17,9 @@ async def test_session_end_twice(mcp_client):
     note_id_1 = r1.structured_content["note_id"]
     assert note_id_1 is not None
 
-    # Second end on same session -- documents current behaviour
-    # (currently succeeds and creates a second summary note)
+    # Second end on the same session must be rejected, not silently create a
+    # duplicate summary note (closed_by is already set from the first call).
     end_args["summary"] = "Second end"
     r2 = await mcp_client.call_tool("session_end", end_args)
-    assert not r2.is_error, r2
-    assert r2.structured_content["note_id"] != note_id_1
+    assert r2.is_error, r2
+    assert "already closed" in str(r2.content)

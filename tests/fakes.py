@@ -50,21 +50,3 @@ class FakeContext:
         if self.sample_error is not None:
             raise self.sample_error
         return self.sample_result
-
-
-class FakeSessionCloser:
-    """Fake SessionCloser that does nothing."""
-
-    async def close_recent_abandoned(self, db, current_session_id: int) -> list:
-        return []
-
-    async def close_abandoned_background(self, current_session_id: int) -> None:
-        pass
-
-    async def _close_one(self, db, session):
-        from wizard.schemas import ClosedSessionSummary
-        return ClosedSessionSummary(
-            session_id=session.id, summary="fake", closed_via="synthetic",
-            task_ids=[], note_count=0,
-        )
-

@@ -1,23 +1,47 @@
 """Shared fixtures for behavioural testing."""
 
-from collections.abc import AsyncGenerator, Generator
-from contextlib import ExitStack, contextmanager
-from typing import Any
-from unittest.mock import patch
+import os
+from pathlib import Path
 
-import pytest
-from fastmcp.client import Client
-from sqlalchemy import text
-from sqlmodel import Session, SQLModel, create_engine
+# Must run before any `wizard.*` import below (including transitively, e.g.
+# `wizard.repositories` -> `wizard.database` -> `wizard.config`) — Settings()
+# reads WIZARD_CONFIG_FILE once at import time, and wizard.database.engine is
+# a module-level singleton built from settings.db right then. Without this,
+# a handful of scenario tests call get_session() directly (bypassing the
+# per-test mcp_client patching below) and land on the real
+# ~/.wizard/wizard.db, writing throwaway session/tool-call rows into
+# whatever personal database happens to be configured on the machine
+# running the suite.
+os.environ.setdefault(
+    "WIZARD_CONFIG_FILE", str(Path(__file__).parent / "test_config.json")
+)
 
-from wizard.repositories import (
+from collections.abc import AsyncGenerator, Generator  # noqa: E402
+from contextlib import ExitStack, contextmanager  # noqa: E402
+from typing import Any  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+
+import pytest  # noqa: E402
+from fastmcp.client import Client  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
+
+from wizard.database import run_migrations as _run_migrations  # noqa: E402
+from wizard.repositories import (  # noqa: E402
     MeetingRepository,
     NoteRepository,
     SessionRepository,
     TaskRepository,
     TaskStateRepository,
 )
-from wizard.security import SecurityService
+from wizard.security import SecurityService  # noqa: E402
+
+# The handful of tests that call get_session() directly share this one
+# process-wide in-memory engine (same as they always implicitly shared
+# whatever `wizard.database.engine` pointed to) — run the real migration
+# chain once so it has the full schema, including the FTS5 virtual tables
+# that plain SQLModel.metadata.create_all() doesn't know how to create.
+_run_migrations()
 
 # ---------------------------------------------------------------------------
 # Database

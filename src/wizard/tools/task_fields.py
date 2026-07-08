@@ -13,6 +13,28 @@ from ..security import SecurityService
 
 logger = logging.getLogger(__name__)
 
+_STATUS_ALIASES: dict[str, str] = {
+    "completed": "done",
+    "complete": "done",
+    "finish": "done",
+    "finished": "done",
+    "open": "todo",
+    "pending": "todo",
+    "wip": "in_progress",
+    "doing": "in_progress",
+    "inactive": "archived",
+}
+
+
+def normalize_status(v: str) -> str:
+    """Map a status string (alias or case variant) to its canonical
+    TaskStatus value. Lowercases both before AND after the alias lookup —
+    TaskStatus values are lowercase, so a case variant of a real value
+    (e.g. "Done", "TODO") has no alias entry and must fall through to its
+    lowered form, not its original case, or it still fails enum validation."""
+    lowered = v.lower()
+    return _STATUS_ALIASES.get(lowered, lowered)
+
 
 class _ConfirmDone(BaseModel):
     confirmed: bool

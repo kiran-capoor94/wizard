@@ -16,9 +16,17 @@ def render() -> None:
     st.title("Tasks")
 
     col1, col2, col3 = st.columns([2, 2, 1])
-    status_filter = col1.selectbox("Status", _STATUS_OPTIONS)
-    source_filter = col2.text_input("Source type", placeholder="JIRA, NOTION…")
+    # Explicit keys so Reset can actually clear them — without a key, a widget's
+    # value lives in Streamlit's own per-widget state and st.rerun() alone
+    # (the previous implementation) leaves it completely untouched.
+    status_filter = col1.selectbox("Status", _STATUS_OPTIONS, key="tasks_status_filter")
+    source_filter = col2.text_input(
+        "Source type", placeholder="JIRA, NOTION…", key="tasks_source_filter"
+    )
     if col3.button("Reset"):
+        st.session_state.pop("tasks_status_filter", None)
+        st.session_state.pop("tasks_source_filter", None)
+        st.session_state["tasks_offset"] = 0
         st.rerun()
 
     if "tasks_offset" not in st.session_state:

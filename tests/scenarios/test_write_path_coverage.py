@@ -116,29 +116,32 @@ async def test_jira_upsert_path_pseudonymises_name(mcp_client, security_with_sto
 
 
 @pytest.mark.asyncio
-async def test_save_all_inserts_multiple_notes_in_one_flush(mcp_client, seed_task):
+async def test_save_all_inserts_multiple_notes_in_one_flush(mcp_client, seed_task, db_session):
     """save_all must persist N notes and return them all with assigned IDs."""
     task = await seed_task(name="Batch insert task")
 
-    with get_session() as db:
-        session = WizardSession()
-        db.add(session)
-        db.flush()
-        db.refresh(session)
+    # mcp_client routes tool calls through db_session (see conftest._GET_SESSION_TARGETS),
+    # so seed_task's task lives there — using the real get_session() here would open a
+    # second, unrelated engine where task.id doesn't exist and silently orphan the FK.
+    db = db_session
+    session = WizardSession()
+    db.add(session)
+    db.flush()
+    db.refresh(session)
 
-        notes = [
-            Note(
-                note_type=NoteType.INVESTIGATION,
-                content=f"Note {i}",
-                task_id=task.id,
-                session_id=session.id,
-            )
-            for i in range(5)
-        ]
-        repo = NoteRepository()
-        saved = repo.save_all(db, notes)
-        assert len(saved) == 5
-        assert all(n.id is not None for n in saved)
+    notes = [
+        Note(
+            note_type=NoteType.INVESTIGATION,
+            content=f"Note {i}",
+            task_id=task.id,
+            session_id=session.id,
+        )
+        for i in range(5)
+    ]
+    repo = NoteRepository()
+    saved = repo.save_all(db, notes)
+    assert len(saved) == 5
+    assert all(n.id is not None for n in saved)
 
 
 @pytest.mark.asyncio

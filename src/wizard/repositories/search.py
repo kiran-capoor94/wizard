@@ -22,7 +22,8 @@ _ALPHA = 0.5  # weight for BM25; (1-_ALPHA) for cosine
 
 def bm25_score(rank: float) -> float:
     """Convert FTS5 rank (negative, lower=better) to 0-1 score (higher=better)."""
-    return 1.0 / (1.0 - rank)
+    strength = max(0.0, -rank)
+    return strength / (1.0 + strength)
 
 
 def cosine_score(distance: float) -> float:
@@ -90,7 +91,7 @@ class SearchRepository:
         cosine_scores: dict[int, float] = {}
         if query_vec is not None:
             blob = serialize_float32(query_vec)
-            with contextlib.suppress(Exception):
+            try:
                 vec_rows = db.execute(  # type: ignore[call-overload]
                     text(
                         "SELECT note_id, distance "
@@ -103,6 +104,10 @@ class SearchRepository:
                 cosine_scores = {
                     row["note_id"]: cosine_score(row["distance"]) for row in vec_rows
                 }
+            except Exception as e:
+                logger.warning(
+                    "Cosine search failed, falling back to BM25-only: %s", e
+                )
 
         # BM25 anchors candidate set; cosine re-ranks but cannot surface new notes
         out = []

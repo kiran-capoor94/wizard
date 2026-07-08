@@ -330,6 +330,7 @@ def analytics(
     day: bool = typer.Option(False, "--day", help="Show today's analytics"),
     week: bool = typer.Option(False, "--week", help="Show last 7 days (default)"),
     month: bool = typer.Option(False, "--month", help="Show last 30 days"),
+    year: bool = typer.Option(False, "--year", help="Show last 365 days"),
     from_date: Optional[str] = typer.Option(
         None, "--from", help="Start date YYYY-MM-DD"
     ),
@@ -338,7 +339,7 @@ def analytics(
     """Show wizard usage analytics."""
     today = datetime.date.today()
 
-    options_set = sum([day, week, month, bool(from_date or to_date)])
+    options_set = sum([day, week, month, year, bool(from_date or to_date)])
     if options_set > 1:
         typer.echo(
             "Options --day, --week, --month, --year, --from/--to are mutually exclusive.",
@@ -360,14 +361,14 @@ def analytics(
         except ValueError as exc:
             typer.echo(f"Invalid date format: {exc}", err=True)
             raise typer.Exit(1) from exc
-    elif week:
-        start = today - datetime.timedelta(days=7)
-        end = today
     elif month:
         start = today - datetime.timedelta(days=30)
         end = today
-    else:  # year
+    elif year:
         start = today - datetime.timedelta(days=365)
+        end = today
+    else:  # week is the default (matches --week's help text)
+        start = today - datetime.timedelta(days=7)
         end = today
 
     db_path = Path(os.environ.get("WIZARD_DB", settings.db))

@@ -1,7 +1,10 @@
 import hashlib
+import hmac
 import logging
 import re
+import secrets
 from collections.abc import Callable
+from pathlib import Path
 
 import phonenumbers
 from faker import Faker
@@ -14,6 +17,20 @@ from .database import engine as _wizard_engine
 from .models import PseudonymMap
 
 logger = logging.getLogger(__name__)
+
+
+_UNSAFE_SESSION_ID_CHARS = frozenset("/\\:")
+
+
+def is_safe_session_id(sid: str) -> bool:
+    """Return True if sid is safe to use as a filesystem path component.
+
+    Rejects path traversal sequences and empty strings; allows UUIDs and
+    agent-generated IDs like 'session-2026-04-22-gemini-studio-free-tier'.
+    Shared by session_tools (MCP tool input) and cli/hooks.py (hook-JSON
+    input) — both use agent_session_id the same way, as a path component.
+    """
+    return bool(sid) and ".." not in sid and not any(c in sid for c in _UNSAFE_SESSION_ID_CHARS)
 
 
 _HONORIFICS = r"(?:Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Dame|Rev)\.?"
@@ -68,7 +85,9 @@ class HeuristicNameFinder:
         spans = []
         for m in self._HONORIFIC_RE.finditer(text):
             parts = [g for g in m.groups()[1:] if g]  # skip the honorific itself
-            if any(p in _BLOCKLIST for p in parts):
+            # Only bail if EVERY captured part is a blocklisted common word — a single
+            # collision (e.g. "May" in "Dr. May Chen") shouldn't erase the whole name.
+            if parts and all(p in _BLOCKLIST for p in parts):
                 continue
             matched = m.group(0)
             if self._is_allowlisted(matched):
@@ -82,7 +101,7 @@ class HeuristicNameFinder:
             groups = [g for g in m.groups() if g]
             if not groups:
                 continue
-            if any(p in _BLOCKLIST for p in groups):
+            if all(p in _BLOCKLIST for p in groups):
                 continue
             name = " ".join(groups)
             name_start = m.start(1)
@@ -107,6 +126,38 @@ class HeuristicNameFinder:
         return result
 
 
+_SALT_PATH = Path.home() / ".wizard" / "pseudonym_salt"
+_salt_cache: bytes | None = None
+
+
+def _get_or_create_salt() -> bytes:
+    """Per-install secret mixed into pseudonym hashes via HMAC.
+
+    A bare sha256(entity_type:name) hash is a dictionary-attack target — anyone
+    with DB access can hash every name in a directory and match it against
+    original_hash, fully reversing the "anonymization". HMAC with a secret
+    that never leaves this machine closes that off.
+    """
+    global _salt_cache
+    if _salt_cache is not None:
+        return _salt_cache
+    try:
+        _SALT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if _SALT_PATH.exists():
+            _salt_cache = _SALT_PATH.read_bytes()
+        else:
+            _salt_cache = secrets.token_bytes(32)
+            _SALT_PATH.write_bytes(_salt_cache)
+    except OSError as e:
+        logger.warning(
+            "Could not persist pseudonym salt at %s (%s); using a process-local "
+            "salt — pseudonyms will not be stable across restarts.",
+            _SALT_PATH, e,
+        )
+        _salt_cache = secrets.token_bytes(32)
+    return _salt_cache
+
+
 class PseudonymStore:
     """Persistent PII-to-fake-value mapping backed by the pseudonym_map SQLite table.
 
@@ -119,7 +170,7 @@ class PseudonymStore:
 
     def get_or_create(self, original: str, entity_type: str, generator: Callable[[], str]) -> str:
         key = f"{entity_type}:{original.strip().lower()}"
-        original_hash = hashlib.sha256(key.encode()).hexdigest()
+        original_hash = hmac.new(_get_or_create_salt(), key.encode(), hashlib.sha256).hexdigest()
         try:
             with Session(self._engine) as session:
                 existing = session.exec(
@@ -161,13 +212,13 @@ class SecurityService:
     PATTERNS: list[tuple[str, str, str]] = [
         ("NHS_ID", r"\b\d{3}\s\d{3}\s\d{4}\b", "NHS_ID"),
         ("NI_NUMBER", r"\b[A-Z]{2}\d{6}[A-D]\b", "NI_NUMBER"),
-        ("EMAIL", r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b", "EMAIL"),
+        ("EMAIL", r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b", "EMAIL"),
         (
             "POSTCODE",
             r"\b([Gg][Ii][Rr]\s?0[Aa]{2}|[A-Za-z]{1,2}\d{1,2}[A-Za-z]?\s?\d[A-Za-z]{2})\b",
             "POSTCODE",
         ),
-        ("SECRET", r"(Bearer\s[A-Za-z0-9\-._~+/]+=*|sk-[A-Za-z0-9]{20,})", "SECRET"),
+        ("SECRET", r"((?i:Bearer)\s[A-Za-z0-9\-._~+/]+=*|sk-[A-Za-z0-9]{20,})", "SECRET"),
     ]
 
     def __init__(
@@ -243,7 +294,6 @@ class SecurityService:
         counters: dict[str, int],
     ) -> str:
         name_spans = self._name_finder.find_spans(text)
-        replacements: list[tuple[str, str]] = []
         for _, _, matched in name_spans:
             if matched in original_to_stub:
                 continue
@@ -253,10 +303,7 @@ class SecurityService:
                 counters["PERSON"] = counters.get("PERSON", 0) + 1
                 fake = f"[PERSON_{counters['PERSON']}]"
             original_to_stub[matched] = fake
-            replacements.append((matched, fake))
-        for original, fake in sorted(replacements, key=lambda x: len(x[0]), reverse=True):
-            text = text.replace(original, fake)
-        return text
+        return self._apply_spans(text, name_spans, original_to_stub)
 
     def _scrub_phones(
         self,
@@ -265,26 +312,51 @@ class SecurityService:
         counters: dict[str, int],
         regions: list[str | None],
     ) -> str:
-        replacements: list[tuple[str, str]] = []
+        spans: list[tuple[int, int, str]] = []
         for region in regions:
             try:
                 for match in phonenumbers.PhoneNumberMatcher(text, region):
                     raw = match.raw_string
                     if any(p.search(raw) for p in self._allowlist_patterns):
                         continue
-                    if raw in original_to_stub:
-                        continue
-                    counters["PHONE"] = counters.get("PHONE", 0) + 1
-                    stub = f"[PHONE_{counters['PHONE']}]"
-                    original_to_stub[raw] = stub
-                    replacements.append((raw, stub))
+                    spans.append((match.start, match.end, raw))
             except phonenumbers.NumberParseException as e:
                 logger.debug("Phone matching failed for region %s: %s", region, e)
                 continue
 
-        # Replace longest matches first to avoid partial substitutions
-        for original, stub in sorted(
-            replacements, key=lambda x: len(x[0]), reverse=True
-        ):
-            text = text.replace(original, stub)
-        return text
+        # Overlapping matches can occur when multiple regions match the same or
+        # nested substrings — dedupe to non-overlapping spans in position order,
+        # longest first, same as HeuristicNameFinder._deduplicate.
+        spans.sort(key=lambda s: (s[0], -(s[1] - s[0])))
+        deduped: list[tuple[int, int, str]] = []
+        last_end = -1
+        for start, end, raw in spans:
+            if start >= last_end:
+                deduped.append((start, end, raw))
+                last_end = end
+
+        for _, _, raw in deduped:
+            if raw not in original_to_stub:
+                counters["PHONE"] = counters.get("PHONE", 0) + 1
+                original_to_stub[raw] = f"[PHONE_{counters['PHONE']}]"
+        return self._apply_spans(text, deduped, original_to_stub)
+
+    @staticmethod
+    def _apply_spans(
+        text: str,
+        spans: list[tuple[int, int, str]],
+        original_to_stub: dict[str, str],
+    ) -> str:
+        """Rebuild `text`, substituting each (start, end, matched) span with its
+        stub by position. A global str.replace(matched, stub) — the previous
+        approach — corrupts unrelated text: replacing "Ann" anywhere mangles
+        "Announcement" into "[PERSON_1]ouncement". Spans are non-overlapping
+        and in position order (guaranteed by the callers' dedup step)."""
+        pieces = []
+        cursor = 0
+        for start, end, matched in spans:
+            pieces.append(text[cursor:start])
+            pieces.append(original_to_stub[matched])
+            cursor = end
+        pieces.append(text[cursor:])
+        return "".join(pieces)
