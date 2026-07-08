@@ -12,7 +12,6 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import text
 from sqlmodel import Session
 
-from ..compression import compress
 from ..config import settings
 from ..database import get_session
 from ..deps import (
@@ -209,13 +208,12 @@ def _scrub_session_state(
     """Scrub PII from session state fields and return state + clean intent."""
 
     state = SessionState(
-        intent=compress(_scrub_field(sec, intent, "session intent") or ""),
+        intent=_scrub_field(sec, intent, "session intent") or "",
         working_set=working_set,
-        state_delta=compress(_scrub_field(sec, state_delta, "state_delta") or ""),
-        open_loops=[compress(_scrub_field(sec, loop, "open_loop") or loop) for loop in open_loops],
+        state_delta=_scrub_field(sec, state_delta, "state_delta") or "",
+        open_loops=[_scrub_field(sec, loop, "open_loop") or loop for loop in open_loops],
         next_actions=[
-            compress(_scrub_field(sec, action, "next_action") or action)
-            for action in next_actions
+            _scrub_field(sec, action, "next_action") or action for action in next_actions
         ],
         closure_status=closure_status,
         tool_registry=tool_registry,
