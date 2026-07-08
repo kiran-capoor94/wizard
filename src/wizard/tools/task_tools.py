@@ -15,6 +15,8 @@ from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo,
 from ..embedding import embed, serialize_float32
 from ..mcp_instance import mcp
 from ..models import (
+    MENTAL_MODEL_MAX_CHARS,
+    NOTE_CONTENT_MAX_CHARS,
     Note,
     NoteType,
     Task,
@@ -196,7 +198,7 @@ def _prepare_note_fields(
         mm_scrub = sec.scrub(mental_model)
         if mm_scrub.was_modified:
             logger.info("PII scrubbed from mental_model")
-        mental_model = mm_scrub.clean
+        mental_model = mm_scrub.clean[:MENTAL_MODEL_MAX_CHARS]
     content_hash = hashlib.sha256(clean.encode()).hexdigest()
     return clean, mental_model, content_hash
 
@@ -315,10 +317,10 @@ async def save_note(
             task_db_id: int = task.id
 
         # Phase 2: validate size limit.
-        if len(content) > 100_000:
-            raise ToolError("Content exceeds 100k character limit")
+        if len(content) > NOTE_CONTENT_MAX_CHARS:
+            raise ToolError(f"Content exceeds {NOTE_CONTENT_MAX_CHARS:,} character limit")
 
-        # Phase 3: compress, scrub, dedup, and write.
+        # Phase 3: scrub, dedup, and write.
         clean, mental_model, content_hash = _prepare_note_fields(
             sec, content, mental_model
         )

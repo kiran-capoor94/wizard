@@ -32,6 +32,7 @@ from ..repositories import (
     find_latest_session_with_notes,
 )
 from ..schemas import (
+    SESSION_FIELD_MAX_CHARS,
     NoteDetail,
     ResumedTaskNotes,
     ResumeSessionResponse,
@@ -205,15 +206,21 @@ def _scrub_session_state(
     closure_status: Literal["clean", "interrupted", "blocked"],
     tool_registry: str | None,
 ) -> tuple[SessionState, str]:
-    """Scrub PII from session state fields and return state + clean intent."""
+    """Scrub PII from session state fields, cap length, and return state + clean intent."""
 
     state = SessionState(
-        intent=_scrub_field(sec, intent, "session intent") or "",
+        intent=(_scrub_field(sec, intent, "session intent") or "")[:SESSION_FIELD_MAX_CHARS],
         working_set=working_set,
-        state_delta=_scrub_field(sec, state_delta, "state_delta") or "",
-        open_loops=[_scrub_field(sec, loop, "open_loop") or loop for loop in open_loops],
+        state_delta=(_scrub_field(sec, state_delta, "state_delta") or "")[
+            :SESSION_FIELD_MAX_CHARS
+        ],
+        open_loops=[
+            (_scrub_field(sec, loop, "open_loop") or loop)[:SESSION_FIELD_MAX_CHARS]
+            for loop in open_loops
+        ],
         next_actions=[
-            _scrub_field(sec, action, "next_action") or action for action in next_actions
+            (_scrub_field(sec, action, "next_action") or action)[:SESSION_FIELD_MAX_CHARS]
+            for action in next_actions
         ],
         closure_status=closure_status,
         tool_registry=tool_registry,

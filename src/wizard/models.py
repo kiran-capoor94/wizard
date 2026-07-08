@@ -7,6 +7,9 @@ from sqlalchemy import Column, ForeignKey, Index, Integer, Text
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, Relationship, SQLModel
 
+NOTE_CONTENT_MAX_CHARS = 100_000
+MENTAL_MODEL_MAX_CHARS = 1500
+
 
 def _value_enum(enum_cls: type[Enum]) -> SAEnum:
     """SQLAlchemy Enum type that binds/reads by the member's .value, not its
@@ -224,7 +227,7 @@ class Note(TimestampMixin, table=True):
         default=None,
         description=(
             "1-2 sentence causal abstraction written by the engineer. "
-            "Soft cap 1500 chars at the application display layer."
+            f"Truncated to {MENTAL_MODEL_MAX_CHARS} chars in save_note's _prepare_note_fields."
         ),
     )
     session_id: int | None = Field(default=None, foreign_key="wizardsession.id")

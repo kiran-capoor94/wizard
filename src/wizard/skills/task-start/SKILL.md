@@ -47,7 +47,7 @@ what specific, observable outcome confirms it is done?
 - If you cannot state it: ask the user before proceeding.
 
 Examples of good success criteria:
-- "The test `test_note_compression.py` passes and note content in DB is <= 1000 chars"
+- "The test `test_save_note.py` passes and note content in the DB matches the scrubbed input verbatim"
 - "Running `wizard search 'JWT failure'` returns the note written in this session"
 - "The dashboard loads at localhost:8501 showing synthesis health for last 10 sessions"
 
