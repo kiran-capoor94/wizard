@@ -10,7 +10,6 @@ from fastmcp.exceptions import ToolError
 from pydantic import BeforeValidator
 from sqlalchemy import text as _sa_text
 
-from ..compression import compress as compress_text
 from ..database import engine, get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
 from ..embedding import embed, serialize_float32
@@ -188,10 +187,7 @@ def _prepare_note_fields(
     content: str,
     mental_model: str | None,
 ) -> tuple[str, str | None, str]:
-    """Compress, scrub PII, and hash content. Returns (clean, mental_model, hash)."""
-    content = compress_text(content)
-    if mental_model is not None:
-        mental_model = compress_text(mental_model)
+    """Scrub PII and hash content. Returns (clean, mental_model, hash)."""
     scrub_result = sec.scrub(content)
     if scrub_result.was_modified:
         logger.info("PII scrubbed from note content")
