@@ -31,24 +31,30 @@ def upgrade() -> None:
                 sa.text(f"UPDATE {table} SET artifact_id = :aid WHERE id = :id"),
                 {"aid": str(uuid.uuid4()), "id": row_id},
             )
-    # Backfill note.artifact_id from existing FKs (task takes priority over session over meeting)
+    # Backfill note.artifact_id from existing FKs (task takes priority over session over meeting).
+    # Each guarded with an EXISTS check so an orphaned FK (task_id/session_id/meeting_id
+    # pointing at a deleted row — FK enforcement was off) doesn't stamp artifact_type
+    # without a matching artifact_id.
     conn.execute(sa.text("""
         UPDATE note SET
             artifact_id = (SELECT artifact_id FROM task WHERE task.id = note.task_id),
             artifact_type = 'task'
         WHERE task_id IS NOT NULL AND artifact_id IS NULL
+          AND EXISTS (SELECT 1 FROM task WHERE task.id = note.task_id)
     """))
     conn.execute(sa.text("""
         UPDATE note SET
             artifact_id = (SELECT artifact_id FROM wizardsession WHERE wizardsession.id = note.session_id),
             artifact_type = 'session'
         WHERE session_id IS NOT NULL AND artifact_id IS NULL AND task_id IS NULL
+          AND EXISTS (SELECT 1 FROM wizardsession WHERE wizardsession.id = note.session_id)
     """))
     conn.execute(sa.text("""
         UPDATE note SET
             artifact_id = (SELECT artifact_id FROM meeting WHERE meeting.id = note.meeting_id),
             artifact_type = 'meeting'
         WHERE meeting_id IS NOT NULL AND artifact_id IS NULL AND task_id IS NULL AND session_id IS NULL
+          AND EXISTS (SELECT 1 FROM meeting WHERE meeting.id = note.meeting_id)
     """))
     # Backfill synthesis_status for sessions already synthesised before the column existed
     conn.execute(sa.text(

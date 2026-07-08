@@ -25,6 +25,8 @@ if [ -z "$TRANSCRIPT" ] && [ -z "$SESSION_ID" ]; then
     exit 0
 fi
 
+# Only meaningful as a dev-checkout fallback below — a real install runs the
+# `wizard` entry point directly and never touches this path.
 WIZARD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 ARGS=(capture --close)
@@ -51,8 +53,33 @@ CLEANUP_DIR=""
 # Run synthesis in background so the hook returns immediately.
 # Local LLMs can take minutes; blocking the hook causes hook timeouts.
 (
-    uv --directory "$WIZARD_DIR" run wizard "${ARGS[@]}" \
-        >> "$HOME/.wizard/synthesis.log" 2>&1 || true
-    [ -n "$CLEANUP_DIR" ] && rm -rf "$CLEANUP_DIR" 2>/dev/null || true
+    LOG="$HOME/.wizard/synthesis.log"
+    # `uv --directory` only makes sense against a dev checkout (needs
+    # pyproject.toml there); refresh_hooks() copies this script to
+    # ~/.wizard/hooks/ for real installs, where WIZARD_DIR resolves to
+    # ~/.wizard and this branch would silently no-op every session. Prefer
+    # the installed entry point whenever it's actually on PATH.
+    if command -v wizard >/dev/null 2>&1; then
+        if wizard "${ARGS[@]}" >> "$LOG" 2>&1; then
+            CAPTURE_STATUS=0
+        else
+            CAPTURE_STATUS=$?
+        fi
+    elif [ -f "$WIZARD_DIR/pyproject.toml" ]; then
+        if uv --directory "$WIZARD_DIR" run wizard "${ARGS[@]}" >> "$LOG" 2>&1; then
+            CAPTURE_STATUS=0
+        else
+            CAPTURE_STATUS=$?
+        fi
+    else
+        echo "wizard: no 'wizard' binary on PATH and no dev checkout at $WIZARD_DIR — capture skipped" >> "$LOG" 2>&1
+        CAPTURE_STATUS=1
+    fi
+    # Only clean up the retry-linkage directory on success — on failure it
+    # holds transcript_path/wizard_id needed for `wizard capture --close
+    # --session-id <id>` to retry, per docs/dev/synthesis.md.
+    if [ "$CAPTURE_STATUS" -eq 0 ] && [ -n "$CLEANUP_DIR" ]; then
+        rm -rf "$CLEANUP_DIR" 2>/dev/null || true
+    fi
 ) &
 disown $!

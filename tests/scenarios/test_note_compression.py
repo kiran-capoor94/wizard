@@ -35,5 +35,14 @@ async def test_compressed_content_is_stored(mcp_client, seed_task):
             "note_type": "INVESTIGATION",
             "content": content,
         })
-
     assert not r.is_error, r
+
+    # Read the note back — the point of this test is that the *stored* content
+    # is the compressed string, not the raw input. Only asserting is_error
+    # (the old version of this test) would still pass if save_note stopped
+    # calling compress_text on the write path entirely.
+    rewind = await mcp_client.call_tool("rewind_task", {"task_id": task.id})
+    assert not rewind.is_error, rewind
+    previews = [n["preview"] for n in rewind.structured_content["timeline"]]
+    assert compressed in previews
+    assert content not in previews

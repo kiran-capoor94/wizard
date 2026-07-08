@@ -29,6 +29,10 @@ def _set_sqlite_pragmas(dbapi_conn, _connection_record) -> None:
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=30000")
     cursor.execute("PRAGMA synchronous=NORMAL")
+    # SQLite disables FK enforcement per-connection by default — without this,
+    # ondelete="CASCADE" on TaskState.task_id (models.py) is a no-op and deleting
+    # a Task orphans its TaskState row instead of cascading.
+    cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 
 

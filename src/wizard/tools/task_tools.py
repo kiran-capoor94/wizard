@@ -33,34 +33,31 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..skills import SKILL_TASK_START, load_skill_post
-from .formatting import try_notify
+from .formatting import spawn_background, try_notify
 from .task_fields import (
     apply_task_fields,
     check_duplicate_name,
     elicit_done_confirmation,
+    normalize_status,
 )
-
-_STATUS_ALIASES: dict[str, str] = {
-    "completed": "done",
-    "complete": "done",
-    "finish": "done",
-    "finished": "done",
-    "open": "todo",
-    "pending": "todo",
-    "wip": "in_progress",
-    "doing": "in_progress",
-    "inactive": "archived",
-}
 
 
 def _normalize_status(v: object) -> object:
+    return normalize_status(v) if isinstance(v, str) else v
+
+
+def _normalize_note_type(v: object) -> object:
+    # NoteType values are uppercase; agents (and the save_note docstring
+    # itself, historically) commonly send lowercase — normalize rather than
+    # let every case variant hard-fail validation.
     if isinstance(v, str):
-        return _STATUS_ALIASES.get(v.lower(), v)
+        return v.upper()
     return v
 
 
 NullableTaskStatus = Annotated[TaskStatus | None, BeforeValidator(_normalize_status)]
 TaskStatusWithDefault = Annotated[TaskStatus, BeforeValidator(_normalize_status)]
+NoteTypeCI = Annotated[NoteType, BeforeValidator(_normalize_note_type)]
 
 logger = logging.getLogger(__name__)
 
@@ -274,7 +271,9 @@ async def sample_mental_model(
 
 
 async def write_embedding(note_id: int, content: str) -> None:
-    vec = embed(content)
+    # embed() is a blocking call (model load + inference) — run it off the
+    # event loop so it doesn't stall every other concurrent session's tool calls.
+    vec = await asyncio.to_thread(embed, content)
     if vec is None:
         return
     blob = serialize_float32(vec)
@@ -295,7 +294,7 @@ async def write_embedding(note_id: int, content: str) -> None:
 async def save_note(
     ctx: Context,
     task_id: int,
-    note_type: NoteType,
+    note_type: NoteTypeCI,
     content: str,
     mental_model: str | None = None,
     t_repo: TaskRepository = Depends(get_task_repo),
@@ -305,7 +304,8 @@ async def save_note(
 ) -> SaveNoteResponse:
     """Scrub and persist a note.
 
-    Types: investigation|decision|docs|learnings|session_summary|failure|observation.
+    Types (case-insensitive): INVESTIGATION|DECISION|DOCS|LEARNINGS|
+    SESSION_SUMMARY|FAILURE|OBSERVATION.
     """
     logger.info("save_note task_id=%d note_type=%s", task_id, note_type.value)
     try:
@@ -347,7 +347,7 @@ async def save_note(
             except Exception as e:
                 logger.warning("save_note: mental model synthesis failed: %s", e)
         if not result.was_duplicate:
-            asyncio.create_task(write_embedding(result.note_id, clean))
+            spawn_background(write_embedding(result.note_id, clean))
 
         await try_notify(ctx.report_progress(1, 2))
         await try_notify(ctx.report_progress(2, 2))

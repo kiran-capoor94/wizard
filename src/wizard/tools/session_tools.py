@@ -1,6 +1,6 @@
-import asyncio
 import datetime
 import logging
+import os
 from typing import Literal
 
 import sentry_sdk
@@ -41,7 +41,7 @@ from ..schemas import (
     SessionState,
     TaskContext,
 )
-from ..security import SecurityService
+from ..security import SecurityService, is_safe_session_id
 from ..services import SessionCloser
 from ..skills import (
     SKILL_SESSION_END,
@@ -49,7 +49,7 @@ from ..skills import (
     load_skill_post,
 )
 from ..tool_call_buffer import tool_call_buffer
-from .formatting import try_notify
+from .formatting import spawn_background, try_notify
 from .mode_tools import build_available_modes
 from .session_helpers import (
     build_prior_summaries,
@@ -58,8 +58,6 @@ from .session_helpers import (
 )
 
 logger = logging.getLogger(__name__)
-
-_UNSAFE_SESSION_ID_CHARS = frozenset("/\\:")
 
 
 def _scrub_field(sec: SecurityService, value: str | None, field_name: str) -> str | None:
@@ -70,15 +68,6 @@ def _scrub_field(sec: SecurityService, value: str | None, field_name: str) -> st
     if result.was_modified:
         logger.info("PII scrubbed from %s", field_name)
     return result.clean
-
-
-def _is_safe_session_id(sid: str) -> bool:
-    """Return True if sid is safe to use as a filesystem path component.
-
-    Rejects path traversal sequences and empty strings; allows UUIDs and
-    agent-generated IDs like 'session-2026-04-22-gemini-studio-free-tier'.
-    """
-    return bool(sid) and ".." not in sid and not any(c in sid for c in _UNSAFE_SESSION_ID_CHARS)
 
 
 def _apply_default_mode(session: WizardSession) -> None:
@@ -119,7 +108,7 @@ async def session_start(
     """Create a session, return open/blocked tasks + unsummarised meetings."""
     logger.info("session_start agent_session_id=%s", agent_session_id)
 
-    if agent_session_id and not _is_safe_session_id(agent_session_id):
+    if agent_session_id and not is_safe_session_id(agent_session_id):
         logger.warning("session_start: unsafe agent_session_id %r — ignoring", agent_session_id)
         agent_session_id = None
 
@@ -140,6 +129,7 @@ async def session_start(
             continued_from_id=continued_from_id,
             agent_session_id=agent_session_id,
             agent="claude-code" if agent_session_id else None,
+            pid=os.getpid(),
         )
         db.add(session)
         db.flush()
@@ -201,7 +191,7 @@ async def session_start(
     await try_notify(ctx.report_progress(4, 4))
 
     # Background task dispatched AFTER db context closes so it gets its own clean session
-    asyncio.create_task(session_closer.close_abandoned_background(response.session_id))
+    spawn_background(session_closer.close_abandoned_background(response.session_id))
 
     return response
 
@@ -258,6 +248,11 @@ async def _persist_session_end(
         if session is None:
             await ctx.error(f"Session {session_id} not found")
             raise ToolError(f"Session {session_id} not found")
+        if session.closed_by is not None:
+            await ctx.error(f"Session {session_id} was already closed")
+            raise ToolError(
+                f"Session {session_id} was already closed (closed_by={session.closed_by!r})"
+            )
 
         session_state_saved = False
         try:
@@ -423,7 +418,7 @@ async def resume_session(
     """Resume a prior session in a new thread. Creates a new session."""
     logger.info("resume_session session_id=%s", session_id)
 
-    if agent_session_id and not _is_safe_session_id(agent_session_id):
+    if agent_session_id and not is_safe_session_id(agent_session_id):
         logger.warning("resume_session: unsafe agent_session_id %r — ignoring", agent_session_id)
         agent_session_id = None
 
@@ -446,6 +441,7 @@ async def resume_session(
         # Resumed sessions explicitly continue from the source session.
         new_session = WizardSession(
             continued_from_id=prior.id,
+            pid=os.getpid(),
         )
         db.add(new_session)
         db.flush()

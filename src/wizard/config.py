@@ -29,6 +29,11 @@ class JsonConfigSettingsSource(PydanticBaseSettingsSource):
         except FileNotFoundError:
             logger.info("No config file at %s, using defaults", config_file)
             return {}
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(
+                "Could not read config at %s (%s), using defaults", config_file, e
+            )
+            return {}
 
 
 class ScrubbingSettings(BaseModel):

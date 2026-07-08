@@ -19,6 +19,7 @@ from ..deps import (
     get_task_state_repo,
 )
 from ..mcp_instance import mcp
+from ..models import TaskStatus
 from ..repositories import (
     NoteRepository,
     SearchRepository,
@@ -37,6 +38,7 @@ from ..schemas import (
     TaskDetailResponse,
     TaskSummary,
 )
+from .task_fields import normalize_status
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +65,20 @@ async def get_tasks(
     db: Session = Depends(_get_db_session),
 ) -> GetTasksResponse:
     """List tasks with optional status and source_type filters. Paginated."""
+    normalized_status = None
+    if status is not None:
+        normalized_status = [normalize_status(s) for s in status]
+        valid_values = {v.value for v in TaskStatus}
+        invalid = [s for s in normalized_status if s not in valid_values]
+        if invalid:
+            raise ToolError(
+                f"Invalid status filter {invalid}. Valid values: {sorted(valid_values)}"
+            )
+
     offset = _decode_cursor(cursor) if cursor else 0
     tasks = t_repo.list_paginated(
         db,
-        status_filter=status,
+        status_filter=normalized_status,
         source_type_filter=source_type,
         limit=limit + 1,
         offset=offset,

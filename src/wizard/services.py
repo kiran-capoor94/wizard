@@ -200,7 +200,8 @@ class SessionCloser:
         max_age_hours: int = 2,
         limit: int = 3,
     ) -> list[WizardSession]:
-        """Sessions with no summary abandoned within the last max_age_hours."""
+        """Sessions with no summary abandoned within the last max_age_hours,
+        excluding any session still owned by a different, still-running process."""
         cutoff = datetime.datetime.now() - datetime.timedelta(hours=max_age_hours)
         stmt = (
             select(WizardSession)
@@ -216,7 +217,8 @@ class SessionCloser:
             .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
             .limit(limit)
         )
-        return list(db.exec(stmt).all())
+        candidates = list(db.exec(stmt).all())
+        return [s for s in candidates if not self._is_live_elsewhere(s)]
 
     def _find_old_abandoned(
         self,
@@ -224,7 +226,8 @@ class SessionCloser:
         current_session_id: int,
         min_age_hours: int = 2,
     ) -> list[WizardSession]:
-        """Sessions with no summary older than min_age_hours."""
+        """Sessions with no summary older than min_age_hours,
+        excluding any session still owned by a different, still-running process."""
         cutoff = datetime.datetime.now() - datetime.timedelta(hours=min_age_hours)
         stmt = (
             select(WizardSession)
@@ -239,7 +242,36 @@ class SessionCloser:
             )
             .order_by(WizardSession.created_at.desc())  # type: ignore[union-attr]
         )
-        return list(db.exec(stmt).all())
+        candidates = list(db.exec(stmt).all())
+        return [s for s in candidates if not self._is_live_elsewhere(s)]
+
+    @staticmethod
+    def _is_live_elsewhere(session: WizardSession) -> bool:
+        """True if `session` was created by a different OS process that is
+        still running — i.e. a genuinely concurrent session, not one that
+        crashed or was abandoned by a process that has since exited.
+
+        Each wizard-server instance is a separate stdio subprocess per agent
+        connection (see agent_registration.py), so a different, still-alive
+        pid means a different terminal is actively using this session right
+        now — auto-closing it would clobber its eventual real summary. A pid
+        equal to the current process is safe to close (e.g. the same process
+        calling session_start again after an unclean prior session, as in the
+        compaction/"restart without ending" flows); a missing pid (session
+        predates this check, or came from resume_session before this field
+        existed) is treated as closeable, matching pre-existing behaviour.
+        """
+        if session.pid is None or session.pid == os.getpid():
+            return False
+        try:
+            os.kill(session.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # Process exists but isn't ours to signal — assume it's alive
+            # rather than risk clobbering a live session.
+            return True
+        return True
 
     async def _close_one(
         self,

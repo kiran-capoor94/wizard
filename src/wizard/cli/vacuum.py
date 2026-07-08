@@ -34,6 +34,7 @@ def run_vacuum() -> None:
         _sqlite3.connect(str(db_path)) as conn,
     ):
         orphaned = 0
+        orphan_cleanup_error: str | None = None
         try:
             if _sqlite_vec is not None:
                 conn.enable_load_extension(True)
@@ -44,8 +45,10 @@ def run_vacuum() -> None:
                 " WHERE note_id NOT IN (SELECT id FROM note)"
             )
             orphaned = orphan_cur.rowcount
-        except Exception:
-            pass
+        except Exception as e:
+            # Don't swallow this — a locked DB, missing extension, or disk-full
+            # error here previously produced a false "0 orphaned removed" success.
+            orphan_cleanup_error = str(e)
         conn.commit()
         conn.execute("PRAGMA wal_checkpoint(FULL)")
         conn.execute("VACUUM")
@@ -53,11 +56,22 @@ def run_vacuum() -> None:
     size_after = db_path.stat().st_size
     mb_before = size_before / 1_048_576
     mb_after = size_after / 1_048_576
+    orphan_line = (
+        f"  [yellow]![/yellow]  Orphaned-embedding cleanup skipped: {orphan_cleanup_error}"
+        if orphan_cleanup_error
+        else f"  [green]✓[/green]  Removed [bold]{orphaned}[/bold] orphaned embedding(s)"
+    )
+    title = (
+        "[yellow]Vacuum complete (with warnings)[/yellow]"
+        if orphan_cleanup_error
+        else "[green]Vacuum complete[/green]"
+    )
+    border_style = "yellow" if orphan_cleanup_error else "green"
     rprint(Panel(
-        f"  [green]✓[/green]  Removed [bold]{orphaned}[/bold] orphaned embedding(s)\n"
+        f"{orphan_line}\n"
         f"  [green]✓[/green]  Database: [dim]{mb_before:.1f} MB[/dim]"
         f" → [bold]{mb_after:.1f} MB[/bold]"
         f" ([green]freed {mb_before - mb_after:.1f} MB[/green])",
-        title="[green]Vacuum complete[/green]",
-        border_style="green",
+        title=title,
+        border_style=border_style,
     ))

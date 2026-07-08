@@ -165,13 +165,6 @@ class AnalyticsRepository:
         start_dt = datetime.datetime.combine(start, datetime.time.min)
         end_dt = datetime.datetime.combine(end, datetime.time.max)
 
-        session_rows = db.exec(
-            select(WizardSession.id, WizardSession.created_at).where(
-                WizardSession.created_at >= start_dt,
-                WizardSession.created_at <= end_dt,
-            )
-        ).all()
-
         task_start_rows = db.exec(
             select(ToolCall.session_id).where(
                 ToolCall.tool_name == "task_start",
@@ -183,10 +176,19 @@ class AnalyticsRepository:
         if not task_start_rows:
             return 0.0
 
-        # Index session created_at by id for O(1) lookup.
-        session_created_at: dict[int, datetime.datetime] = {
-            sid: created_at for sid, created_at in session_rows if sid is not None
-        }
+        # Batch-load created_at for exactly the sessions referenced by task_start_rows —
+        # NOT just sessions created within [start, end]. A task_start call in-window can
+        # belong to a session created before the window; restricting to in-window
+        # sessions silently dropped those from the numerator (they were never
+        # excluded from the denominator, only undercounted).
+        session_ids = {sid for sid in task_start_rows if sid is not None}
+        session_created_at: dict[int, datetime.datetime] = dict(
+            db.exec(
+                select(WizardSession.id, WizardSession.created_at).where(
+                    col(WizardSession.id).in_(session_ids)
+                )
+            ).all()
+        )
 
         # Single query: earliest note ever written. If any note predates a session's
         # start, prior context existed for that task_start — same answer for every
