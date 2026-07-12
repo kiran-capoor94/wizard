@@ -300,14 +300,18 @@ class SessionCloser:
             session.closed_by = "auto"
         db.add(session)
         db.flush()
-        note = Note(
-            note_type=NoteType.SESSION_SUMMARY,
-            content=clean_summary,
-            session_id=session_id,
-            artifact_id=session.artifact_id,
-            artifact_type="session",
-        )
-        self._note_repo.save(db, note)
+        # Skip the SESSION_SUMMARY note for synthetic (interrupted-session)
+        # summaries — it is pure boilerplate ("Auto-closed: …"). The session
+        # row records closure; no memory-worthy note exists here.
+        if closed_via != "synthetic":
+            note = Note(
+                note_type=NoteType.SESSION_SUMMARY,
+                content=clean_summary,
+                session_id=session_id,
+                artifact_id=session.artifact_id,
+                artifact_type="session",
+            )
+            self._note_repo.save(db, note)
         return ClosedSessionSummary(
             session_id=session_id,
             summary=clean_summary,
