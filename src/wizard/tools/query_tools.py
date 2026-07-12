@@ -129,7 +129,7 @@ async def get_task(
     if task is None:
         raise ToolError(f"Task {task_id} not found")
 
-    notes_raw = n_repo.get_for_task(db, task_id, ascending=True)
+    notes_raw = n_repo.get_for_task(db, task_id, ascending=True, active_only=True)
     notes = [NoteDetail.from_model(n) for n in notes_raw]
 
     latest_mental_model = next(

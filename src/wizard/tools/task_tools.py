@@ -144,7 +144,7 @@ async def task_start(
             task_ctx = t_repo.get_task_context(db, task)
 
             # All notes descending: used for counts, selection, and rolling_summary lookup.
-            all_notes = n_repo.get_for_task(db, task_id=task.id)
+            all_notes = n_repo.get_for_task(db, task_id=task.id, active_only=True)
             notes_by_type: dict[str, int] = {}
             for note in all_notes:
                 key = note.note_type.value
