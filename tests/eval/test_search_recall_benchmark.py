@@ -11,6 +11,12 @@ from __future__ import annotations
 import os
 import sys
 
+if "PYTEST_CURRENT_TEST" not in os.environ and not os.environ.get("WIZARD_CONFIG_FILE") and __name__ != "__main__":
+    raise RuntimeError(
+        "Refusing to import the recall benchmark against the real DB. "
+        "Run it via pytest, or set WIZARD_CONFIG_FILE to an isolated DB."
+    )
+
 if __name__ == "__main__" and not os.environ.get("WIZARD_CONFIG_FILE"):
     print(
         "Refusing to run against the real DB. Re-run with an isolated DB, e.g.:\n"
