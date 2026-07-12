@@ -39,6 +39,22 @@ def _build_fts_query(query: str) -> str:
     return " OR ".join(f'"{t}"*' for t in terms)
 
 
+Key = tuple[str, int]  # (entity_type, entity_id)
+
+
+def _rrf_fuse(lanes: list[list[Key]], k: int = _RRF_K) -> dict[Key, float]:
+    """Reciprocal Rank Fusion: sum 1/(k + rank + 1) across lanes per key.
+
+    Scale-free — combines BM25-rank and cosine-distance lanes without
+    reconciling their score scales. A key in only one lane still scores > 0.
+    """
+    scores: dict[Key, float] = {}
+    for lane in lanes:
+        for rank, key in enumerate(lane):
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
+    return scores
+
+
 def bm25_score(rank: float) -> float:
     """Convert FTS5 rank (negative, lower=better) to 0-1 score (higher=better)."""
     strength = max(0.0, -rank)
