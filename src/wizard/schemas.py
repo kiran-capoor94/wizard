@@ -274,6 +274,12 @@ class SaveNoteResponse(BaseModel):
     was_duplicate: bool = False
 
 
+class MarkNoteResponse(BaseModel):
+    note_id: int
+    status: str
+    superseded_by_note_id: int | None = None
+
+
 class UpdateTaskResponse(BaseModel):
     task_id: int
     updated_fields: list[str]

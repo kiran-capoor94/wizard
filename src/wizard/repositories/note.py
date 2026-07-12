@@ -141,6 +141,33 @@ class NoteRepository:
         )
         return list(db.exec(stmt).all())
 
+    def set_status(
+        self, db: Session, note_id: int, status: str,
+        superseded_by_note_id: int | None = None,
+    ) -> Note:
+        note = db.get(Note, note_id)
+        if note is None:
+            raise ValueError(f"Note {note_id} not found")
+        note.status = status
+        db.add(note)
+        if superseded_by_note_id is not None:
+            winner = db.get(Note, superseded_by_note_id)
+            if winner is None:
+                raise ValueError(f"Note {superseded_by_note_id} not found")
+            winner.supersedes_note_id = note_id
+            db.add(winner)
+        elif status == "active":
+            # clearing a demotion: drop any back-link that pointed at this note.
+            # Use db.execute(...).scalars() rather than db.exec(...) so this works
+            # whether callers pass a sqlmodel.Session or a plain sqlalchemy Session
+            # (the latter has no .exec()).
+            stmt = select(Note).where(Note.supersedes_note_id == note_id)
+            for w in db.execute(stmt).scalars().all():
+                w.supersedes_note_id = None
+                db.add(w)
+        db.flush()
+        return note
+
     def count_for_sessions(self, db: Session, session_ids: list[int]) -> dict[int, int]:
         """Batch-count notes per session. Returns {session_id: count}."""
         if not session_ids:
