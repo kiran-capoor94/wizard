@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import logging
 from typing import Annotated
 
@@ -12,6 +11,7 @@ from sqlalchemy import text as _sa_text
 
 from ..database import engine, get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
+from ..note_hashing import content_hash as compute_content_hash
 from ..embedding import embed, serialize_float32
 from ..mcp_instance import mcp
 from ..models import (
@@ -199,7 +199,7 @@ def _prepare_note_fields(
         if mm_scrub.was_modified:
             logger.info("PII scrubbed from mental_model")
         mental_model = mm_scrub.clean[:MENTAL_MODEL_MAX_CHARS]
-    content_hash = hashlib.sha256(clean.encode()).hexdigest()
+    content_hash = compute_content_hash(clean)
     return clean, mental_model, content_hash
 
 
