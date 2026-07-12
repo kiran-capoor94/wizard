@@ -26,6 +26,7 @@ from fastmcp.client import Client  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
 
+from wizard.database import create_fts_schema  # noqa: E402
 from wizard.database import run_migrations as _run_migrations  # noqa: E402
 from wizard.repositories import (  # noqa: E402
     MeetingRepository,
@@ -49,9 +50,20 @@ _run_migrations()
 
 @pytest.fixture
 def db_engine():
-    """Fresh in-memory SQLite engine per test — guarantees isolation."""
+    """Fresh in-memory SQLite engine per test — guarantees isolation.
+
+    SQLModel.metadata.create_all() only knows about ORM-mapped tables — the
+    FTS5 search tables and their sync triggers are raw SQL living outside
+    that metadata (see wizard.database.create_fts_schema), so they're added
+    explicitly here too. Without this, any test exercising search() would
+    hit "no such table: note_fts" despite the real (migrated) database
+    having it.
+    """
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
+    with engine.connect() as conn:
+        create_fts_schema(conn)
+        conn.commit()
     return engine
 
 
