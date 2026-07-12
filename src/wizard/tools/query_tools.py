@@ -124,7 +124,7 @@ async def get_task(
     ts_repo: TaskStateRepository = Depends(get_task_state_repo),
     db: Session = Depends(_get_db_session),
 ) -> TaskDetailResponse:
-    """Get a single task with all its notes. Read-only — does not log access."""
+    """Get a single task with its active notes. Read-only — does not log access."""
     task = t_repo.get(db, task_id)
     if task is None:
         raise ToolError(f"Task {task_id} not found")

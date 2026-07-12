@@ -165,6 +165,7 @@ async def mark_note(
     status: str,
     superseded_by_note_id: int | None = None,
     n_repo: NoteRepository = Depends(get_note_repo),
+    t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
 ) -> MarkNoteResponse:
     """Deliberately set a note's status (e.g. supersede/invalidate a stale note).
 
@@ -178,11 +179,15 @@ async def mark_note(
         raise ToolError(f"invalid status {status!r}; must be one of {sorted(_MARKABLE)}")
     if superseded_by_note_id is not None and status != "superseded":
         raise ToolError("superseded_by_note_id is only valid with status='superseded'")
+    if superseded_by_note_id is not None and superseded_by_note_id == note_id:
+        raise ToolError("a note cannot supersede itself")
     with get_session() as db:
         try:
             note = n_repo.set_status(db, note_id, status, superseded_by_note_id)
         except ValueError as e:
             raise ToolError(str(e)) from e
+        if note.task_id is not None:
+            t_state_repo.recompute_for_task(db, note.task_id)
         return MarkNoteResponse(
             note_id=note.id,  # type: ignore[arg-type]
             status=note.status,
