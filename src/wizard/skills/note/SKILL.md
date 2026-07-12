@@ -1,7 +1,7 @@
 ---
 name: note
 description: Use after any investigation, debugging session, architecture decision, or non-obvious discovery — whenever there's a finding worth preserving for the next session
-allowed-tools: mcp__wizard__save_note ToolSearch
+allowed-tools: mcp__wizard__save_note mcp__wizard__mark_note ToolSearch
 ---
 
 # Save Note
