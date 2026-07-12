@@ -55,6 +55,8 @@ Example: `redis caching decision` → `"redis"* OR "caching"* OR "decision"*`. Q
 
 This is the fix for root cause (2): a note found **only** by the vector lane now receives an RRF contribution and can appear in results.
 
+**1b-note — vec-lane distance threshold (refinement found during planning).** Because cosine KNN *always* returns nearest neighbours, an unconstrained union would make even a nonsense query return the corpus's closest notes (breaking `test_hybrid_search_no_results_for_nonexistent_term` and hurting precision). Gate the vec lane with `_VEC_MAX_DISTANCE = 0.8` (cosine distance, 0–2 scale): after fetching the pool ordered by distance, keep only rows with `distance < _VEC_MAX_DISTANCE` before they enter the lane. Filtered in Python (sqlite-vec KNN needs its own `LIMIT k`, so no SQL `WHERE distance` clause). Genuine paraphrase matches sit well under 0.8; unrelated notes sit above it. The exact cutoff is a knob the eval harness (Section 3) can tune.
+
 **1c. Widen the candidate pool before the merge.**
 
 - Introduce `_POOL_MULTIPLIER = 5`. Each lane fetches `limit * _POOL_MULTIPLIER` rows (`LIMIT` in each SQL query), fusion runs over the wider pool, then the merged result is trimmed to `limit`.
@@ -109,6 +111,7 @@ Assertions: word-form and phrase categories rise from ~0 to `recall@10 ≥ 0.8`;
 ## Risks & Notes
 
 - **RRF discards absolute scores.** `SearchResult` exposes no numeric score field, so ranking-only fusion changes nothing observable downstream. If a score is ever surfaced, expose the RRF score.
+- **Vec lane always returns neighbours.** Mitigated by the `_VEC_MAX_DISTANCE` gate (1b-note); the vec lane must remain wrapped in try/except so engines without `vec_note_embeddings` (e.g. the `fts_engine` test fixture) degrade to BM25-only, as today.
 - **Porter over-stemming** (e.g. "universal"→"univers") can create occasional loose matches; acceptable for a single-user recall tool, and RRF de-emphasises weak hits.
 - **Short-term prefix matches** (`"a"*`) broaden results; RRF ranking absorbs this, and terms this short are rare in real queries.
 - **Migration rebuild cost** is trivial on a single-user local DB.
