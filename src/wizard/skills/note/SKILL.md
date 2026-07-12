@@ -231,3 +231,20 @@ save_note(
 - ⚠️ Do NOT duplicate prior notes — if a finding was already captured in a prior note (visible from `task_start`), reference it instead of re-stating it. Duplicates inflate the note count and dilute the signal that `what_am_i_missing` depends on.
 - ⚠️ Do NOT save speculative content as fact — speculation recorded as a finding will mislead future sessions that have no memory of the uncertainty.
 - ⚠️ Do NOT skip the mental model when you have 2+ notes and none exists — `what_am_i_missing` will flag `no_model` and the next session will lack orientation.
+
+---
+
+## Demoting stale or wrong notes
+
+When a new finding **supersedes or contradicts** a note you already saved, don't
+leave both to compete in recall — demote the old one with `mark_note`:
+
+- `mark_note(note_id=<old>, status="superseded", superseded_by_note_id=<new>)` —
+  the old note is hidden from recall (task_start, get_task, resume, search) and
+  the new note records that it replaced it. `rewind_task` still shows the old note.
+- `mark_note(note_id=<id>, status="contradicted" | "invalid")` — for a note later
+  found wrong, with no single replacement.
+- `mark_note(note_id=<id>, status="active")` — reverse a demotion.
+
+`active` is the only status that surfaces in recall. Demote deliberately; when in
+doubt, leave the note active.
