@@ -15,7 +15,8 @@
 - Run tests with `uv run pytest`. FTS-dependent tests use the migrated process-wide engine (`from wizard.database import engine`), created once via `run_migrations()` in `tests/conftest.py`; the `db_engine` fixture uses `create_all()` and has **no** FTS tables — do not use it for search tests.
 - Constants: `_RRF_K = 60`, `_POOL_MULTIPLIER = 5`, `_VEC_MAX_DISTANCE = 0.8`.
 - Commit after each task. Conventional-commit messages.
-- New Alembic migration `down_revision = "69d7ea262b9b"` (current head as of 2026-07-12).
+- New Alembic migration `down_revision = "restore_fts_triggers"` (current head after merging `fix/restore-note-session-fts-search` into main, 2026-07-12; supersedes the earlier `69d7ea262b9b` head).
+- **Never run migrations/DDL against the real DB.** `alembic/env.py` overrides any passed `sqlalchemy.url` with `wizard.database.engine.url`, which is built from `settings.db` (default `~/.wizard/wizard.db`). To target a scratch DB, set `WIZARD_CONFIG_FILE` to a temp JSON `{"db": "<tmpfile>"}` in a fresh subprocess so `settings.db` resolves there at import.
 
 ---
 
@@ -517,7 +518,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b1c2d3e4f5a6"
-down_revision: Union[str, None] = "69d7ea262b9b"
+down_revision: Union[str, None] = "restore_fts_triggers"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -597,36 +598,38 @@ Then run the stemming test:
 Run: `uv run pytest tests/scenarios/test_fts_stemming.py -v`
 Expected: PASS.
 
-- [ ] **Step 4: Verify migration up/down + row-count integrity against a scratch DB**
+- [ ] **Step 4: Verify migration up/down/up against an ISOLATED temp DB (never the real one)**
 
-Run:
+`alembic/env.py` forces `sqlalchemy.url` to `wizard.database.engine.url`, which comes from `settings.db`. So the ONLY safe way to migrate a scratch DB is to point `settings.db` at a temp file via `WIZARD_CONFIG_FILE` in a fresh subprocess. Run:
 ```bash
 cd ~/repos/wizard
-uv run python - <<'PY'
-import os, tempfile
-os.environ["WIZARD_CONFIG_FILE"] = ""  # use defaults
-from sqlalchemy import create_engine, text
-from alembic.config import Config
+TMPDB=$(mktemp -u --suffix=.db)
+TMPCFG=$(mktemp --suffix=.json)
+printf '{"db": "%s"}\n' "$TMPDB" > "$TMPCFG"
+WIZARD_CONFIG_FILE="$TMPCFG" uv run python - <<'PY'
 from alembic import command
+from alembic.config import Config
+from sqlalchemy import text
 import importlib.resources
-tmp = tempfile.mktemp(suffix=".db")
-url = f"sqlite:///{tmp}"
+from wizard.database import engine  # built from settings.db == the temp file
 d = str(importlib.resources.files("wizard").joinpath("alembic"))
-cfg = Config(); cfg.set_main_option("script_location", d); cfg.set_main_option("sqlalchemy.url", url)
+cfg = Config(); cfg.set_main_option("script_location", d)
 command.upgrade(cfg, "head")
-eng = create_engine(url)
-with eng.begin() as c:
+with engine.begin() as c:
     c.execute(text("INSERT INTO note (note_type, content) VALUES ('INVESTIGATION', 'cache invalidation')"))
     n = c.execute(text("SELECT count(*) FROM note")).scalar()
     f = c.execute(text("SELECT count(*) FROM note_fts")).scalar()
+    fts_sql = c.execute(text("SELECT sql FROM sqlite_master WHERE name='note_fts'")).scalar()
     print("note rows:", n, "note_fts rows:", f)
     assert n == f, "FTS rebuild row-count mismatch"
+    assert "porter" in (fts_sql or ""), "note_fts not created with porter tokenizer"
 command.downgrade(cfg, "-1")
 command.upgrade(cfg, "head")
-print("up/down/up OK")
+print("up/down/up OK; porter confirmed")
 PY
+rm -f "$TMPDB" "$TMPCFG"
 ```
-Expected: `note rows: 1 note_fts rows: 1` then `up/down/up OK`.
+Expected: `note rows: 1 note_fts rows: 1` then `up/down/up OK; porter confirmed`. Confirm the printed DB path under the run is the temp file, NOT `~/.wizard/wizard.db`.
 
 - [ ] **Step 5: Commit**
 
