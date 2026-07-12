@@ -136,7 +136,7 @@ class SearchRepository:
             meta_rows = db.execute(  # type: ignore[call-overload]
                 text(
                     "SELECT id AS entity_id, content, note_type, task_id, created_at "
-                    "FROM note WHERE id IN :ids"
+                    "FROM note WHERE id IN :ids AND status = 'active'"
                 ).bindparams(bindparam("ids", expanding=True)),
                 {"ids": all_ids},
             ).mappings().fetchall()
