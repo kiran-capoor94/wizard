@@ -11,6 +11,13 @@ from __future__ import annotations
 import os
 import sys
 
+if __name__ == "__main__" and not os.environ.get("WIZARD_CONFIG_FILE"):
+    print(
+        "Refusing to run against the real DB. Re-run with an isolated DB, e.g.:\n"
+        "  WIZARD_CONFIG_FILE=/path/to/temp-config.json uv run python -m tests.eval.test_search_recall_benchmark"
+    )
+    sys.exit(1)
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session as SASession
@@ -126,15 +133,6 @@ def test_recall_benchmark_meets_targets(monkeypatch):
 
 
 if __name__ == "__main__":
-    if not os.environ.get("WIZARD_CONFIG_FILE"):
-        print(
-            "Refusing to run against the real database. Point WIZARD_CONFIG_FILE at an "
-            "isolated config first, e.g.:\n"
-            "  WIZARD_CONFIG_FILE=/path/to/temp-config.json uv run python "
-            "-m tests.eval.test_search_recall_benchmark"
-        )
-        sys.exit(1)
-
     from unittest.mock import patch
     with patch.object(search_mod, "embed", _fake_embed), SASession(engine) as db:
         metrics = run_benchmark(db, SearchRepository())
