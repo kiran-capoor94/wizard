@@ -36,24 +36,27 @@ class NoteRepository:
         task_id: int | None,
         ascending: bool = False,
         limit: int | None = None,
+        active_only: bool = False,
     ) -> list[Note]:
         if task_id is None:
             return []
         order = col(Note.created_at).asc() if ascending else col(Note.created_at).desc()
-        stmt = select(Note).where(Note.task_id == task_id).order_by(order)
+        stmt = select(Note).where(Note.task_id == task_id)
+        if active_only:
+            stmt = stmt.where(Note.status == "active")
+        stmt = stmt.order_by(order)
         if limit is not None:
             stmt = stmt.limit(limit)
         return list(db.exec(stmt).all())
 
     def get_notes_grouped_by_task(
-        self, db: Session, session_id: int
+        self, db: Session, session_id: int, active_only: bool = False
     ) -> dict[int, list[Note]]:
         """Return notes for a session grouped by task_id, ordered by created_at asc."""
-        stmt = (
-            select(Note)
-            .where(Note.session_id == session_id)
-            .order_by(col(Note.created_at).asc())
-        )
+        stmt = select(Note).where(Note.session_id == session_id)
+        if active_only:
+            stmt = stmt.where(Note.status == "active")
+        stmt = stmt.order_by(col(Note.created_at).asc())
         all_notes = list(db.exec(stmt).all())
         by_task: dict[int, list[Note]] = {}
         for n in all_notes:

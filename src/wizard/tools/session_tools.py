@@ -385,7 +385,7 @@ def _group_prior_notes(
     Returns at most 3 notes per task (most recent). Full history is available
     via rewind_task when needed.
     """
-    by_task = n_repo.get_notes_grouped_by_task(db, session_id)
+    by_task = n_repo.get_notes_grouped_by_task(db, session_id, active_only=True)
     if not by_task:
         return []
 
