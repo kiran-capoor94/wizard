@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -18,6 +19,24 @@ logger = logging.getLogger(__name__)
 EntityType = Literal["note", "session", "meeting", "task"]
 
 _ALPHA = 0.5  # weight for BM25; (1-_ALPHA) for cosine
+_RRF_K = 60
+_POOL_MULTIPLIER = 5
+_VEC_MAX_DISTANCE = 0.8  # cosine distance (0-2); drop vec hits at/above this
+
+_TERM_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _build_fts_query(query: str) -> str:
+    """Build an OR-of-prefix-terms FTS5 MATCH string from free text.
+
+    Each word becomes a quoted prefix token ("foo"*) so FTS5 operators in
+    user input are neutralised and partial-word matches are restored. Returns
+    "" when no usable terms remain (caller treats that as empty -> []).
+    """
+    terms = _TERM_RE.findall(query)
+    if not terms:
+        return ""
+    return " OR ".join(f'"{t}"*' for t in terms)
 
 
 def bm25_score(rank: float) -> float:
