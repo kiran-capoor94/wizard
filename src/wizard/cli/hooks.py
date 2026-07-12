@@ -10,6 +10,9 @@ from wizard.config import settings
 from wizard.models import NOTE_CONTENT_MAX_CHARS, NoteType
 from wizard.security import is_safe_session_id
 
+from ..deps import get_security
+from ..note_hashing import content_hash as compute_content_hash
+
 logger = logging.getLogger(__name__)
 
 _MIN_CONTENT_LEN = 50  # ignore trivially short messages
@@ -35,9 +38,10 @@ def run_stop_hook(agent_session_id: str, last_message: str) -> None:
         if task_id is None:
             return
 
-        _write_observation(
-            db_path, task_id, wizard_session_id, last_message[:NOTE_CONTENT_MAX_CHARS]
-        )
+        sec = get_security()
+        clean = sec.scrub(last_message[:NOTE_CONTENT_MAX_CHARS]).clean
+        c_hash = compute_content_hash(clean)
+        _write_observation(db_path, task_id, wizard_session_id, clean, c_hash)
     except Exception as e:
         logger.debug("hook: run_stop_hook failed: %s", e)
 
@@ -68,16 +72,24 @@ def _resolve_active_task_id(db_path: Path, wizard_session_id: int) -> int | None
 
 
 def _write_observation(
-    db_path: Path, task_id: int, session_id: int, content: str
+    db_path: Path, task_id: int, session_id: int, content: str, content_hash: str
 ) -> None:
-    """Insert OBSERVATION note and update task_state counts."""
+    """Insert OBSERVATION note (deduped, hashed) and update task_state counts."""
     now = datetime.now().isoformat()
     try:
         with sqlite3.connect(str(db_path), timeout=5) as conn:
+            dup = conn.execute(
+                "SELECT 1 FROM note"
+                " WHERE task_id = ? AND content_hash = ? AND status = 'active' LIMIT 1",
+                (task_id, content_hash),
+            ).fetchone()
+            if dup is not None:
+                return
             conn.execute(
-                "INSERT INTO note (note_type, content, task_id, session_id, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (NoteType.OBSERVATION.value, content, task_id, session_id, now, now),
+                "INSERT INTO note"
+                " (note_type, content, content_hash, task_id, session_id, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (NoteType.OBSERVATION.value, content, content_hash, task_id, session_id, now, now),
             )
             conn.execute(
                 """
