@@ -3,10 +3,12 @@ from sqlalchemy.orm import Session as SASession
 
 from wizard.database import engine
 from wizard.models import Note, NoteType
+from wizard.repositories import search as search_mod
 from wizard.repositories.search import SearchRepository
 
 
-def test_word_form_variation_matches_after_stemming():
+def test_word_form_variation_matches_after_stemming(monkeypatch):
+    monkeypatch.setattr(search_mod, "embed", lambda _t: None)
     with SASession(engine) as db:
         n = Note(note_type=NoteType.DECISION,
                  content="we will cache the rendered template fragments",
