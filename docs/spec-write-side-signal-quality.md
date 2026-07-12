@@ -33,7 +33,7 @@ Two stages, sequenced and independently shippable, plus measurement. Stage 2a is
 
 ### Stage 2b — Demotion machinery (activates existing columns)
 
-**2b-1. Read-side active-only filters (the enabler).** Add opt-in active-only filtering so recall excludes demoted notes while history views keep them:
+**2b-1. Read-side active-only filters (the enabler).** `active` is the **sole recall-eligible status** — recall excludes every other status (superseded, contradicted, invalid, **archived**, **unclassified**). The filter is literally `status == 'active'`. Add it as opt-in so recall excludes non-active notes while history views keep them:
 - `NoteRepository.get_for_task` (`note.py:33-46`) — add `active_only: bool = False` param; when true, `WHERE status == 'active'`. Recall callers pass `active_only=True`: `task_start` `_select_key_notes` (`tools/task_tools.py:147,153`) and `get_task` (`tools/query_tools.py:132`). `rewind_task` (`tools/note_tools.py:41`) passes `active_only=False` (full history, with status shown).
 - `get_notes_grouped_by_task` (`note.py:48-62`) — same `active_only` param; resume (`session_tools.py` `_group_prior_notes`) passes `True`.
 - Search note fetch (`search.py:136-140`) — add `AND status = 'active'` to the `WHERE id IN :ids` metadata query, so demoted notes never appear in search results even if their FTS/vec rows still match. (The FTS/vec index tables have no status column; filtering at the metadata join is correct and sufficient.)
