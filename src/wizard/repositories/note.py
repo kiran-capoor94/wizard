@@ -148,6 +148,18 @@ class NoteRepository:
         note = db.get(Note, note_id)
         if note is None:
             raise ValueError(f"Note {note_id} not found")
+
+        # Always clear any existing back-links pointing at this note first —
+        # this covers re-demotion (A supersedes B, then A supersedes C) and
+        # reverting to 'active', leaving no stale winners either way.
+        # Use db.execute(...).scalars() rather than db.exec(...) so this works
+        # whether callers pass a sqlmodel.Session or a plain sqlalchemy Session
+        # (the latter has no .exec()).
+        stmt = select(Note).where(Note.supersedes_note_id == note_id)
+        for w in db.execute(stmt).scalars().all():
+            w.supersedes_note_id = None
+            db.add(w)
+
         note.status = status
         db.add(note)
         if superseded_by_note_id is not None:
@@ -156,15 +168,6 @@ class NoteRepository:
                 raise ValueError(f"Note {superseded_by_note_id} not found")
             winner.supersedes_note_id = note_id
             db.add(winner)
-        elif status == "active":
-            # clearing a demotion: drop any back-link that pointed at this note.
-            # Use db.execute(...).scalars() rather than db.exec(...) so this works
-            # whether callers pass a sqlmodel.Session or a plain sqlalchemy Session
-            # (the latter has no .exec()).
-            stmt = select(Note).where(Note.supersedes_note_id == note_id)
-            for w in db.execute(stmt).scalars().all():
-                w.supersedes_note_id = None
-                db.add(w)
         db.flush()
         return note
 
