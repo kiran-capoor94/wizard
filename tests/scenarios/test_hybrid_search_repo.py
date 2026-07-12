@@ -2,22 +2,8 @@
 from sqlalchemy.orm import Session as SASession
 
 from wizard.database import engine
-from wizard.repositories.search import SearchRepository, bm25_score, cosine_score
-
-
-def testbm25_score_negative_rank():
-    # rank=-1.0 → 1/(1-(-1)) = 0.5
-    assert abs(bm25_score(-1.0) - 0.5) < 1e-9
-
-
-def testcosine_score_zero_distance():
-    # distance=0 → 1.0 (identical vectors)
-    assert cosine_score(0.0) == 1.0
-
-
-def testcosine_score_max_distance():
-    # distance=2 → 0.0 (opposite vectors)
-    assert cosine_score(2.0) == 0.0
+from wizard.repositories import search as search_mod
+from wizard.repositories.search import SearchRepository
 
 
 def test_hybrid_search_empty_query_returns_empty():
@@ -27,7 +13,9 @@ def test_hybrid_search_empty_query_returns_empty():
     assert results == []
 
 
-def test_hybrid_search_no_results_for_nonexistent_term():
+def test_hybrid_search_no_results_for_nonexistent_term(monkeypatch):
+    # Force embedding off so only BM25 runs -> a truly novel term yields nothing.
+    monkeypatch.setattr(search_mod, "embed", lambda _text: None)
     repo = SearchRepository()
     with SASession(engine) as db:
         results = repo.hybrid_search(db, "zzz_nonexistent_xqy_term_9999")

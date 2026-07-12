@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlmodel import Session
 
 from ..embedding import embed, serialize_float32
@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 EntityType = Literal["note", "session", "meeting", "task"]
 
-_ALPHA = 0.5  # weight for BM25; (1-_ALPHA) for cosine
 _RRF_K = 60
 _POOL_MULTIPLIER = 5
 _VEC_MAX_DISTANCE = 0.8  # cosine distance (0-2); drop vec hits at/above this
@@ -55,17 +54,6 @@ def _rrf_fuse(lanes: list[list[Key]], k: int = _RRF_K) -> dict[Key, float]:
     return scores
 
 
-def bm25_score(rank: float) -> float:
-    """Convert FTS5 rank (negative, lower=better) to 0-1 score (higher=better)."""
-    strength = max(0.0, -rank)
-    return strength / (1.0 + strength)
-
-
-def cosine_score(distance: float) -> float:
-    """Convert vec0 cosine distance (0-2) to 0-1 score (higher=better)."""
-    return 1.0 - distance / 2.0
-
-
 class SearchRepository:
     def hybrid_search(
         self,
@@ -74,184 +62,175 @@ class SearchRepository:
         limit: int = 10,
         entity_type: EntityType | None = None,
     ) -> list[SearchResult]:
-        """Hybrid BM25+cosine search. Notes blend both; other entities use BM25 only."""
-        sanitised = query.replace('"', "").replace("*", "").strip()
-        if not sanitised:
+        """Union hybrid search: per-entity BM25 lanes + a threshold-gated cosine
+        lane for notes, fused by Reciprocal Rank Fusion."""
+        fts_query = _build_fts_query(query)
+        if not fts_query:
             return []
-        fts_query = f'"{sanitised}"'
         query_vec = embed(query)
-        results: list[tuple[float, SearchResult]] = []
+        pool = limit * _POOL_MULTIPLIER
 
-        if entity_type is None or entity_type == "note":
-            results.extend(self._search_notes(db, fts_query, query_vec, limit))
-        if entity_type is None or entity_type == "session":
-            results.extend(self._search_sessions(db, fts_query, limit))
-        if entity_type is None or entity_type == "meeting":
-            results.extend(self._search_meetings(db, fts_query, limit))
-        if entity_type is None or entity_type == "task":
-            results.extend(self._search_tasks(db, fts_query, limit))
+        lanes: list[list[Key]] = []
+        results: dict[Key, SearchResult] = {}
 
-        results.sort(key=lambda x: x[0], reverse=True)  # higher score = better
-        return [r for _, r in results[:limit]]
+        def add(pair: tuple[list[list[Key]], dict[Key, SearchResult]]) -> None:
+            new_lanes, new_results = pair
+            lanes.extend(new_lanes)
+            results.update(new_results)
+
+        if entity_type in (None, "note"):
+            add(self._search_notes(db, fts_query, query_vec, pool))
+        if entity_type in (None, "session"):
+            add(self._search_sessions(db, fts_query, pool))
+        if entity_type in (None, "meeting"):
+            add(self._search_meetings(db, fts_query, pool))
+        if entity_type in (None, "task"):
+            add(self._search_tasks(db, fts_query, pool))
+
+        fused = _rrf_fuse(lanes)
+        ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+        return [results[key] for key, _ in ranked[:limit] if key in results]
 
     def _search_notes(
         self,
         db: Session,
         fts_query: str,
         query_vec: list[float] | None,
-        limit: int,
-    ) -> list[tuple[float, SearchResult]]:
-        # BM25 lane
+        pool: int,
+    ) -> tuple[list[list[Key]], dict[Key, SearchResult]]:
+        # BM25 lane: note ids in rank order.
         bm25_rows = db.execute(  # type: ignore[call-overload]
             text(
-                "SELECT note_fts.rowid AS entity_id, note_fts.content AS content, "
-                "note_fts.note_type AS note_type, note.task_id AS task_id, "
-                "note.created_at AS created_at, note_fts.rank AS rank "
-                "FROM note_fts "
-                "JOIN note ON note.id = note_fts.rowid "
-                "WHERE note_fts MATCH :q "
+                "SELECT note_fts.rowid AS entity_id "
+                "FROM note_fts WHERE note_fts MATCH :q "
                 "ORDER BY note_fts.rank LIMIT :lim"
             ),
-            {"q": fts_query, "lim": limit},
+            {"q": fts_query, "lim": pool},
         ).mappings().fetchall()
+        bm25_ids = [row["entity_id"] for row in bm25_rows]
 
-        bm25_scores: dict[int, float] = {
-            row["entity_id"]: bm25_score(row["rank"]) for row in bm25_rows
-        }
-        bm25_meta: dict[int, dict] = {
-            row["entity_id"]: dict(row) for row in bm25_rows
-        }
-
-        # Cosine lane (only when embedding is available)
-        cosine_scores: dict[int, float] = {}
+        # Cosine lane: note ids in distance order, threshold-gated. Degrades to
+        # empty if embedding unavailable or vec table absent.
+        vec_ids: list[int] = []
         if query_vec is not None:
             blob = serialize_float32(query_vec)
             try:
                 vec_rows = db.execute(  # type: ignore[call-overload]
                     text(
-                        "SELECT note_id, distance "
-                        "FROM vec_note_embeddings "
-                        "WHERE embedding MATCH :blob "
-                        "ORDER BY distance LIMIT :lim"
+                        "SELECT note_id, distance FROM vec_note_embeddings "
+                        "WHERE embedding MATCH :blob ORDER BY distance LIMIT :lim"
                     ),
-                    {"blob": blob, "lim": limit},
+                    {"blob": blob, "lim": pool},
                 ).mappings().fetchall()
-                cosine_scores = {
-                    row["note_id"]: cosine_score(row["distance"]) for row in vec_rows
-                }
+                vec_ids = [
+                    row["note_id"] for row in vec_rows
+                    if row["distance"] < _VEC_MAX_DISTANCE
+                ]
             except Exception as e:
-                logger.warning(
-                    "Cosine search failed, falling back to BM25-only: %s", e
-                )
+                logger.warning("Cosine search failed, BM25-only for notes: %s", e)
 
-        # BM25 anchors candidate set; cosine re-ranks but cannot surface new notes
-        out = []
-        for note_id, b in bm25_scores.items():
-            c = cosine_scores.get(note_id, 0.0)
-            score = _ALPHA * b + (1.0 - _ALPHA) * c
-            meta = bm25_meta[note_id]
-            snippet = (meta.get("content") or "")[:200]
-            out.append((
-                score,
-                SearchResult(
-                    entity_type="note",
-                    entity_id=note_id,
-                    title=meta.get("note_type") or "note",
-                    snippet=snippet,
-                    created_at=meta.get("created_at"),
-                    task_id=meta.get("task_id"),
-                ),
-            ))
-        return out
+        # Fetch metadata for the union of ids in one pass.
+        all_ids: list[int] = list(dict.fromkeys(bm25_ids + vec_ids))
+        meta: dict[int, dict] = {}
+        if all_ids:
+            meta_rows = db.execute(  # type: ignore[call-overload]
+                text(
+                    "SELECT id AS entity_id, content, note_type, task_id, created_at "
+                    "FROM note WHERE id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": all_ids},
+            ).mappings().fetchall()
+            meta = {row["entity_id"]: dict(row) for row in meta_rows}
+
+        results: dict[Key, SearchResult] = {}
+        for nid in all_ids:
+            m = meta.get(nid)
+            if m is None:
+                continue
+            results[("note", nid)] = SearchResult(
+                entity_type="note",
+                entity_id=nid,
+                title=m.get("note_type") or "note",
+                snippet=(m.get("content") or "")[:200],
+                created_at=m.get("created_at"),
+                task_id=m.get("task_id"),
+            )
+        bm25_lane = [("note", i) for i in bm25_ids if i in meta]
+        vec_lane = [("note", i) for i in vec_ids if i in meta]
+        return [bm25_lane, vec_lane], results
 
     def _search_sessions(
-        self, db: Session, query: str, limit: int
-    ) -> list[tuple[float, SearchResult]]:
+        self, db: Session, fts_query: str, pool: int
+    ) -> tuple[list[list[Key]], dict[Key, SearchResult]]:
         rows = db.execute(  # type: ignore[call-overload]
             text(
                 "SELECT session_fts.rowid AS entity_id, session_fts.summary AS summary, "
-                "wizardsession.created_at AS created_at, session_fts.rank AS rank "
-                "FROM session_fts "
-                "JOIN wizardsession ON wizardsession.id = session_fts.rowid "
-                "WHERE session_fts MATCH :q "
-                "ORDER BY session_fts.rank LIMIT :lim"
+                "wizardsession.created_at AS created_at "
+                "FROM session_fts JOIN wizardsession ON wizardsession.id = session_fts.rowid "
+                "WHERE session_fts MATCH :q ORDER BY session_fts.rank LIMIT :lim"
             ),
-            {"q": query, "lim": limit},
+            {"q": fts_query, "lim": pool},
         ).mappings().fetchall()
-        out = []
+        lane: list[Key] = []
+        results: dict[Key, SearchResult] = {}
         for row in rows:
-            snippet = (row["summary"] or "")[:200]
+            key: Key = ("session", row["entity_id"])
             created = row["created_at"]
             title = f"Session {row['entity_id']}"
             if created:
                 with contextlib.suppress(ValueError):
                     title = f"Session {datetime.fromisoformat(str(created)).strftime('%Y-%m-%d')}"
-            out.append((
-                bm25_score(row["rank"]),
-                SearchResult(
-                    entity_type="session",
-                    entity_id=row["entity_id"],
-                    title=title,
-                    snippet=snippet,
-                    created_at=row["created_at"],
-                ),
-            ))
-        return out
+            results[key] = SearchResult(
+                entity_type="session", entity_id=row["entity_id"], title=title,
+                snippet=(row["summary"] or "")[:200], created_at=created,
+            )
+            lane.append(key)
+        return [lane], results
 
     def _search_meetings(
-        self, db: Session, query: str, limit: int
-    ) -> list[tuple[float, SearchResult]]:
+        self, db: Session, fts_query: str, pool: int
+    ) -> tuple[list[list[Key]], dict[Key, SearchResult]]:
         rows = db.execute(  # type: ignore[call-overload]
             text(
                 "SELECT meeting_fts.rowid AS entity_id, meeting_fts.content AS content, "
-                "meeting_fts.title AS title, meeting.created_at AS created_at, "
-                "meeting_fts.rank AS rank "
-                "FROM meeting_fts "
-                "JOIN meeting ON meeting.id = meeting_fts.rowid "
-                "WHERE meeting_fts MATCH :q "
-                "ORDER BY meeting_fts.rank LIMIT :lim"
+                "meeting_fts.title AS title, meeting.created_at AS created_at "
+                "FROM meeting_fts JOIN meeting ON meeting.id = meeting_fts.rowid "
+                "WHERE meeting_fts MATCH :q ORDER BY meeting_fts.rank LIMIT :lim"
             ),
-            {"q": query, "lim": limit},
+            {"q": fts_query, "lim": pool},
         ).mappings().fetchall()
-        out = []
+        lane: list[Key] = []
+        results: dict[Key, SearchResult] = {}
         for row in rows:
-            snippet = (row["content"] or "")[:200]
-            out.append((
-                bm25_score(row["rank"]),
-                SearchResult(
-                    entity_type="meeting",
-                    entity_id=row["entity_id"],
-                    title=row["title"] or "meeting",
-                    snippet=snippet,
-                    created_at=row["created_at"],
-                ),
-            ))
-        return out
+            key: Key = ("meeting", row["entity_id"])
+            results[key] = SearchResult(
+                entity_type="meeting", entity_id=row["entity_id"],
+                title=row["title"] or "meeting", snippet=(row["content"] or "")[:200],
+                created_at=row["created_at"],
+            )
+            lane.append(key)
+        return [lane], results
 
     def _search_tasks(
-        self, db: Session, query: str, limit: int
-    ) -> list[tuple[float, SearchResult]]:
+        self, db: Session, fts_query: str, pool: int
+    ) -> tuple[list[list[Key]], dict[Key, SearchResult]]:
         rows = db.execute(  # type: ignore[call-overload]
             text(
                 "SELECT task_fts.rowid AS entity_id, task_fts.name AS name, "
-                "task.created_at AS created_at, task_fts.rank AS rank "
-                "FROM task_fts "
-                "JOIN task ON task.id = task_fts.rowid "
-                "WHERE task_fts MATCH :q "
-                "ORDER BY task_fts.rank LIMIT :lim"
+                "task.created_at AS created_at "
+                "FROM task_fts JOIN task ON task.id = task_fts.rowid "
+                "WHERE task_fts MATCH :q ORDER BY task_fts.rank LIMIT :lim"
             ),
-            {"q": query, "lim": limit},
+            {"q": fts_query, "lim": pool},
         ).mappings().fetchall()
-        out = []
+        lane: list[Key] = []
+        results: dict[Key, SearchResult] = {}
         for row in rows:
-            out.append((
-                bm25_score(row["rank"]),
-                SearchResult(
-                    entity_type="task",
-                    entity_id=row["entity_id"],
-                    title=row["name"] or "task",
-                    snippet=row["name"] or "",
-                    created_at=row["created_at"],
-                ),
-            ))
-        return out
+            key: Key = ("task", row["entity_id"])
+            results[key] = SearchResult(
+                entity_type="task", entity_id=row["entity_id"],
+                title=row["name"] or "task", snippet=row["name"] or "",
+                created_at=row["created_at"],
+            )
+            lane.append(key)
+        return [lane], results
