@@ -66,6 +66,7 @@ EXPECTED_TOOLS = {
     "update_task",
     "rewind_task",
     "what_am_i_missing",
+    "mark_note",
     "what_should_i_work_on",
     "get_meeting",
     "save_meeting_summary",
@@ -111,6 +112,7 @@ REQUIRED_PARAMS: dict[str, list[str]] = {
     "update_task": ["task_id"],
     "rewind_task": ["task_id"],
     "what_am_i_missing": ["task_id"],
+    "mark_note": ["note_id", "status"],
     "what_should_i_work_on": ["session_id"],  # mode has default "focus"
     "get_meeting": ["meeting_id"],
     "save_meeting_summary": ["meeting_id", "summary"],

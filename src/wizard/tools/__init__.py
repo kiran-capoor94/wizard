@@ -1,6 +1,6 @@
 from .meeting_tools import get_meeting, ingest_meeting, save_meeting_summary
 from .mode_tools import get_modes, set_mode
-from .note_tools import rewind_task, what_am_i_missing
+from .note_tools import mark_note, rewind_task, what_am_i_missing
 from .query_tools import get_session, get_sessions, get_task, get_tasks
 from .session_tools import resume_session, session_end, session_start
 from .task_tools import create_task, save_note, task_start, update_task
@@ -9,7 +9,7 @@ from .triage_tools import what_should_i_work_on
 __all__ = [
     "session_start", "session_end", "resume_session",
     "task_start", "save_note", "update_task", "create_task",
-    "rewind_task", "what_am_i_missing",
+    "rewind_task", "what_am_i_missing", "mark_note",
     "get_meeting", "save_meeting_summary", "ingest_meeting",
     "get_tasks", "get_task", "get_sessions", "get_session",
     "what_should_i_work_on",

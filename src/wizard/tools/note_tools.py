@@ -6,8 +6,10 @@ from fastmcp.exceptions import ToolError
 from ..database import get_session
 from ..deps import get_note_repo, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
+from ..models import NoteStatus
 from ..repositories import NoteRepository, TaskRepository, TaskStateRepository
 from ..schemas import (
+    MarkNoteResponse,
     MissingResponse,
     RewindResponse,
     RewindSummary,
@@ -19,6 +21,7 @@ from ..schemas import (
 logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+_MARKABLE = {s.value for s in NoteStatus}
 
 
 async def rewind_task(
@@ -157,5 +160,36 @@ async def what_am_i_missing(
         return MissingResponse(signals=signals)
 
 
+async def mark_note(
+    note_id: int,
+    status: str,
+    superseded_by_note_id: int | None = None,
+    n_repo: NoteRepository = Depends(get_note_repo),
+) -> MarkNoteResponse:
+    """Deliberately set a note's status (e.g. supersede/invalidate a stale note).
+
+    `active` is the only recall-eligible status; any other value hides the note
+    from recall (task_start, get_task, resume, search) while rewind_task still
+    shows it. Pass `superseded_by_note_id` (only with status='superseded') to
+    record that a newer note replaced this one.
+    """
+    status = status.lower()
+    if status not in _MARKABLE:
+        raise ToolError(f"invalid status {status!r}; must be one of {sorted(_MARKABLE)}")
+    if superseded_by_note_id is not None and status != "superseded":
+        raise ToolError("superseded_by_note_id is only valid with status='superseded'")
+    with get_session() as db:
+        try:
+            note = n_repo.set_status(db, note_id, status, superseded_by_note_id)
+        except ValueError as e:
+            raise ToolError(str(e)) from e
+        return MarkNoteResponse(
+            note_id=note.id,  # type: ignore[arg-type]
+            status=note.status,
+            superseded_by_note_id=superseded_by_note_id,
+        )
+
+
 mcp.tool()(rewind_task)
 mcp.tool()(what_am_i_missing)
+mcp.tool()(mark_note)
