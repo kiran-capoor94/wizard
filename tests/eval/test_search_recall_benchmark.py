@@ -8,6 +8,9 @@ Run as a report:  uv run python -m tests.eval.test_search_recall_benchmark
 """
 from __future__ import annotations
 
+import os
+import sys
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session as SASession
@@ -34,12 +37,12 @@ CASES = {
     "word_form": [("caching templates", {"cache"}),
                   ("rebalancing consumers", {"kafka"})],              # inflected
     "multi_term": [("redis caching", {"cache"})],                    # most-terms first
-    "semantic_only": [("cat on a rug", {"feline"})],                 # no lexical overlap
+    "semantic_only": [("cat rug", {"feline"})],                      # no lexical overlap
 }
 
 # Deterministic fake embedding space: label/query -> unit-ish vector.
 _VECS = {
-    "cat on a rug": [1.0] + [0.0] * 383,
+    "cat rug": [1.0] + [0.0] * 383,
     "feline": [1.0] + [0.0] * 383,
 }
 
@@ -123,6 +126,15 @@ def test_recall_benchmark_meets_targets(monkeypatch):
 
 
 if __name__ == "__main__":
+    if not os.environ.get("WIZARD_CONFIG_FILE"):
+        print(
+            "Refusing to run against the real database. Point WIZARD_CONFIG_FILE at an "
+            "isolated config first, e.g.:\n"
+            "  WIZARD_CONFIG_FILE=/path/to/temp-config.json uv run python "
+            "-m tests.eval.test_search_recall_benchmark"
+        )
+        sys.exit(1)
+
     from unittest.mock import patch
     with patch.object(search_mod, "embed", _fake_embed), SASession(engine) as db:
         metrics = run_benchmark(db, SearchRepository())
