@@ -11,7 +11,6 @@ from sqlalchemy import text as _sa_text
 
 from ..database import engine, get_session
 from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
-from ..note_hashing import content_hash as compute_content_hash
 from ..embedding import embed, serialize_float32
 from ..mcp_instance import mcp
 from ..models import (
@@ -24,6 +23,7 @@ from ..models import (
     TaskPriority,
     TaskStatus,
 )
+from ..note_hashing import content_hash as compute_content_hash
 from ..repositories import MeetingRepository, NoteRepository, TaskRepository, TaskStateRepository
 from ..schemas import (
     CreateTaskResponse,
