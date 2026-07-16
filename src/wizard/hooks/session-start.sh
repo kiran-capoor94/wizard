@@ -170,4 +170,13 @@ if [ -n "$AGENT_UUID" ]; then
     CONTEXT="agent_session_id=$AGENT_UUID source=$SOURCE. $CONTEXT"
 fi
 
+# Proactive recall: inject a compact read-only memory brief so orientation is
+# automatic even before session_start is called. Never fatal.
+BRIEF=$(wizard hook session-brief 2>/dev/null || true)
+if [ -n "$BRIEF" ]; then
+    CONTEXT="$BRIEF
+
+$CONTEXT"
+fi
+
 jq -n --arg ctx "$CONTEXT" '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":$ctx}}'
