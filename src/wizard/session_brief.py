@@ -30,7 +30,7 @@ def render_brief(db: Session) -> str:
     ]
     for e in open_index:
         tag = "in-progress" if e.status == TaskStatus.IN_PROGRESS else f"stale {e.stale_days}d"
-        lines.append(f"  - #{e.id} {e.name} ({tag})")
+        lines.append(f"  - #{e.id} {e.name[:80]} ({tag})")
     if summaries:
         summary = summaries[0].summary.replace("\n", " ").strip()[:_SUMMARY_MAX_CHARS]
         lines.append(f"Last session: {summary}")
@@ -44,9 +44,7 @@ def build_session_brief(db_path: str) -> str:
     Never raises — this feeds a hook that must not interrupt the agent.
     """
     try:
-        engine = create_engine(
-            f"sqlite:///{db_path}?mode=ro", connect_args={"uri": True}
-        )
+        engine = create_engine(f"sqlite:///file:{db_path}?mode=ro&uri=true")
         with Session(engine) as db:
             return render_brief(db)
     except Exception:

@@ -1,6 +1,8 @@
 import datetime
 
+import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session as SASession
 from sqlmodel import SQLModel, create_engine
 
@@ -67,7 +69,29 @@ def test_build_session_brief_readonly_path(tmp_path):
 
 
 def test_build_session_brief_missing_db_returns_empty(tmp_path):
-    assert build_session_brief(str(tmp_path / "nope.db")) == ""
+    db_path = tmp_path / "nope.db"
+    assert build_session_brief(str(db_path)) == ""
+    # The RO URI must raise (not create) against a missing file.
+    assert not db_path.exists()
+
+
+def test_build_session_brief_opens_readonly(tmp_path):
+    db_file = tmp_path / "ro.db"
+    eng = create_engine(f"sqlite:///{db_file}")
+    SQLModel.metadata.create_all(eng)
+    with SASession(eng) as db:
+        t = Task(name="brief-ro-task", status=TaskStatus.TODO)
+        db.add(t)
+        db.flush()
+        db.add(TaskState(task_id=t.id, last_touched_at=datetime.datetime.now()))
+        db.commit()
+    eng.dispose()
+
+    ro_engine = create_engine(f"sqlite:///file:{db_file}?mode=ro&uri=true")
+    with SASession(ro_engine) as db:
+        with pytest.raises(OperationalError, match="readonly"):
+            db.execute(text("INSERT INTO task (name, status) VALUES ('nope', 'todo')"))
+    ro_engine.dispose()
 
 
 def test_cli_session_brief_smoke(monkeypatch):

@@ -43,7 +43,7 @@ Complete in order. Do not advance past a failed gate.
 
 3. **Note type selected**
    - ✅ You have chosen the correct `note_type` using the decision tree below
-   - 🛑 If unsure: default to `investigation`. It's the broadest type.
+   - 🛑 If genuinely unsure, pick the most honest type from the finding itself — do NOT silently fall back to `investigation` (a mistyped note misleads `what_am_i_missing`).
 
 4. **Content is specific**
    - ✅ Content includes at least one of: file path, function name, error message, concrete finding, or explicit rationale
@@ -189,7 +189,7 @@ If wizard tool schemas are not already loaded, call `ToolSearch` to fetch the sc
 
 ### Step 1 — Identify the Note Type
 
-Use the decision tree above. If genuinely ambiguous, default to `investigation`.
+Use the decision tree above. If genuinely unsure, pick the most honest type from the finding itself — do NOT silently fall back to `investigation` (a mistyped note misleads `what_am_i_missing`).
 
 ### Step 2 — Draft the Content
 
