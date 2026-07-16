@@ -137,6 +137,20 @@ def hook_stop() -> None:
         pass  # hook failures must never interrupt the agent
 
 
+@hook_app.command("session-brief")
+def hook_session_brief() -> None:
+    """Print a compact read-only memory brief for the SessionStart hook."""
+    from wizard.config import settings
+    from wizard.session_brief import build_session_brief
+
+    try:
+        brief = build_session_brief(settings.db)
+    except Exception:
+        brief = ""
+    if brief:
+        typer.echo(brief)
+
+
 @hook_app.command("after-agent")
 def hook_after_agent() -> None:
     """Handle Gemini CLI AfterAgent hook — write last response as OBSERVATION note."""
