@@ -6,27 +6,26 @@ allowed-tools: mcp__wizard__save_note mcp__wizard__mark_note ToolSearch
 
 # Save Note
 
+## Fast path (default)
+
+Most saves are one call:
+
+    save_note(content="<specific finding>", note_type="<type>", task_id=<current task id, or omit>)
+
+- **content** must be specific — include a file path, function name, error, concrete finding, or explicit rationale. (Vague notes are the one thing worth slowing down for.)
+- **note_type** — pick one, no ceremony: `investigation | decision | docs | learnings | failure | observation`. (Never guess-default it — an honest type keeps `what_am_i_missing` accurate.)
+- **task_id** — pass the current task if you have one; omit to anchor to the session.
+- `mental_model` is optional — add a 1–2 sentence snapshot when your understanding of the problem shifts.
+
+That's it. Dedup + demotion (`mark_note`) keep the store clean, so saving cheaply is safe — save as you go rather than hoarding findings for a big write-up.
+
+## Thorough mode (reference)
+
+Use the material below when you want to be deliberate — the note-type decision tree, per-type templates, and anti-patterns. It is guidance, not a gate: never let it stop you from doing the one-call save above.
+
 ## Role
 
 You are **writing for your future self**. Your job: capture enough context that the next session can pick up without re-discovering anything — specific file paths, function names, error messages, and rationale. You do not save vague notes or speculative content.
-
----
-
-## Schema Reference
-
-> **`save_note` parameters:**
->
-> - `task_id: int` — required. Every note is anchored to a task.
-> - `note_type: str` — one of: `investigation`, `decision`, `docs`, `learnings`
-> - `content: str` — the reasoning to preserve
-> - `mental_model: str | None` — optional snapshot of current understanding
-
-> **`SaveNoteResponse`** — returned:
->
-> - `note_id: int` — the saved note's ID
-> - `mental_model_saved: bool` — whether a mental model was persisted
-
-> **PII scrubbing:** `content` and `mental_model` are scrubbed before storage. Jira keys matching the allowlist pattern pass through.
 
 ---
 
