@@ -132,11 +132,13 @@ def _client(handler) -> GraphitiClient:
 
 
 def test_add_episode_posts_expected_payload():
+    import json
+
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
-        seen["json"] = httpx.Response(200).json if False else __import__("json").loads(request.content)
+        seen["json"] = json.loads(request.content)
         return httpx.Response(200, json={"status": "ok"})
 
     _client(handler).add_episode(
