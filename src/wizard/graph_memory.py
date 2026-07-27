@@ -6,10 +6,12 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from datetime import datetime
 
 from .exceptions import GraphitiUnavailable
 from .integrations.graphiti import GraphitiClient
+from .schemas import SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -97,3 +99,24 @@ class GraphMemoryService:
             ok = False
         self._reachable_cache = (now, ok)
         return ok
+
+    def search(
+        self, db, query: str, limit: int, entity_type: str | None,
+        search_repo, fetch_display: Callable[[object, list[tuple[str, int]]], list[SearchResult]],
+    ) -> list[SearchResult]:
+        if not self.is_reachable():
+            return search_repo.hybrid_search(db, query, limit=limit, entity_type=entity_type)
+        try:
+            uuids = self._client.search(query, limit)
+        except GraphitiUnavailable as e:
+            logger.warning("Graphiti search failed, falling back to SQLite: %s", e)
+            return search_repo.hybrid_search(db, query, limit=limit, entity_type=entity_type)
+        pairs: list[tuple[str, int]] = []
+        for u in uuids:
+            parsed = parse_episode_uuid(u)
+            if parsed is None:
+                continue
+            if entity_type is not None and parsed[0] != entity_type:
+                continue
+            pairs.append(parsed)
+        return fetch_display(db, pairs)[:limit]
