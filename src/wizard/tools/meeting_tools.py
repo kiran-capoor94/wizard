@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 import sentry_sdk
 from fastmcp import Context
@@ -8,7 +9,14 @@ from fastmcp.server.elicitation import AcceptedElicitation
 from pydantic import BaseModel
 
 from ..database import get_session
-from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo
+from ..deps import (
+    get_graph_memory_service,
+    get_meeting_repo,
+    get_note_repo,
+    get_security,
+    get_task_repo,
+)
+from ..graph_memory import GraphMemoryService, meeting_body
 from ..mcp_instance import mcp
 from ..models import Meeting, MeetingCategory, Note, NoteType, TaskStatus
 from ..repositories import MeetingRepository, NoteRepository, TaskRepository
@@ -19,7 +27,7 @@ from ..schemas import (
 )
 from ..security import SecurityService
 from ..skills import SKILL_MEETING, load_skill_post
-from .formatting import try_notify
+from .formatting import spawn_background, try_notify
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +192,23 @@ async def save_meeting_summary(
         raise
 
 
+async def push_meeting_episode(
+    gms: GraphMemoryService,
+    meeting_id: int,
+    title: str,
+    category: str,
+    content: str,
+) -> None:
+    """Dual-write a meeting episode to Graphiti. push_episode is sync and internally
+    guarded by `enabled`; this thunk just keeps it on the spawn_background seam."""
+    gms.push_episode(
+        entity_type="meeting", entity_id=meeting_id,
+        name=f"meeting {meeting_id}",
+        reference_time=datetime.now(),
+        body=meeting_body(title=title, category=category, content=content, summary=None),
+    )
+
+
 async def ingest_meeting(
     ctx: Context,
     title: str,
@@ -194,6 +219,7 @@ async def ingest_meeting(
     category: MeetingCategory = MeetingCategory.GENERAL,
     meetings_repo: MeetingRepository = Depends(get_meeting_repo),
     sec: SecurityService = Depends(get_security),
+    gms: GraphMemoryService = Depends(get_graph_memory_service),
 ) -> IngestMeetingResponse:
     """Accepts meeting data (e.g. from Krisp MCP), scrubs and stores locally."""
     logger.info("ingest_meeting source_id=%s", source_id)
@@ -236,6 +262,9 @@ async def ingest_meeting(
 
         await try_notify(ctx.report_progress(2, 2))
         await try_notify(ctx.info(f"Meeting {meeting.id} ingested (existed=False)."))
+        spawn_background(
+            push_meeting_episode(gms, meeting.id, clean_title, category.value, clean_content)
+        )
         return IngestMeetingResponse(
             meeting_id=meeting.id,
             already_existed=False,
