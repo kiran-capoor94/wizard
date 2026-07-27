@@ -98,6 +98,14 @@ class SynthesisSettings(BaseModel):
         return data
 
 
+class GraphitiSettings(BaseModel):
+    enabled: bool = False
+    url: str = "http://localhost:8000"
+    group_id: str = "wizard"
+    timeout_seconds: float = 2.0
+    health_ttl_seconds: float = 30.0
+
+
 class SentrySettings(BaseModel):
     dsn: str = ""
     enabled: bool = False
@@ -140,6 +148,7 @@ class Settings(BaseSettings):
         default_factory=KnowledgeStoreSettings
     )
     synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
+    graphiti: GraphitiSettings = Field(default_factory=GraphitiSettings)
     sentry: SentrySettings = Field(default_factory=SentrySettings)
     modes: ModesSettings = Field(default_factory=ModesSettings)
     paths: WizardPaths = Field(default_factory=WizardPaths)
