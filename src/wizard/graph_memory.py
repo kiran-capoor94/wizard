@@ -5,6 +5,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from datetime import datetime
+
+from .exceptions import GraphitiUnavailable
+from .integrations.graphiti import GraphitiClient
 
 logger = logging.getLogger(__name__)
 
@@ -52,3 +57,43 @@ def meeting_body(title: str, category: str, content: str, summary: str | None) -
         "kind": "meeting", "title": title, "category": category,
         "content": content, "summary": summary,
     })
+
+
+class GraphMemoryService:
+    """Dual-writes Wizard entities to Graphiti and caches reachability checks."""
+
+    def __init__(
+        self, client: GraphitiClient, enabled: bool, health_ttl_seconds: float = 30.0
+    ) -> None:
+        self._client = client
+        self._enabled = enabled
+        self._ttl = health_ttl_seconds
+        self._reachable_cache: tuple[float, bool] | None = None
+
+    def push_episode(
+        self, entity_type: str, entity_id: int, body: str,
+        name: str, reference_time: datetime,
+    ) -> None:
+        if not self._enabled:
+            return
+        try:
+            self._client.add_episode(
+                name=name, body=body, reference_time=reference_time,
+                uuid=episode_uuid(entity_type, entity_id),
+                source_description=f"wizard:{entity_type}",
+            )
+        except GraphitiUnavailable as e:
+            logger.warning("Graphiti dual-write skipped (%s): %s", entity_type, e)
+
+    def is_reachable(self) -> bool:
+        if not self._enabled:
+            return False
+        now = time.monotonic()
+        if self._reachable_cache and now - self._reachable_cache[0] < self._ttl:
+            return self._reachable_cache[1]
+        try:
+            ok = self._client.health()
+        except GraphitiUnavailable:
+            ok = False
+        self._reachable_cache = (now, ok)
+        return ok
