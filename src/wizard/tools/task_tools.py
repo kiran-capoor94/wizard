@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime
 from typing import Annotated
 
 import sentry_sdk
@@ -10,8 +11,16 @@ from pydantic import BeforeValidator
 from sqlalchemy import text as _sa_text
 
 from ..database import engine, get_session
-from ..deps import get_meeting_repo, get_note_repo, get_security, get_task_repo, get_task_state_repo
+from ..deps import (
+    get_graph_memory_service,
+    get_meeting_repo,
+    get_note_repo,
+    get_security,
+    get_task_repo,
+    get_task_state_repo,
+)
 from ..embedding import embed, serialize_float32
+from ..graph_memory import GraphMemoryService, note_body
 from ..mcp_instance import mcp
 from ..models import (
     MENTAL_MODEL_MAX_CHARS,
@@ -35,6 +44,7 @@ from ..schemas import (
 from ..security import SecurityService
 from ..skills import SKILL_TASK_START, load_skill_post
 from .formatting import spawn_background, try_notify
+from .note_tools import select_key_notes
 from .task_fields import (
     apply_task_fields,
     check_duplicate_name,
@@ -62,68 +72,6 @@ NoteTypeCI = Annotated[NoteType, BeforeValidator(_normalize_note_type)]
 
 logger = logging.getLogger(__name__)
 
-_KEY_NOTES_CAP = 5  # max notes returned by task_start
-
-
-def _add_tier_notes(
-    selected: list,
-    seen: set[int],
-    notes: list,
-) -> None:
-    """Add notes from a tier until cap is reached. Modifies selected and seen in place."""
-    for n in sorted(notes, key=lambda x: x.created_at):
-        if len(selected) >= _KEY_NOTES_CAP:
-            break
-        if n.id is not None and n.id not in seen:
-            selected.append(n)
-            seen.add(n.id)
-
-
-def _select_key_notes(notes_desc: list) -> list:
-    """Select the most informative notes for task_start context.
-
-    Priority (hard-ordered, total capped at _KEY_NOTES_CAP):
-    0. All failure notes — what didn't work is load-bearing context.
-    1. All decision notes — resolved choices are always load-bearing.
-    2. Notes with mental_models — explicit understanding captures.
-    3. Fill remaining slots with most recent notes (newest-first).
-
-    Returns notes in priority order (oldest-first within tiers 0-2, newest-first for tier 3).
-    """
-    selected = []
-    seen: set[int] = set()
-
-    # Tier 0: failure notes (oldest-first within tier)
-    failure_notes = [
-        n for n in notes_desc
-        if n.note_type == NoteType.FAILURE and n.id is not None
-    ]
-    _add_tier_notes(selected, seen, failure_notes)
-
-    # Tier 1: decision notes (oldest-first within tier)
-    decision_notes = [
-        n for n in notes_desc
-        if n.note_type == NoteType.DECISION and n.id is not None
-    ]
-    _add_tier_notes(selected, seen, decision_notes)
-
-    # Tier 2: notes with mental models (oldest-first within tier)
-    mental_model_notes = [
-        n for n in notes_desc
-        if n.mental_model is not None and n.id is not None
-    ]
-    _add_tier_notes(selected, seen, mental_model_notes)
-
-    # Tier 3: fill remaining slots with most recent notes (newest-first)
-    for n in notes_desc:
-        if len(selected) >= _KEY_NOTES_CAP:
-            break
-        if n.id is not None and n.id not in seen:
-            selected.append(n)
-            seen.add(n.id)
-
-    return selected
-
 
 async def task_start(
     ctx: Context,
@@ -150,7 +98,7 @@ async def task_start(
                 key = note.note_type.value
                 notes_by_type[key] = notes_by_type.get(key, 0) + 1
 
-            key_notes = _select_key_notes(all_notes)
+            key_notes = select_key_notes(all_notes)
             prior_notes = [NoteDetail.from_model(n) for n in key_notes if n.id is not None]
             latest_mental_model = next(
                 (n.mental_model for n in all_notes if n.mental_model is not None), None
@@ -289,6 +237,29 @@ async def write_embedding(note_id: int, content: str) -> None:
         logger.warning("embedding write failed for note %d: %s", note_id, e)
 
 
+async def push_note_episode(
+    gms: GraphMemoryService,
+    note_id: int,
+    note_type: NoteType,
+    clean: str,
+    mental_model: str | None,
+    task_db_id: int,
+    session_id: int | None,
+) -> None:
+    """Dual-write a note episode to Graphiti. push_episode is sync and internally
+    guarded by `enabled`; this thunk just keeps it on the spawn_background seam."""
+    gms.push_episode(
+        entity_type="note", entity_id=note_id,
+        name=f"note {note_id}",
+        reference_time=datetime.now(),
+        body=note_body(
+            note_type=note_type.value, content=clean,
+            mental_model=mental_model, task_id=task_db_id,
+            session_id=session_id, supersedes_note_id=None,
+        ),
+    )
+
+
 async def save_note(
     ctx: Context,
     task_id: int,
@@ -299,6 +270,7 @@ async def save_note(
     sec: SecurityService = Depends(get_security),
     n_repo: NoteRepository = Depends(get_note_repo),
     t_state_repo: TaskStateRepository = Depends(get_task_state_repo),
+    gms: GraphMemoryService = Depends(get_graph_memory_service),
 ) -> SaveNoteResponse:
     """Scrub and persist a note.
 
@@ -346,6 +318,9 @@ async def save_note(
                 logger.warning("save_note: mental model synthesis failed: %s", e)
         if not result.was_duplicate:
             spawn_background(write_embedding(result.note_id, clean))
+            spawn_background(push_note_episode(
+                gms, result.note_id, note_type, clean, mental_model, task_db_id, session_id,
+            ))
 
         await try_notify(ctx.report_progress(1, 2))
         await try_notify(ctx.report_progress(2, 2))
