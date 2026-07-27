@@ -27,6 +27,13 @@ def test_parse_rejects_foreign_uuids():
     assert parse_episode_uuid("wizard-note-notanint") is None
 
 
+def test_parse_rejects_task_uuids():
+    # Tasks are never written to Graphiti (no dual-write path exists for
+    # them), so a "wizard-task-*" uuid can never legitimately be a graph
+    # hit — it must be dropped rather than treated as valid-but-unfindable.
+    assert parse_episode_uuid("wizard-task-5") is None
+
+
 def test_note_body_encodes_supersedes_uuid():
     body = json.loads(note_body(
         note_type="DECISION", content="use WAL", mental_model="lock contention",
