@@ -4,8 +4,16 @@ from unittest.mock import MagicMock
 
 from wizard.exceptions import GraphitiUnavailable
 from wizard.graph_memory import (
-    GraphMemoryService, episode_uuid, parse_episode_uuid, note_body,
+    GraphMemoryService,
+    episode_uuid,
+    note_body,
+    parse_episode_uuid,
 )
+from wizard.schemas import SearchResult
+
+
+def _sr(eid: int) -> SearchResult:
+    return SearchResult(entity_type="note", entity_id=eid, title="t", snippet="s")
 
 
 def test_uuid_round_trip():
@@ -51,3 +59,36 @@ def test_is_reachable_false_on_unavailable():
     client = MagicMock()
     client.health.side_effect = GraphitiUnavailable("down")
     assert GraphMemoryService(client=client, enabled=True).is_reachable() is False
+
+
+def test_search_uses_graphiti_when_reachable():
+    client = MagicMock()
+    client.health.return_value = True
+    client.search.return_value = ["wizard-note-42", "kiranos-idea-9", "wizard-note-7"]
+    svc = GraphMemoryService(client=client, enabled=True)
+
+    captured = {}
+    def fetch_display(db, pairs):
+        captured["pairs"] = pairs
+        return [_sr(42), _sr(7)]
+    repo = MagicMock()
+
+    out = svc.search(db=None, query="q", limit=10, entity_type=None,
+                     search_repo=repo, fetch_display=fetch_display)
+    # foreign uuid dropped; order preserved
+    assert captured["pairs"] == [("note", 42), ("note", 7)]
+    assert [r.entity_id for r in out] == [42, 7]
+    repo.hybrid_search.assert_not_called()
+
+
+def test_search_falls_back_when_unreachable():
+    client = MagicMock()
+    client.health.side_effect = GraphitiUnavailable("down")
+    repo = MagicMock()
+    repo.hybrid_search.return_value = [_sr(1)]
+    svc = GraphMemoryService(client=client, enabled=True)
+
+    out = svc.search(db=None, query="q", limit=10, entity_type=None,
+                     search_repo=repo, fetch_display=lambda db, p: [])
+    assert [r.entity_id for r in out] == [1]
+    repo.hybrid_search.assert_called_once()
