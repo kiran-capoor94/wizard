@@ -15,7 +15,9 @@ from .schemas import SearchResult
 
 logger = logging.getLogger(__name__)
 
-_VALID_TYPES = {"note", "session", "meeting", "task"}
+# "task" excluded: tasks are never written to Graphiti, so recognizing the
+# type here would make task hits silently unfindable in graphiti-mode.
+_VALID_TYPES = {"note", "session", "meeting"}
 
 
 def episode_uuid(entity_type: str, entity_id: int) -> str:
