@@ -16,10 +16,12 @@ def test_word_form_variation_matches_after_stemming(monkeypatch):
                  # is standalone (no task/session/meeting), so give it an
                  # artifact_id directly.
                  artifact_id="test-fts-stemming-note")
-        db.add(n); db.commit()
+        db.add(n)
+        db.commit()
         try:
             # "caching" (query) vs "cache" (note) only match if stemmed.
             results = SearchRepository().hybrid_search(db, "caching templates", limit=10)
             assert any(r.entity_id == n.id for r in results)
         finally:
-            db.delete(n); db.commit()
+            db.delete(n)
+            db.commit()
