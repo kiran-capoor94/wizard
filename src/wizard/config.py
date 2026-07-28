@@ -112,6 +112,9 @@ class GraphitiSettings(BaseModel):
     group_id: str = "wizard"
     timeout_seconds: float = 2.0
     health_ttl_seconds: float = 30.0
+    write_timeout_seconds: float = 30.0  # /messages does per-episode LLM extraction
+    backfill_batch_size: int = 25  # episodes per batch before pausing
+    backfill_pause_seconds: float = 5.0  # sleep between batches so the serial worker drains
 
 
 class SentrySettings(BaseModel):
