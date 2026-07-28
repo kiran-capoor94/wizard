@@ -173,3 +173,42 @@ def test_health_http_status_error_raises_graphiti_unavailable():
 
     with pytest.raises(GraphitiUnavailable):
         _client(handler).health()
+
+
+def test_add_episode_uses_write_timeout_search_uses_read_timeout(monkeypatch):
+    seen_timeouts = []
+    real_client = httpx.Client
+
+    def recording_client(*args, **kwargs):
+        seen_timeouts.append(kwargs["timeout"])
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", recording_client)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/messages":
+            return httpx.Response(200, json={"status": "ok"})
+        return httpx.Response(200, json={"facts": []})
+
+    c = GraphitiClient(
+        url="http://graph.test", group_id="wizard",
+        timeout_seconds=1.0, write_timeout_seconds=30.0,
+    )
+    c._transport = httpx.MockTransport(handler)
+
+    c.search("q", limit=10)
+    c.add_episode(
+        name="note 42", body='{"kind":"note"}',
+        reference_time=datetime(2026, 7, 28, 12, 0, 0),
+        uuid="wizard-note-42", source_description="wizard:note",
+    )
+
+    assert seen_timeouts[0] == 1.0
+    assert seen_timeouts[1] == 30.0
+    assert seen_timeouts[0] != seen_timeouts[1]
+
+
+def test_write_timeout_defaults_to_read_timeout_when_not_given():
+    c = GraphitiClient(url="http://graph.test", group_id="wizard", timeout_seconds=1.0)
+    assert c._write_timeout == 1.0
+    assert c._read_timeout == 1.0

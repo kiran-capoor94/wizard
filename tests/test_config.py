@@ -8,3 +8,6 @@ def test_graphiti_defaults_are_inert():
     assert s.graphiti.group_id == "wizard"
     assert s.graphiti.timeout_seconds == 2.0
     assert s.graphiti.health_ttl_seconds == 30.0
+    assert s.graphiti.write_timeout_seconds == 30.0
+    assert s.graphiti.backfill_batch_size == 25
+    assert s.graphiti.backfill_pause_seconds == 5.0
