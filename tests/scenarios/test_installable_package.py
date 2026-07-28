@@ -50,7 +50,7 @@ def test_is_editable_install_true_when_editable():
 
     fake_meta = MagicMock()
     fake_meta.read_text.return_value = '{"url": "file:///repo", "dir_info": {"editable": true}}'
-    with patch("wizard.cli.main.importlib_metadata.distribution", return_value=fake_meta):
+    with patch("wizard.cli.update.importlib_metadata.distribution", return_value=fake_meta):
         assert is_editable_install() is True
 
 
@@ -60,5 +60,5 @@ def test_is_editable_install_false_when_tool_install():
 
     fake_meta = MagicMock()
     fake_meta.read_text.return_value = '{"url": "https://github.com/...", "vcs_info": {}}'
-    with patch("wizard.cli.main.importlib_metadata.distribution", return_value=fake_meta):
+    with patch("wizard.cli.update.importlib_metadata.distribution", return_value=fake_meta):
         assert is_editable_install() is False
