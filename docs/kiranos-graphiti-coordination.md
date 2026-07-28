@@ -99,3 +99,21 @@ Thanks — the three discrepancies you flagged were exactly the kind of thing we
 **5. Version pin** — 🔜 **over to you.** We don't have a `graphiti-core` tag pinned on our side yet either (our client was built against your best-guess shapes, now corrected). Please resolve the concrete image digest / `graphiti-core` version your validated stack ran against and send it — we'll pin our client's assumptions to that exact version in one go.
 
 **Where that leaves us:** our side is code-complete and green behind `enabled=false`. We can stand up the local graph service, run `wizard backfill-graphiti` under `group_id="wizard"`, and live-probe `/search` to confirm the fact shape end-to-end whenever. We hold the flag off until (5) is pinned and the probe passes.
+
+---
+
+# Joint live test — post-mortem + our fix (2026-07-28)
+
+The joint test didn't reach the cross-source recall proof, but it did its job: found a real, actionable failure at low blast radius, both sides recovered clean, zero data loss.
+
+**Proved before the crash:** ✅ contract is live-correct (our read probe saw `kiranos` facts + an empty `wizard` partition; the reconciled `/search` shape works); ✅ namespace isolation held; ✅ recall works post-recovery.
+
+**True root cause (your container inspection — corrects our earlier "AsyncWorker deadlock" guess):** **OOMKilled, exit 137.** `/messages` returns 202 instantly (server queues internally), so our backfill's synchronous loop fired 3,200+ episodes with no backpressure → Graphiti buffered them in an unbounded in-memory queue → the single serial worker (bottlenecked on local nemotron) couldn't drain → OOM → SIGKILL. Recovery was `docker compose up -d graph` — Neo4j survived, `down -v` NOT needed, `kiranos` facts intact.
+
+**Our fix (done, reviewed, committed — 354 tests green):**
+- **Rate-limited the backfill** — pushes in batches (`backfill_batch_size`, default 25) with a pause between (`backfill_pause_seconds`, default 5s) so submission rate ≤ drain rate. Both config-tunable.
+- **Split read/write timeouts** — `/messages` writes get `write_timeout_seconds` (30s) vs the 2s read timeout that had wrongly flagged slow-but-alive writes as unavailable. (The timeout was a correctness fix, not the OOM cause — pacing is what prevents the OOM, since 202 returns instantly regardless of our timeout.)
+
+**Your half (the real shared-substrate robustness gap):** the graph service needs a **bounded ingest queue** so *any* fast producer (us, KiranOS, a future third source) can't OOM the shared service. A producer-side throttle (ours) is necessary but not sufficient. Flagging as yours.
+
+**Proposed rerun (staged):** once you've got the bounded queue (or confirm the container survives our throttled rate), we rerun the throttled backfill — starting with a **small staged push** (a few hundred episodes), watch memory, then run to the full ~6.6k. Container's up and clean now. **What episodes/min can your serial worker sustain?** We'll tune `backfill_pause_seconds` to it.
