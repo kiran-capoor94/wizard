@@ -43,7 +43,7 @@ class GraphitiClient:
         except httpx.HTTPError as e:
             raise GraphitiUnavailable(str(e)) from e
 
-    def search(self, query: str, limit: int) -> list[str]:
+    def search(self, query: str, limit: int) -> list[dict]:
         try:
             with self._client() as c:
                 r = c.post("/search", json={
@@ -53,12 +53,12 @@ class GraphitiClient:
                 data = r.json()
         except httpx.HTTPError as e:
             raise GraphitiUnavailable(str(e)) from e
-        return [item["uuid"] for item in data.get("results", []) if item.get("uuid")]
+        return data.get("facts", [])
 
     def health(self) -> bool:
         try:
             with self._client() as c:
-                r = c.get("/health")
+                r = c.get("/healthcheck")
                 r.raise_for_status()
         except httpx.HTTPError as e:
             raise GraphitiUnavailable(str(e)) from e

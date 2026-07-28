@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable
 from datetime import datetime
 
 from .exceptions import GraphitiUnavailable
@@ -63,6 +62,31 @@ def meeting_body(title: str, category: str, content: str, summary: str | None) -
     })
 
 
+def _parse_ts(value: str | None) -> datetime | None:
+    """Safely parse an ISO timestamp string. Returns None on missing/unparseable
+    input rather than raising — a bad timestamp must not break search."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def fact_to_search_result(fact: dict) -> SearchResult:
+    """Map a Graphiti /search fact dict to a fact-level SearchResult.
+
+    Facts are graph-extracted edges, not Wizard rows — entity_id is None.
+    """
+    return SearchResult(
+        entity_type="fact",
+        entity_id=None,
+        title=fact.get("name") or "fact",
+        snippet=fact.get("fact") or "",
+        created_at=_parse_ts(fact.get("valid_at") or fact.get("created_at")),
+    )
+
+
 class GraphMemoryService:
     """Dual-writes Wizard entities to Graphiti and caches reachability checks."""
 
@@ -103,22 +127,13 @@ class GraphMemoryService:
         return ok
 
     def search(
-        self, db, query: str, limit: int, entity_type: str | None,
-        search_repo, fetch_display: Callable[[object, list[tuple[str, int]]], list[SearchResult]],
+        self, db, query: str, limit: int, entity_type: str | None, search_repo,
     ) -> list[SearchResult]:
         if not self.is_reachable():
             return search_repo.hybrid_search(db, query, limit=limit, entity_type=entity_type)
         try:
-            uuids = self._client.search(query, limit)
+            facts = self._client.search(query, limit)
         except GraphitiUnavailable as e:
             logger.warning("Graphiti search failed, falling back to SQLite: %s", e)
             return search_repo.hybrid_search(db, query, limit=limit, entity_type=entity_type)
-        pairs: list[tuple[str, int]] = []
-        for u in uuids:
-            parsed = parse_episode_uuid(u)
-            if parsed is None:
-                continue
-            if entity_type is not None and parsed[0] != entity_type:
-                continue
-            pairs.append(parsed)
-        return fetch_display(db, pairs)[:limit]
+        return [fact_to_search_result(f) for f in facts][:limit]
