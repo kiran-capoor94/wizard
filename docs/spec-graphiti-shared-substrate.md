@@ -73,7 +73,7 @@ Graphiti side:
 | HTTP surface | REST graph service (`GRAPHITI_URL`, default `http://localhost:8000`), local embedder |
 | Search when Graphiti up | Graphiti **only**; SQLite `hybrid_search` is fallback when unreachable/errors |
 | Entity → episode | One episode per note / session-close / meeting; rich fields as JSON body |
-| Result mapping | Episode-level: parse `uuid` → `(entity_type, int id)`, fetch title/snippet from SQLite |
+| Result mapping | **Corrected:** `/search` returns extracted facts, not episode uuids. Fact-level: map fact dict → `SearchResult(entity_type="fact", entity_id=None)` directly, no SQLite round-trip |
 
 ## Architecture
 
@@ -94,11 +94,19 @@ search (tool)
         ▼
   GraphMemoryService.search(query, limit, entity_type)   [services]
         │  reachable? ── yes ─▶ GraphitiClient.search(group_ids=["wizard"])
-        │                          │ parse uuids → (type,id) → SQLite fetch → SearchResult
+        │                          │ facts → fact_to_search_result → SearchResult (entity_type="fact")
         │  reachable? ── no  ─▶ SearchRepository.hybrid_search(...)   [existing, unchanged]
         ▼
-  SearchResponse   (schema unchanged)
+  SearchResponse   (SearchResult.entity_type widened with "fact"; entity_id now int | None)
 ```
+
+**Correction (post-implementation):** KiranOS confirmed the real Graphiti REST contract —
+`/search` returns extracted **facts** (`{uuid, name, fact, created_at, valid_at}`), not the
+episode uuids Wizard wrote. The original "parse `wizard-note-42` → SQLite round-trip" read
+path therefore always returned empty in graphiti-mode. Graphiti-mode `search` now returns
+fact-level `SearchResult`s directly (`entity_type="fact"`, `entity_id=None`, `snippet` = the
+fact text, `title` = the fact name) with no SQLite hydration step. The SQLite fallback path
+is unchanged and still returns real row-level results with real `entity_id`s.
 
 ### Components
 
@@ -114,8 +122,8 @@ search (tool)
    - `push_episode(entity_type, entity_id, payload, reference_time)` — builds the JSON body,
      computes `uuid = f"wizard-{entity_type}-{entity_id}"`, calls the client. Swallows/logs
      `GraphitiUnavailable` (dual-write must never fail the originating tool).
-   - `search(query, limit, entity_type)` — reachability branch above; maps Graphiti episode
-     results back to `SearchResult` by parsing the uuid and fetching display fields from SQLite;
+   - `search(query, limit, entity_type)` — reachability branch above; maps each Graphiti fact
+     dict directly to a fact-level `SearchResult` (`fact_to_search_result`, no SQLite lookup);
      falls back to `SearchRepository.hybrid_search` otherwise.
 
 3. **`config.py` — `GraphitiSettings`**: `enabled: bool = False`, `url: str = "http://localhost:8000"`,

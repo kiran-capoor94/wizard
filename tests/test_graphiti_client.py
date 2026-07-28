@@ -33,13 +33,18 @@ def test_add_episode_posts_expected_payload():
     assert seen["json"]["messages"][0]["uuid"] == "wizard-note-42"
 
 
-def test_search_returns_uuids_in_order():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"results": [
-            {"uuid": "wizard-note-42"}, {"uuid": "wizard-session-5"}]})
+def test_search_returns_facts():
+    facts = [
+        {
+            "uuid": "e1", "name": "n1", "fact": "note_42 mentions WAL",
+            "created_at": "2026-07-28T00:00:00", "valid_at": "2026-07-28T00:00:00",
+        },
+    ]
 
-    assert _client(handler).search("db lock", limit=10) == [
-        "wizard-note-42", "wizard-session-5"]
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"facts": facts})
+
+    assert _client(handler).search("db lock", limit=10) == facts
 
 
 def test_connection_error_raises_graphiti_unavailable():

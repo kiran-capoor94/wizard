@@ -76,7 +76,8 @@ wizard backfill-graphiti   # push existing notes/sessions/meetings into the shar
 - `update_task_status` is deprecated; always use `update_task`.
 - `search` serves from the shared Graphiti graph when `settings.graphiti.enabled` is true and the
   service is reachable; otherwise it falls back to the local hybrid BM25+cosine engine. Graphiti
-  dual-writes are fire-and-forget and never block or fail a tool call.
+  dual-writes are fire-and-forget and never block or fail a tool call. Graphiti-mode results are
+  extracted facts (entity_type='fact', no row id); the SQLite fallback returns row-level results.
 
 ## File Size & Structural Thresholds
 

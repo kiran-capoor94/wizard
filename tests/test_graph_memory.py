@@ -6,6 +6,7 @@ from wizard.exceptions import GraphitiUnavailable
 from wizard.graph_memory import (
     GraphMemoryService,
     episode_uuid,
+    fact_to_search_result,
     note_body,
     parse_episode_uuid,
 )
@@ -71,20 +72,18 @@ def test_is_reachable_false_on_unavailable():
 def test_search_uses_graphiti_when_reachable():
     client = MagicMock()
     client.health.return_value = True
-    client.search.return_value = ["wizard-note-42", "kiranos-idea-9", "wizard-note-7"]
+    client.search.return_value = [
+        {"name": "n", "fact": "WAL contention", "valid_at": "2026-07-28T00:00:00"},
+    ]
     svc = GraphMemoryService(client=client, enabled=True)
-
-    captured = {}
-    def fetch_display(db, pairs):
-        captured["pairs"] = pairs
-        return [_sr(42), _sr(7)]
     repo = MagicMock()
 
-    out = svc.search(db=None, query="q", limit=10, entity_type=None,
-                     search_repo=repo, fetch_display=fetch_display)
-    # foreign uuid dropped; order preserved
-    assert captured["pairs"] == [("note", 42), ("note", 7)]
-    assert [r.entity_id for r in out] == [42, 7]
+    out = svc.search(db=None, query="q", limit=10, entity_type=None, search_repo=repo)
+    assert len(out) == 1
+    result = out[0]
+    assert result.entity_type == "fact"
+    assert result.entity_id is None
+    assert result.snippet == "WAL contention"
     repo.hybrid_search.assert_not_called()
 
 
@@ -95,7 +94,38 @@ def test_search_falls_back_when_unreachable():
     repo.hybrid_search.return_value = [_sr(1)]
     svc = GraphMemoryService(client=client, enabled=True)
 
-    out = svc.search(db=None, query="q", limit=10, entity_type=None,
-                     search_repo=repo, fetch_display=lambda db, p: [])
+    out = svc.search(db=None, query="q", limit=10, entity_type=None, search_repo=repo)
     assert [r.entity_id for r in out] == [1]
     repo.hybrid_search.assert_called_once()
+
+
+def test_fact_to_search_result_maps_fields():
+    result = fact_to_search_result({
+        "name": "n1", "fact": "note_42 mentions WAL", "valid_at": "2026-07-28T00:00:00",
+    })
+    assert result.entity_type == "fact"
+    assert result.entity_id is None
+    assert result.title == "n1"
+    assert result.snippet == "note_42 mentions WAL"
+    assert result.created_at is not None
+
+
+def test_fact_to_search_result_prefers_created_at_when_no_valid_at():
+    result = fact_to_search_result({
+        "name": "n1", "fact": "f", "created_at": "2026-07-28T00:00:00",
+    })
+    assert result.created_at is not None
+
+
+def test_fact_to_search_result_handles_missing_fields_without_raising():
+    result = fact_to_search_result({})
+    assert result.entity_type == "fact"
+    assert result.entity_id is None
+    assert result.title == "fact"
+    assert result.snippet == ""
+    assert result.created_at is None
+
+
+def test_fact_to_search_result_handles_unparseable_timestamp():
+    result = fact_to_search_result({"name": "n", "fact": "f", "valid_at": "not-a-date"})
+    assert result.created_at is None

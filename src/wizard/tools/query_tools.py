@@ -260,14 +260,17 @@ async def search(
     """Search across notes, sessions, meetings, and tasks by keyword.
 
     Serves from the shared Graphiti graph when reachable, else the local
-    hybrid BM25+cosine engine. Result shape is identical either way.
-    entity_type: optional filter — 'note', 'session', 'meeting', or 'task'.
+    hybrid BM25+cosine engine. When Graphiti serves the query, results are
+    extracted facts (entity_type="fact", entity_id=None) rather than
+    row-level hits; the SQLite fallback returns row-level results as before.
+    entity_type: optional filter — 'note', 'session', 'meeting', or 'task'
+    (applies only to the SQLite path; Graphiti-mode facts have no entity_type
+    to filter by, so this param is ignored on that path).
     """
     if not query.strip():
         raise ToolError("query must not be empty")
     results = gms.search(
-        db=db, query=query, limit=limit, entity_type=entity_type,
-        search_repo=s_repo, fetch_display=s_repo.fetch_by_keys,
+        db=db, query=query, limit=limit, entity_type=entity_type, search_repo=s_repo,
     )
     return SearchResponse(results=results, total=len(results))
 
