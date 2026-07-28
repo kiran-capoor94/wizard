@@ -7,14 +7,13 @@ import sentry_sdk
 from fastmcp import Context
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import ToolError
-from pydantic import ValidationError
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import text
-from sqlmodel import Session
 
 from ..config import settings
 from ..database import get_session
 from ..deps import (
+    get_graph_memory_service,
     get_meeting_repo,
     get_note_repo,
     get_security,
@@ -22,6 +21,7 @@ from ..deps import (
     get_task_repo,
     get_task_state_repo,
 )
+from ..graph_memory import GraphMemoryService, session_body
 from ..mcp_instance import mcp
 from ..models import Note, NoteType, ToolCall, WizardSession
 from ..repositories import (
@@ -33,13 +33,10 @@ from ..repositories import (
 )
 from ..schemas import (
     SESSION_FIELD_MAX_CHARS,
-    NoteDetail,
-    ResumedTaskNotes,
     ResumeSessionResponse,
     SessionEndResponse,
     SessionStartResponse,
     SessionState,
-    TaskContext,
 )
 from ..security import SecurityService, is_safe_session_id
 from ..services import SessionCloser
@@ -54,7 +51,9 @@ from .mode_tools import build_available_modes
 from .session_helpers import (
     build_prior_summaries,
     build_wizard_context,
+    deserialise_session_state,
     find_previous_session_id,
+    group_prior_notes,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,6 +227,25 @@ def _scrub_session_state(
     return state, state.intent
 
 
+async def push_session_episode(
+    gms: GraphMemoryService,
+    session_id: int,
+    state: SessionState,
+) -> None:
+    """Dual-write a session episode to Graphiti. push_episode is sync and internally
+    guarded by `enabled`; this thunk just keeps it on the spawn_background seam."""
+    gms.push_episode(
+        entity_type="session", entity_id=session_id,
+        name=f"session {session_id}",
+        reference_time=datetime.datetime.now(),
+        body=session_body(
+            intent=state.intent, state_delta=state.state_delta,
+            open_loops=state.open_loops, next_actions=state.next_actions,
+            closure_status=state.closure_status,
+        ),
+    )
+
+
 async def _persist_session_end(
     ctx: Context,
     session_id: int,
@@ -241,6 +259,7 @@ async def _persist_session_end(
     tool_registry: str | None,
     sec: SecurityService,
     n_repo: NoteRepository,
+    gms: GraphMemoryService,
 ) -> SessionEndResponse:
     """Write session close state and summary note to the DB; return response."""
     state, clean_intent = _scrub_session_state(
@@ -307,6 +326,8 @@ async def _persist_session_end(
             skill_instructions=load_skill_post(SKILL_SESSION_END),
         )
 
+    spawn_background(push_session_episode(gms, session_id, state))
+
     with get_session() as maint_db:
         try:
             maint_db.execute(text("PRAGMA incremental_vacuum(100)"))
@@ -330,13 +351,14 @@ async def session_end(
     tool_registry: str | None = None,
     sec: SecurityService = Depends(get_security),
     n_repo: NoteRepository = Depends(get_note_repo),
+    gms: GraphMemoryService = Depends(get_graph_memory_service),
 ) -> SessionEndResponse:
     """Persists session summary + SessionState to WizardSession."""
     logger.info("session_end session_id=%d", session_id)
     try:
         response = await _persist_session_end(
             ctx, session_id, summary, intent, working_set, state_delta,
-            open_loops, next_actions, closure_status, tool_registry, sec, n_repo,
+            open_loops, next_actions, closure_status, tool_registry, sec, n_repo, gms,
         )
     except ValueError as e:
         logger.warning("session_end failed: %s", e)
@@ -352,64 +374,6 @@ async def session_end(
             logger.warning("session_end: skill candidate detection failed: %s", e)
 
     return response
-
-
-def _deserialise_session_state(
-    db: Session, prior: WizardSession, t_repo: TaskRepository
-) -> tuple[SessionState | None, list[TaskContext]]:
-    """Deserialise prior session_state JSON and rebuild working set task contexts."""
-    if prior.session_state is None:
-        logger.warning(
-            "Session %d was not cleanly closed — no structured state available. "
-            "Falling back to note history.",
-            prior.id,
-        )
-        return None, []
-    try:
-        state = SessionState.model_validate_json(prior.session_state)
-        working_set = t_repo.get_task_contexts_by_ids(db, list(state.working_set))
-        return state, working_set
-    except (ValueError, ValidationError) as e:
-        logger.warning("Failed to deserialise session_state: %s", e)
-        return None, []
-
-
-_RESUME_NOTES_PER_TASK = 3
-
-
-def _group_prior_notes(
-    db: Session, session_id: int, n_repo: NoteRepository, t_repo: TaskRepository
-) -> list[ResumedTaskNotes]:
-    """Query notes for a session, grouped by task with latest mental model.
-
-    Returns at most 3 notes per task (most recent). Full history is available
-    via rewind_task when needed.
-    """
-    by_task = n_repo.get_notes_grouped_by_task(db, session_id, active_only=True)
-    if not by_task:
-        return []
-
-    task_ids = list(by_task.keys())
-    task_contexts = {tc.id: tc for tc in t_repo.get_task_contexts_by_ids(db, task_ids)}
-
-    result: list[ResumedTaskNotes] = []
-    for tid, notes in by_task.items():
-        tc = task_contexts.get(tid)
-        if tc is not None:
-            latest_mm = next(
-                (n.mental_model for n in reversed(notes) if n.mental_model is not None),
-                None,
-            )
-            # Tiered delivery: cap notes per task to avoid bloating resume context
-            capped = notes[-_RESUME_NOTES_PER_TASK:]
-            result.append(
-                ResumedTaskNotes(
-                    task=tc,
-                    notes=[NoteDetail.from_model(n) for n in capped],
-                    latest_mental_model=latest_mm,
-                )
-            )
-    return result
 
 
 async def resume_session(
@@ -464,9 +428,9 @@ async def resume_session(
             keyed_dir.mkdir(parents=True, exist_ok=True)
             (keyed_dir / "wizard_id").write_text(str(new_session.id))
 
-        session_state, working_set_tasks = _deserialise_session_state(db, prior, t_repo)
+        session_state, working_set_tasks = deserialise_session_state(db, prior, t_repo)
 
-        prior_notes = _group_prior_notes(db, prior.id, n_repo, t_repo)
+        prior_notes = group_prior_notes(db, prior.id, n_repo, t_repo)
 
         return ResumeSessionResponse(
             session_id=new_session.id,

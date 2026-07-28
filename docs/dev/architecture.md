@@ -16,6 +16,7 @@ src/wizard/
     analytics.py             # Session/note/task usage stats (wizard analytics)
     dashboard.py             # Streamlit health dashboard — 5 panels: active session, recent notes, synthesis health, memory utilisation, tool call frequency
     verify.py                # `wizard verify` — 5-step MCP handshake smoke test
+    graphiti.py               # `wizard backfill-graphiti` — pushes existing notes/sessions/meetings into Graphiti
   mcp_instance.py            # FastMCP app factory; registers ToolLoggingMiddleware + skills
   skills.py                  # Skill loader (reads ~/.wizard/skills/ at startup)
   synthesis_prompt.py        # Transcript filtering and prompt construction for synthesis (`filter_for_synthesis`, `format_prompt`, `KEEP_RESULT_TOOLS`, `ROLE_CHAR_LIMITS`)
@@ -39,6 +40,9 @@ src/wizard/
     task_state.py            # TaskStateRepository
     search.py                # SearchRepository — FTS5 fan-out across notes/sessions/meetings/tasks; BM25 ranked
     analytics.py             # AnalyticsRepository — tool call frequency, session/note/task usage stats
+  integrations/               # Thin third-party API wrappers (no business logic)
+    graphiti.py               # GraphitiClient — REST wrapper over the shared Graphiti graph service
+  graph_memory.py            # GraphMemoryService — dual-write + Graphiti-primary/SQLite-fallback search, gated behind `settings.graphiti.enabled`
   resources.py               # 5 read-only MCP resources (wizard://* URIs)
   prompts.py                 # MCP prompt templates
   middleware.py              # ToolLoggingMiddleware (Sentry spans per tool) + SessionStateMiddleware (session snapshot + Sentry user tag)

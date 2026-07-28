@@ -12,12 +12,14 @@ from sqlmodel import Session
 
 from ..deps import get_db_session as _get_db_session
 from ..deps import (
+    get_graph_memory_service,
     get_note_repo,
     get_search_repo,
     get_session_repo,
     get_task_repo,
     get_task_state_repo,
 )
+from ..graph_memory import GraphMemoryService
 from ..mcp_instance import mcp
 from ..models import TaskStatus
 from ..repositories import (
@@ -251,17 +253,25 @@ async def search(
     query: str,
     limit: int = 10,
     entity_type: Literal["note", "session", "meeting", "task"] | None = None,
+    gms: GraphMemoryService = Depends(get_graph_memory_service),
     s_repo: SearchRepository = Depends(get_search_repo),
     db: Session = Depends(_get_db_session),
 ) -> SearchResponse:
     """Search across notes, sessions, meetings, and tasks by keyword.
 
-    Uses hybrid BM25+cosine search. Results ranked by relevance.
-    entity_type: optional filter — 'note', 'session', 'meeting', or 'task'.
+    Serves from the shared Graphiti graph when reachable, else the local
+    hybrid BM25+cosine engine. When Graphiti serves the query, results are
+    extracted facts (entity_type="fact", entity_id=None) rather than
+    row-level hits; the SQLite fallback returns row-level results as before.
+    entity_type: optional filter — 'note', 'session', 'meeting', or 'task'
+    (applies only to the SQLite path; Graphiti-mode facts have no entity_type
+    to filter by, so this param is ignored on that path).
     """
     if not query.strip():
         raise ToolError("query must not be empty")
-    results = s_repo.hybrid_search(db, query, limit=limit, entity_type=entity_type)
+    results = gms.search(
+        db=db, query=query, limit=limit, entity_type=entity_type, search_repo=s_repo,
+    )
     return SearchResponse(results=results, total=len(results))
 
 
