@@ -99,6 +99,14 @@ class SynthesisSettings(BaseModel):
 
 
 class GraphitiSettings(BaseModel):
+    """Shared Graphiti graph service — Wizard talks to it over HTTP only (no
+    graphiti-core dependency). Pinned server version, agreed with KiranOS:
+    graphiti-core==0.22.0, image
+    zepai/graphiti@sha256:76d14f30afc65d2f914637d67d0c0631a7e779e2740be1ae99b9dc0c5876d2da
+    (+ neo4j 5.26.2). Both sides run this exact digest; bumps are agreed jointly.
+    The service must set OPENAI_BASE_URL to a local embedder or scrubbed content
+    leaves the machine (Graphiti's embedder is a separate client from the LLM)."""
+
     enabled: bool = False
     url: str = "http://localhost:8000"
     group_id: str = "wizard"
