@@ -13,15 +13,24 @@ logger = logging.getLogger(__name__)
 
 
 class GraphitiClient:
-    def __init__(self, url: str, group_id: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        url: str,
+        group_id: str,
+        timeout_seconds: float,
+        write_timeout_seconds: float | None = None,
+    ) -> None:
         self._url = url.rstrip("/")
         self._group_id = group_id
-        self._timeout = timeout_seconds
+        self._read_timeout = timeout_seconds
+        self._write_timeout = (
+            write_timeout_seconds if write_timeout_seconds is not None else timeout_seconds
+        )
         self._transport: httpx.BaseTransport | None = None  # test seam
 
-    def _client(self) -> httpx.Client:
+    def _client(self, timeout: float) -> httpx.Client:
         return httpx.Client(
-            base_url=self._url, timeout=self._timeout, transport=self._transport
+            base_url=self._url, timeout=timeout, transport=self._transport
         )
 
     def add_episode(
@@ -37,7 +46,7 @@ class GraphitiClient:
             }],
         }
         try:
-            with self._client() as c:
+            with self._client(self._write_timeout) as c:
                 r = c.post("/messages", json=payload)
                 r.raise_for_status()
         except httpx.HTTPError as e:
@@ -45,7 +54,7 @@ class GraphitiClient:
 
     def search(self, query: str, limit: int) -> list[dict]:
         try:
-            with self._client() as c:
+            with self._client(self._read_timeout) as c:
                 r = c.post("/search", json={
                     "query": query, "group_ids": [self._group_id], "max_facts": limit,
                 })
@@ -57,7 +66,7 @@ class GraphitiClient:
 
     def health(self) -> bool:
         try:
-            with self._client() as c:
+            with self._client(self._read_timeout) as c:
                 r = c.get("/healthcheck")
                 r.raise_for_status()
         except httpx.HTTPError as e:

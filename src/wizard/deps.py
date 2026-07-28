@@ -83,7 +83,12 @@ def get_skill_roots() -> list[Path]:
 
 def get_graphiti_client() -> GraphitiClient:
     g = settings.graphiti
-    return GraphitiClient(url=g.url, group_id=g.group_id, timeout_seconds=g.timeout_seconds)
+    return GraphitiClient(
+        url=g.url,
+        group_id=g.group_id,
+        timeout_seconds=g.timeout_seconds,
+        write_timeout_seconds=g.write_timeout_seconds,
+    )
 
 
 def get_graph_memory_service() -> GraphMemoryService:
