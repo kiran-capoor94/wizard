@@ -99,6 +99,23 @@ def test_search_falls_back_when_unreachable():
     repo.hybrid_search.assert_called_once()
 
 
+def test_search_falls_back_when_client_raises_mid_search():
+    # Distinct from test_search_falls_back_when_unreachable: health check
+    # succeeds (is_reachable() is True) but the subsequent client.search()
+    # call itself raises — the mid-search except branch, not the
+    # unreachable-short-circuit branch.
+    client = MagicMock()
+    client.health.return_value = True
+    client.search.side_effect = GraphitiUnavailable("down mid-search")
+    repo = MagicMock()
+    repo.hybrid_search.return_value = [_sr(1)]
+    svc = GraphMemoryService(client=client, enabled=True)
+
+    out = svc.search(db=None, query="q", limit=10, entity_type=None, search_repo=repo)
+    assert out == repo.hybrid_search.return_value
+    repo.hybrid_search.assert_called_once()
+
+
 def test_fact_to_search_result_maps_fields():
     result = fact_to_search_result({
         "name": "n1", "fact": "note_42 mentions WAL", "valid_at": "2026-07-28T00:00:00",
