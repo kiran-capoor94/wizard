@@ -1,10 +1,8 @@
 import datetime
-import importlib.metadata as importlib_metadata
 import importlib.resources
 import json
 import logging
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +19,8 @@ from wizard.cli import analytics as analytics_module
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.cli.embeddings import run_backfill
 from wizard.cli.hooks import run_stop_hook
+from wizard.cli.update import is_editable_install as is_editable_install
+from wizard.cli.update import migrate, update
 from wizard.cli.vacuum import run_vacuum
 from wizard.cli.verify import verify
 from wizard.config import settings
@@ -56,33 +56,6 @@ _AGENT_CHOICES = [
     "copilot",
     "all",
 ]
-
-def is_editable_install() -> bool:
-    """True for editable (dev); False for `uv tool install`."""
-    try:
-        dist = importlib_metadata.distribution("wizard")
-        url_json = dist.read_text("direct_url.json")
-        if not url_json:
-            return True
-        data = json.loads(url_json)
-        return bool(data.get("editable") or data.get("dir_info", {}).get("editable"))
-    except Exception:
-        return True
-
-
-def _run_update_step(label: str, args: list[str], cwd: Path) -> tuple[bool, str]:
-    """Run a subprocess step, printing label and ok/FAILED. Returns (success, output)."""
-    typer.echo(f"  {label}...", nl=False)
-    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
-    ok = result.returncode == 0
-    status = (
-        typer.style(" ok", fg=typer.colors.GREEN)
-        if ok
-        else typer.style(" FAILED", fg=typer.colors.RED, bold=True)
-    )
-    typer.echo(status)
-    return ok, (result.stdout + result.stderr).strip()
-
 
 def _display_agent_registration(results: list[dict]) -> None:
     table = Table(show_header=False, box=None, padding=(0, 1))
@@ -432,67 +405,5 @@ def backfill_embeddings() -> None:
     run_backfill()
 
 
-@app.command()
-def update(
-    dev: bool = typer.Option(False, "--dev", help="Force editable update path (uv sync only)."),
-) -> None:
-    """Pull latest code (dev) or upgrade tool install, run migrations, re-register agents."""
-    registered = agent_registration.read_registered_agents()
-    if not registered:
-        registered = agent_registration.scan_all_registered()
-
-    if registered:
-        typer.echo("  unlinking old skills/hooks... ", nl=False)
-        # deregister_agents removes skills and hooks based on the CURRENT (old) mirrored assets.
-        _reg_service.deregister_agents(registered)
-        typer.echo("ok")
-
-    if dev or is_editable_install():
-        # Dev mode: git pull + uv sync
-        repo_root = Path(__file__).resolve().parents[3]
-        sync_args = (
-            ["uv", "sync"]
-            if shutil.which("uv")
-            else [sys.executable, "-m", "pip", "install", "-e", str(repo_root)]
-        )
-        ok, output = _run_update_step("sync deps", sync_args, repo_root)
-        if not ok:
-            typer.echo(output, err=True)
-            raise typer.Exit(1)
-        _reg_service.ensure_editable_pth()
-    else:
-        # Installed mode: uv tool upgrade
-        if not shutil.which("uv"):
-            typer.echo("uv not found — cannot upgrade", err=True)
-            raise typer.Exit(1)
-        ok, output = _run_update_step(
-            "upgrade", ["uv", "tool", "upgrade", "wizard"], Path.home()
-        )
-        if not ok:
-            typer.echo(output, err=True)
-            raise typer.Exit(1)
-
-    typer.echo("  run migrations... ", nl=False)
-    try:
-        run_migrations()
-        typer.echo("ok")
-    except Exception as exc:
-        typer.echo(f"FAILED\n{exc}", err=True)
-        raise typer.Exit(1) from exc
-
-    agent_registration.refresh_hooks()
-    _reg_service.refresh_skills()
-
-    if registered:
-        typer.echo("  re-linking skills/hooks... ", nl=False)
-        results = _reg_service.register_agents(registered)
-        typer.echo("ok")
-        _display_agent_registration(results)
-    else:
-        typer.echo("\nNo registered agents found — run: wizard setup --agent <agent>")
-
-    rprint(Panel(
-        f"Skills cache: [dim]{_reg_service.WIZARD_HOME / 'skills'}[/dim]\n"
-        "  ✅  Update complete — obsolete skills and hooks removed.",
-        title="[green]Wizard updated[/green]", border_style="green",
-    ))
+app.command()(migrate)
+app.command()(update)
