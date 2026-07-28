@@ -91,6 +91,107 @@ class SearchRepository:
         ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
         return [results[key] for key, _ in ranked[:limit] if key in results]
 
+    def fetch_by_keys(
+        self, db: Session, pairs: list[tuple[str, int]]
+    ) -> list[SearchResult]:
+        """Batch-fetch display fields for (entity_type, id) pairs, preserving
+        pair order and dropping rows that are missing/inactive.
+
+        Used to hydrate Graphiti graph-search hits (episode uuids resolved to
+        (entity_type, id) pairs) with the same display shape produced by
+        hybrid_search's FTS lanes — batched per type via `IN :ids`, no N+1.
+        """
+        by_type: dict[str, list[int]] = {}
+        for etype, eid in pairs:
+            by_type.setdefault(etype, []).append(eid)
+
+        found: dict[Key, SearchResult] = {}
+        if by_type.get("note"):
+            found.update(self._fetch_notes_by_ids(db, by_type["note"]))
+        if by_type.get("session"):
+            found.update(self._fetch_sessions_by_ids(db, by_type["session"]))
+        if by_type.get("meeting"):
+            found.update(self._fetch_meetings_by_ids(db, by_type["meeting"]))
+        if by_type.get("task"):
+            found.update(self._fetch_tasks_by_ids(db, by_type["task"]))
+
+        return [found[(t, i)] for (t, i) in pairs if (t, i) in found]
+
+    def _fetch_notes_by_ids(self, db: Session, ids: list[int]) -> dict[Key, SearchResult]:
+        rows = db.execute(  # type: ignore[call-overload]
+            text(
+                "SELECT id AS entity_id, content, note_type, task_id, created_at "
+                "FROM note WHERE id IN :ids AND status = 'active'"
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": ids},
+        ).mappings().fetchall()
+        results: dict[Key, SearchResult] = {}
+        for m in rows:
+            results[("note", m["entity_id"])] = SearchResult(
+                entity_type="note",
+                entity_id=m["entity_id"],
+                title=m.get("note_type") or "note",
+                snippet=(m.get("content") or "")[:200],
+                created_at=m.get("created_at"),
+                task_id=m.get("task_id"),
+            )
+        return results
+
+    def _fetch_sessions_by_ids(self, db: Session, ids: list[int]) -> dict[Key, SearchResult]:
+        rows = db.execute(  # type: ignore[call-overload]
+            text(
+                "SELECT id AS entity_id, summary, created_at "
+                "FROM wizardsession WHERE id IN :ids"
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": ids},
+        ).mappings().fetchall()
+        results: dict[Key, SearchResult] = {}
+        for row in rows:
+            created = row["created_at"]
+            title = f"Session {row['entity_id']}"
+            if created:
+                with contextlib.suppress(ValueError):
+                    title = f"Session {datetime.fromisoformat(str(created)).strftime('%Y-%m-%d')}"
+            results[("session", row["entity_id"])] = SearchResult(
+                entity_type="session", entity_id=row["entity_id"], title=title,
+                snippet=(row["summary"] or "")[:200], created_at=created,
+            )
+        return results
+
+    def _fetch_meetings_by_ids(self, db: Session, ids: list[int]) -> dict[Key, SearchResult]:
+        rows = db.execute(  # type: ignore[call-overload]
+            text(
+                "SELECT id AS entity_id, content, title, created_at "
+                "FROM meeting WHERE id IN :ids"
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": ids},
+        ).mappings().fetchall()
+        results: dict[Key, SearchResult] = {}
+        for row in rows:
+            results[("meeting", row["entity_id"])] = SearchResult(
+                entity_type="meeting", entity_id=row["entity_id"],
+                title=row["title"] or "meeting", snippet=(row["content"] or "")[:200],
+                created_at=row["created_at"],
+            )
+        return results
+
+    def _fetch_tasks_by_ids(self, db: Session, ids: list[int]) -> dict[Key, SearchResult]:
+        rows = db.execute(  # type: ignore[call-overload]
+            text(
+                "SELECT id AS entity_id, name, created_at "
+                "FROM task WHERE id IN :ids"
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": ids},
+        ).mappings().fetchall()
+        results: dict[Key, SearchResult] = {}
+        for row in rows:
+            results[("task", row["entity_id"])] = SearchResult(
+                entity_type="task", entity_id=row["entity_id"],
+                title=row["name"] or "task", snippet=row["name"] or "",
+                created_at=row["created_at"],
+            )
+        return results
+
     def _search_notes(
         self,
         db: Session,

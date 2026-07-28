@@ -6,7 +6,7 @@ from fastmcp.exceptions import ToolError
 from ..database import get_session
 from ..deps import get_note_repo, get_task_repo, get_task_state_repo
 from ..mcp_instance import mcp
-from ..models import NoteStatus
+from ..models import NoteStatus, NoteType
 from ..repositories import NoteRepository, TaskRepository, TaskStateRepository
 from ..schemas import (
     MarkNoteResponse,
@@ -22,6 +22,67 @@ logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 _MARKABLE = {s.value for s in NoteStatus}
+_KEY_NOTES_CAP = 5  # max notes returned by task_start
+
+
+def _add_tier_notes(
+    selected: list,
+    seen: set[int],
+    notes: list,
+) -> None:
+    """Add notes from a tier until cap is reached. Modifies selected and seen in place."""
+    for n in sorted(notes, key=lambda x: x.created_at):
+        if len(selected) >= _KEY_NOTES_CAP:
+            break
+        if n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+
+def select_key_notes(notes_desc: list) -> list:
+    """Select the most informative notes for task_start context.
+
+    Priority (hard-ordered, total capped at _KEY_NOTES_CAP):
+    0. All failure notes — what didn't work is load-bearing context.
+    1. All decision notes — resolved choices are always load-bearing.
+    2. Notes with mental_models — explicit understanding captures.
+    3. Fill remaining slots with most recent notes (newest-first).
+
+    Returns notes in priority order (oldest-first within tiers 0-2, newest-first for tier 3).
+    """
+    selected = []
+    seen: set[int] = set()
+
+    # Tier 0: failure notes (oldest-first within tier)
+    failure_notes = [
+        n for n in notes_desc
+        if n.note_type == NoteType.FAILURE and n.id is not None
+    ]
+    _add_tier_notes(selected, seen, failure_notes)
+
+    # Tier 1: decision notes (oldest-first within tier)
+    decision_notes = [
+        n for n in notes_desc
+        if n.note_type == NoteType.DECISION and n.id is not None
+    ]
+    _add_tier_notes(selected, seen, decision_notes)
+
+    # Tier 2: notes with mental models (oldest-first within tier)
+    mental_model_notes = [
+        n for n in notes_desc
+        if n.mental_model is not None and n.id is not None
+    ]
+    _add_tier_notes(selected, seen, mental_model_notes)
+
+    # Tier 3: fill remaining slots with most recent notes (newest-first)
+    for n in notes_desc:
+        if len(selected) >= _KEY_NOTES_CAP:
+            break
+        if n.id is not None and n.id not in seen:
+            selected.append(n)
+            seen.add(n.id)
+
+    return selected
 
 
 async def rewind_task(
