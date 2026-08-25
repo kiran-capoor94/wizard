@@ -23,6 +23,11 @@ engine = create_engine(
 )
 
 
+# Set while alembic is running so connections opt out of FK enforcement; see
+# _set_sqlite_pragmas for why that is necessary and why it happens at connect time.
+_MIGRATIONS_RUNNING = False
+
+
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragmas(dbapi_conn, _connection_record) -> None:
     cursor = dbapi_conn.cursor()
@@ -32,7 +37,14 @@ def _set_sqlite_pragmas(dbapi_conn, _connection_record) -> None:
     # SQLite disables FK enforcement per-connection by default — without this,
     # ondelete="CASCADE" on TaskState.task_id (models.py) is a no-op and deleting
     # a Task orphans its TaskState row instead of cascading.
-    cursor.execute("PRAGMA foreign_keys=ON")
+    #
+    # Migrations are the exception. batch_alter_table rebuilds a table on SQLite:
+    # copy into _alembic_tmp_x, DROP the original, rename. Dropping a table that
+    # others reference (toolcall.session_id, note.session_id -> wizardsession)
+    # fails the FK check and aborts the migration, leaving _alembic_tmp_x behind
+    # to wedge every retry. PRAGMA foreign_keys is ignored inside a transaction,
+    # so opting out has to happen here, as the connection is handed out.
+    cursor.execute("PRAGMA foreign_keys=OFF" if _MIGRATIONS_RUNNING else "PRAGMA foreign_keys=ON")
     cursor.close()
 
 
@@ -128,6 +140,64 @@ def get_session() -> Generator[Session, None, None]:
         except Exception:
             session.rollback()
             raise
+
+
+def _drop_stale_batch_tables() -> None:
+    """Drop _alembic_tmp_* tables left behind by a batch migration that died.
+
+    Alembic does not clean these up, and their presence makes every later upgrade
+    fail with "table _alembic_tmp_x already exists" — turning one recoverable
+    failure into a database that can never be migrated again.
+    """
+    with engine.begin() as conn:
+        stale = [
+            row[0]
+            for row in conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name LIKE '_alembic_tmp_%'"
+                )
+            )
+        ]
+        for table in stale:
+            logger.warning("Dropping stale batch-migration table: %s", table)
+            conn.execute(text(f'DROP TABLE "{table}"'))
+
+
+def _is_in_memory() -> bool:
+    """An in-memory database lives inside its connection, so dispose() destroys it."""
+    return engine.url.database in (None, ":memory:")
+
+
+@contextmanager
+def migration_mode() -> Generator[None, None, None]:
+    """Prepare the database for an alembic run, and restore normal behaviour after.
+
+    Applied in alembic's env.py rather than in run_migrations() so that every
+    entry point is covered — `wizard migrate`, `wizard update`, and the bare
+    `alembic upgrade head` that CLAUDE.md documents for dev all go through env.py.
+    """
+    global _MIGRATIONS_RUNNING
+
+    _MIGRATIONS_RUNNING = True
+    # Pooled connections predate the flag and still enforce FKs, so drop them and
+    # let alembic reopen under it. Not for in-memory databases: the schema lives in
+    # the pooled connection, so disposing discards everything just migrated (this
+    # is how the test suite builds its schema — see tests/conftest.py).
+    #
+    # Leaving FK enforcement on there is harmless: the FK abort this guards against
+    # is a row-level check, and a fresh in-memory database has no rows to violate
+    # it. That is also why this bug never surfaced in the test suite — only a real
+    # database with rows in toolcall/note reproduces it.
+    if not _is_in_memory():
+        engine.dispose()
+    try:
+        _drop_stale_batch_tables()
+        yield
+    finally:
+        _MIGRATIONS_RUNNING = False
+        if not _is_in_memory():
+            engine.dispose()
 
 
 def run_migrations() -> None:
