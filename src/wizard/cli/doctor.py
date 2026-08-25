@@ -1,10 +1,13 @@
+import importlib.resources
 import logging
 import os
 import sqlite3
 from pathlib import Path
 
 import typer
+from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from rich import print as rprint
 from rich.table import Table
 from sqlalchemy import create_engine
@@ -104,15 +107,32 @@ def _check_agent_registrations() -> tuple[bool, str]:
 
 
 def _check_migration_current() -> tuple[bool, str]:
+    """Compare the database's stamped revision against the bundled head.
+
+    Reporting the stamp on its own is worse than having no check: a database
+    several revisions behind, or wedged part-way through a failed migration,
+    still produced a PASS and argued against the very thing that was broken.
+    """
     try:
         db_path_str = os.environ.get("WIZARD_DB", settings.db)
         engine = create_engine(f"sqlite:///{db_path_str}")
         with engine.connect() as conn:
             ctx = MigrationContext.configure(conn)
             current = ctx.get_current_revision()
-        return True, f"Migration current: {current}"
+
+        alembic_dir = str(importlib.resources.files("wizard").joinpath("alembic"))
+        cfg = Config()
+        cfg.set_main_option("script_location", alembic_dir)
+        head = ScriptDirectory.from_config(cfg).get_current_head()
     except Exception as exc:
         return False, f"Migration check failed: {exc}"
+
+    if current == head:
+        return True, f"Migration current: {current}"
+    return False, (
+        f"Migrations pending: database at {current or 'no revision'}, "
+        f"head is {head} — run 'wizard migrate'"
+    )
 
 
 def check_skills_installed() -> tuple[bool, str]:
