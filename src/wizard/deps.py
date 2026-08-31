@@ -9,6 +9,8 @@ from sqlmodel import Session
 
 from .config import WizardPaths, settings
 from .database import get_session as _get_db_session_impl
+from .graph_memory import GraphMemoryService
+from .integrations.graphiti import GraphitiClient
 from .repositories import (
     MeetingRepository,
     NoteRepository,
@@ -77,3 +79,21 @@ def get_wizard_paths() -> WizardPaths:
 def get_skill_roots() -> list[Path]:
     """Return the default skill search roots for mode tools."""
     return [settings.paths.installed_skills, settings.paths.package_skills]
+
+
+def get_graphiti_client() -> GraphitiClient:
+    g = settings.graphiti
+    return GraphitiClient(
+        url=g.url,
+        group_id=g.group_id,
+        timeout_seconds=g.timeout_seconds,
+        write_timeout_seconds=g.write_timeout_seconds,
+    )
+
+
+def get_graph_memory_service() -> GraphMemoryService:
+    return GraphMemoryService(
+        client=get_graphiti_client(),
+        enabled=settings.graphiti.enabled,
+        health_ttl_seconds=settings.graphiti.health_ttl_seconds,
+    )

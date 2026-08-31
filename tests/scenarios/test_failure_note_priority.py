@@ -32,7 +32,7 @@ async def test_failure_notes_sort_before_decisions_in_task_start(mcp_client, see
 
 @pytest.mark.asyncio
 async def test_key_notes_capped_at_five_with_many_high_priority_notes(mcp_client, seed_task):
-    """Test that _select_key_notes enforces cap across all tiers (failure + decision).
+    """Test that select_key_notes enforces cap across all tiers (failure + decision).
 
     With 3 failure + 3 decision notes, the total is 6 high-priority notes.
     The cap is 5, so the function should truncate to 5 notes.

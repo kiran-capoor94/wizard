@@ -18,6 +18,7 @@ from wizard import agent_registration
 from wizard.cli import analytics as analytics_module
 from wizard.cli.doctor import db_is_healthy, doctor
 from wizard.cli.embeddings import run_backfill
+from wizard.cli.graphiti import run_backfill_graphiti
 from wizard.cli.hooks import run_stop_hook
 from wizard.cli.update import is_editable_install as is_editable_install
 from wizard.cli.update import migrate, update
@@ -403,6 +404,20 @@ def vacuum() -> None:
 def backfill_embeddings() -> None:
     """Backfill embeddings for all notes missing a vec_note_embeddings entry."""
     run_backfill()
+
+
+@app.command(name="backfill-graphiti")
+def backfill_graphiti() -> None:
+    """Push existing notes/sessions/meetings into the shared Graphiti graph."""
+    from wizard.deps import get_graphiti_client, get_security
+
+    with get_db_session() as db:
+        run_backfill_graphiti(
+            client=get_graphiti_client(),
+            enabled=settings.graphiti.enabled,
+            db=db,
+            security=get_security(),
+        )
 
 
 app.command()(migrate)

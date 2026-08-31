@@ -431,8 +431,8 @@ class WorkRecommendationResponse(BaseModel):
 
 
 class SearchResult(BaseModel):
-    entity_type: Literal["note", "session", "meeting", "task"]
-    entity_id: int
+    entity_type: Literal["note", "session", "meeting", "task", "fact"]
+    entity_id: int | None = None
     title: str
     snippet: str
     created_at: datetime.datetime | None = None
