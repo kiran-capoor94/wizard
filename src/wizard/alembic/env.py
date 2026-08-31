@@ -10,7 +10,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 import wizard.models  # noqa: F401, E402 — registers Task, Meeting, MeetingTasks with SQLModel.metadata
-from wizard.database import engine  # noqa: E402
+from wizard.database import engine, migration_mode  # noqa: E402
 
 config.set_main_option("sqlalchemy.url", str(engine.url))
 
@@ -49,7 +49,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    with engine.connect() as connection:
+    with migration_mode(), engine.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

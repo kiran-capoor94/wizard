@@ -1,6 +1,6 @@
 [project]
 name = "wizard"
-version = "2.2.42"
+version = "2.2.44"
 description = "Source-agnostic local memory layer for AI agents"
 license = "MIT"
 readme = "README.md"

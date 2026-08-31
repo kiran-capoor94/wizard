@@ -24,7 +24,6 @@ if __name__ == "__main__" and not os.environ.get("WIZARD_CONFIG_FILE"):
     )
     sys.exit(1)
 
-import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session as SASession
 
@@ -72,7 +71,8 @@ def _seed(db) -> dict[str, int]:
         # seeded note a bench-specific artifact_id to satisfy it. This does
         # not affect the words being searched.
         n = Note(note_type=NoteType.INVESTIGATION, content=content, artifact_id=f"bench-{label}")
-        db.add(n); db.flush()
+        db.add(n)
+        db.flush()
         ids[label] = n.id
     # Seed a matching embedding for the semantic-only target only.
     vec = _VECS["feline"]
@@ -99,7 +99,7 @@ def run_benchmark(db, repo) -> dict:
         for cat, cases in CASES.items():
             recalls, rrs = [], []
             for query, rel_labels in cases:
-                rel_ids = {ids[l] for l in rel_labels}
+                rel_ids = {ids[lbl] for lbl in rel_labels}
                 results = repo.hybrid_search(db, query, limit=10)
                 got = [r.entity_id for r in results]
                 hit = rel_ids.intersection(got)
@@ -114,7 +114,8 @@ def run_benchmark(db, repo) -> dict:
                 "recall_at_10": sum(recalls) / len(recalls),
                 "mrr_at_10": sum(rrs) / len(rrs),
             }
-            all_recall += recalls; all_rr += rrs
+            all_recall += recalls
+            all_rr += rrs
         out["aggregate"] = {
             "recall_at_10": sum(all_recall) / len(all_recall),
             "mrr_at_10": sum(all_rr) / len(all_rr),
