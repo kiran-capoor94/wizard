@@ -100,14 +100,17 @@ class GraphMemoryService:
 
     def push_episode(
         self, entity_type: str, entity_id: int, body: str,
-        name: str, reference_time: datetime,
+        reference_time: datetime,
     ) -> None:
+        # The episode name IS the namespaced identity — it is the only
+        # deterministic field Graphiti persists for us (uuid cannot be sent;
+        # see GraphitiClient.add_episode).
         if not self._enabled:
             return
         try:
             self._client.add_episode(
-                name=name, body=body, reference_time=reference_time,
-                uuid=episode_uuid(entity_type, entity_id),
+                name=episode_uuid(entity_type, entity_id),
+                body=body, reference_time=reference_time,
                 source_description=f"wizard:{entity_type}",
             )
         except GraphitiUnavailable as e:

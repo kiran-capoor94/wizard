@@ -203,7 +203,6 @@ async def push_meeting_episode(
     guarded by `enabled`; this thunk just keeps it on the spawn_background seam."""
     gms.push_episode(
         entity_type="meeting", entity_id=meeting_id,
-        name=f"meeting {meeting_id}",
         reference_time=datetime.now(),
         body=meeting_body(title=title, category=category, content=content, summary=None),
     )

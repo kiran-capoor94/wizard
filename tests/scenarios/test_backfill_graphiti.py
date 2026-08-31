@@ -1,11 +1,14 @@
 """Scenario: `wizard backfill-graphiti` streams existing SQLite notes into the
-shared Graphiti graph with deterministic uuids (idempotent, safe to re-run).
+shared Graphiti graph, carrying the namespaced identity in each episode's
+`name`. NOT idempotent — graphiti-core 0.22.0 has no uuid upsert, so re-running
+creates duplicates (see wizard.cli.graphiti).
 
 Also covers the batch pacing added after the first live backfill OOM-killed
 the shared Graphiti service: firing all episodes with no backpressure let a
 serial worker fall behind an unbounded in-memory queue. `_paced_push` batches
 submissions and sleeps between batches so the worker can drain.
 """
+import json
 from unittest.mock import MagicMock
 
 from wizard.cli.graphiti import _paced_push, run_backfill_graphiti
@@ -39,7 +42,8 @@ def test_backfill_pushes_note_episode(db_session):
 
     run_backfill_graphiti(client=client, enabled=True, db=db_session, security=security)
 
-    uuids = [c.kwargs["uuid"] for c in client.add_episode.call_args_list]
+    # identity now travels in `name` — no uuid is sent (see GraphitiClient)
+    uuids = [c.kwargs["name"] for c in client.add_episode.call_args_list]
     assert f"wizard-note-{note.id}" in uuids
 
 
@@ -101,3 +105,55 @@ def test_backfill_threads_pacing_settings_and_paces_between_batches(db_session):
     assert client.add_episode.call_count == 3
     # 3 notes, batch_size=2 -> batches of [2, 1] -> exactly one pause between them.
     sleep.assert_called_once_with(1.0)
+
+
+def test_backfill_handles_sessions_with_null_last_active_at(db_session):
+    """last_active_at is nullable and NULL for every historical row. Using it
+    directly as reference_time raised ValueError on the first session and
+    aborted the whole command, so the meetings phase never ran either."""
+    from wizard.models import WizardSession
+
+    session = WizardSession(
+        summary="Auto-closed session",
+        session_state=json.dumps({
+            "intent": "ship the thing", "state_delta": "shipped",
+            "open_loops": [], "next_actions": [], "closure_status": "clean",
+        }),
+        last_active_at=None,
+    )
+    db_session.add(session)
+    db_session.commit()
+    assert session.last_active_at is None
+
+    client = MagicMock()
+    security = SecurityService(allowlist=[], enabled=True)
+
+    run_backfill_graphiti(client=client, enabled=True, db=db_session, security=security)
+
+    names = [c.kwargs["name"] for c in client.add_episode.call_args_list]
+    assert f"wizard-session-{session.id}" in names
+
+
+def test_one_failing_phase_does_not_abort_the_others(db_session, capsys):
+    """A malformed historical row in one phase must not cost the other phases."""
+    note_repo = NoteRepository()
+    note_repo.save(db_session, Note(note_type=NoteType.DECISION, content="c"))
+    db_session.commit()
+
+    client = MagicMock()
+    security = SecurityService(allowlist=[], enabled=True)
+
+    import wizard.cli.graphiti as g
+
+    original = g._backfill_sessions
+    g._backfill_sessions = MagicMock(side_effect=ValueError("boom"))
+    try:
+        run_backfill_graphiti(client=client, enabled=True, db=db_session, security=security)
+    finally:
+        g._backfill_sessions = original
+
+    out = capsys.readouterr()
+    # notes ran before the failing phase, meetings ran after it
+    assert "1 note episode(s)" in out.out
+    assert "0 session episode(s)" in out.out
+    assert "session phase FAILED" in out.err

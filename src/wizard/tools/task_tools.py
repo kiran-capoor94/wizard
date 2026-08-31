@@ -250,7 +250,6 @@ async def push_note_episode(
     guarded by `enabled`; this thunk just keeps it on the spawn_background seam."""
     gms.push_episode(
         entity_type="note", entity_id=note_id,
-        name=f"note {note_id}",
         reference_time=datetime.now(),
         body=note_body(
             note_type=note_type.value, content=clean,

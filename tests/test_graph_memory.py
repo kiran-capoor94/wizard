@@ -50,7 +50,7 @@ def test_note_body_encodes_supersedes_uuid():
 def test_push_episode_noop_when_disabled():
     client = MagicMock()
     GraphMemoryService(client=client, enabled=False).push_episode(
-        "note", 42, '{"kind":"note"}', "note 42", datetime(2026, 7, 28))
+        "note", 42, '{"kind":"note"}', datetime(2026, 7, 28))
     client.add_episode.assert_not_called()
 
 
@@ -59,7 +59,7 @@ def test_push_episode_swallows_unavailable():
     client.add_episode.side_effect = GraphitiUnavailable("down")
     # must not raise
     GraphMemoryService(client=client, enabled=True).push_episode(
-        "note", 42, '{"kind":"note"}', "note 42", datetime(2026, 7, 28))
+        "note", 42, '{"kind":"note"}', datetime(2026, 7, 28))
     client.add_episode.assert_called_once()
 
 

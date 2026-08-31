@@ -35,14 +35,25 @@ class GraphitiClient:
 
     def add_episode(
         self, name: str, body: str, reference_time: datetime,
-        uuid: str, source_description: str,
+        source_description: str,
     ) -> None:
+        """Create an episode. `name` carries the namespaced identity
+        (wizard-{type}-{id}); Graphiti persists it on the Episodic node.
+
+        No uuid is sent. graphiti-core 0.22.0 reads add_episode(uuid=...) as
+        "fetch this EXISTING episode" (graphiti.py:368 -> get_by_uuid) and
+        raises NodeNotFoundError for a new one. That exception escapes
+        graph_service's worker() and kills the single async ingest consumer
+        for the life of the process, so every later POST /messages is 202'd
+        into a queue nothing reads. /search returns edge uuids, never episode
+        uuids, so a supplied uuid bought nothing on the read path either.
+        """
         payload = {
             "group_id": self._group_id,
             "messages": [{
                 "content": body, "role_type": "user", "role": "wizard",
                 "name": name, "timestamp": reference_time.isoformat(),
-                "source_description": source_description, "uuid": uuid,
+                "source_description": source_description,
             }],
         }
         try:

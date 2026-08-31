@@ -1,8 +1,11 @@
 """Backfill existing SQLite notes/sessions/meetings into the shared Graphiti graph.
 
-Idempotency comes for free from Graphiti's uuid upsert (see
-wizard.graph_memory.episode_uuid) — re-running this command pushes the same
-uuids and simply overwrites the same episodes.
+NOT idempotent. An earlier version claimed idempotency via "Graphiti's uuid
+upsert", but graphiti-core 0.22.0 has no such upsert: add_episode(uuid=...)
+looks up an EXISTING episode and raises NodeNotFoundError otherwise, killing
+the service's ingest worker. Episodes are therefore created without a uuid,
+and re-running this command creates duplicates. Clear the group first
+(DELETE /group/{group_id}) if you need a clean rebuild.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ import typer
 from sqlalchemy import text
 
 from wizard.config import settings
-from wizard.graph_memory import meeting_body, note_body, session_body
+from wizard.graph_memory import episode_uuid, meeting_body, note_body, session_body
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +50,29 @@ def run_backfill_graphiti(
         pause_seconds if pause_seconds is not None else settings.graphiti.backfill_pause_seconds
     )
 
-    notes = _backfill_notes(client, db, security, batch_size, pause_seconds, sleep)
-    sessions = _backfill_sessions(client, db, security, batch_size, pause_seconds, sleep)
-    meetings = _backfill_meetings(client, db, security, batch_size, pause_seconds, sleep)
+    # Each phase is isolated: one malformed historical row must not cost the
+    # other phases. Previously a single NULL timestamp in the session phase
+    # aborted the command and the meetings phase never ran at all.
+    counts: dict[str, int] = {}
+    failures: dict[str, str] = {}
+    for label, fn in (
+        ("note", _backfill_notes),
+        ("session", _backfill_sessions),
+        ("meeting", _backfill_meetings),
+    ):
+        try:
+            counts[label] = fn(client, db, security, batch_size, pause_seconds, sleep)
+        except Exception as e:  # noqa: BLE001 - report and continue to next phase
+            counts[label] = 0
+            failures[label] = f"{type(e).__name__}: {e}"
+            logger.exception("Graphiti backfill phase failed: %s", label)
 
     typer.echo(
-        f"Backfill complete. Pushed {notes} note episode(s), "
-        f"{sessions} session episode(s), {meetings} meeting episode(s)."
+        f"Backfill complete. Pushed {counts['note']} note episode(s), "
+        f"{counts['session']} session episode(s), {counts['meeting']} meeting episode(s)."
     )
+    for label, err in failures.items():
+        typer.echo(f"  {label} phase FAILED: {err}", err=True)
 
 
 def _paced_push(
@@ -103,7 +121,7 @@ def _backfill_notes(
 
     episodes = [
         {
-            "name": f"note {r['id']}",
+            "name": episode_uuid("note", r["id"]),
             "body": note_body(
                 note_type=r["note_type"],
                 content=_scrub(security, r["content"]),
@@ -113,7 +131,6 @@ def _backfill_notes(
                 supersedes_note_id=None,
             ),
             "reference_time": _ts(r["created_at"]),
-            "uuid": f"wizard-note-{r['id']}",
             "source_description": "wizard:note",
         }
         for r in rows
@@ -128,8 +145,13 @@ def _backfill_sessions(
     # SessionCloser only populates it on close) — nothing to push for those.
     rows = db.execute(
         text(
-            "SELECT id, session_state, last_active_at FROM wizardsession "
-            "WHERE session_state IS NOT NULL"
+            # last_active_at is nullable and is NULL for every historical row;
+            # created_at/updated_at are NOT NULL. Without the COALESCE, _ts()
+            # raised ValueError on the first row and aborted the whole backfill,
+            # taking the meetings phase with it.
+            "SELECT id, session_state, "
+            "COALESCE(last_active_at, updated_at, created_at) AS reference_time "
+            "FROM wizardsession WHERE session_state IS NOT NULL"
         )
     ).mappings().fetchall()
 
@@ -139,7 +161,7 @@ def _backfill_sessions(
         # Scrub is already applied at write-time (session_end) — re-scrubbing
         # here is defensive and idempotent (scrubbed text re-scrubs to itself).
         episodes.append({
-            "name": f"session {r['id']}",
+            "name": episode_uuid("session", r["id"]),
             "body": session_body(
                 intent=_scrub(security, state["intent"]),
                 state_delta=_scrub(security, state["state_delta"]),
@@ -147,8 +169,7 @@ def _backfill_sessions(
                 next_actions=state.get("next_actions", []),
                 closure_status=state["closure_status"],
             ),
-            "reference_time": _ts(r["last_active_at"]),
-            "uuid": f"wizard-session-{r['id']}",
+            "reference_time": _ts(r["reference_time"]),
             "source_description": "wizard:session",
         })
     return _paced_push(client, episodes, batch_size, pause_seconds, sleep)
@@ -163,7 +184,7 @@ def _backfill_meetings(
 
     episodes = [
         {
-            "name": f"meeting {r['id']}",
+            "name": episode_uuid("meeting", r["id"]),
             "body": meeting_body(
                 title=_scrub(security, r["title"]),
                 category=r["category"],
@@ -171,7 +192,6 @@ def _backfill_meetings(
                 summary=_scrub(security, r["summary"]),
             ),
             "reference_time": _ts(r["created_at"]),
-            "uuid": f"wizard-meeting-{r['id']}",
             "source_description": "wizard:meeting",
         }
         for r in rows

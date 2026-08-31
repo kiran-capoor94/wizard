@@ -1,4 +1,44 @@
-# Wizard ↔ KiranOS: shared Graphiti contract — 5 open questions
+# Wizard ↔ KiranOS: shared Graphiti contract
+
+> ## ⚠️ Correction (2026-08-31) — the uuid contract below is wrong
+>
+> Everything in this document about deterministic episode uuids was tested live
+> against the pinned image and **does not work**. Both sides have been changed.
+>
+> **What we assumed:** sending `uuid: "wizard-note-42"` on `POST /messages`
+> upserts an episode, giving idempotent backfill, and search returns those
+> uuids so each side can map results back to its own rows.
+>
+> **What actually happens** in graphiti-core 0.22.0:
+>
+> 1. `add_episode(uuid=...)` is an **update selector**, not an idempotency key.
+>    `graphiti.py:368` does `EpisodicNode.get_by_uuid(uuid)` and raises
+>    `NodeNotFoundError` when the episode does not already exist.
+> 2. That exception escapes `graph_service`'s `worker()` and **kills the single
+>    async ingest consumer for the life of the process**. Every subsequent
+>    `POST /messages` still returns `202 Accepted` into a queue nothing reads.
+>    This is silent — no error is returned to the caller.
+> 3. `POST /search` returns **edge (fact) uuids**, never episode uuids. So a
+>    deterministic episode uuid was never reachable from the read path anyway.
+>
+> Verified live: with a uuid, zero nodes are created and ingest stays dead until
+> the container restarts; without one, the episode and its entities extract
+> normally.
+>
+> **The corrected contract:** neither side sends `uuid`. The namespaced identity
+> travels in the episode **`name`** (`wizard-{type}-{id}`, `kiranos:{kind}:{id}`),
+> which Graphiti persists on the Episodic node, plus `source_description`.
+>
+> **Consequence — backfill is no longer idempotent.** Re-running it creates
+> duplicate episodes. Clear the partition first (`DELETE /group/{group_id}`) for
+> a clean rebuild.
+>
+> **Still open:** Wizard's read path (`parse_episode_uuid`) keys on
+> `results[].uuid` expecting `wizard-{type}-{id}`. Since search returns edge
+> uuids, that mapping cannot work against this version and needs redesign —
+> resolve edges to their source episodes, or match on `name`.
+
+## The original 5 open questions (answered, except as corrected above)
 
 **From:** Wizard side (PR [#57](https://github.com/kiran-capoor94/wizard/pull/57), branch `feat/graphiti-shared-substrate`)
 **Re:** the shared Graphiti temporal knowledge graph both systems will read/write

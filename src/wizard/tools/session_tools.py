@@ -236,7 +236,6 @@ async def push_session_episode(
     guarded by `enabled`; this thunk just keeps it on the spawn_background seam."""
     gms.push_episode(
         entity_type="session", entity_id=session_id,
-        name=f"session {session_id}",
         reference_time=datetime.datetime.now(),
         body=session_body(
             intent=state.intent, state_delta=state.state_delta,
