@@ -25,11 +25,11 @@ def test_add_episode_posts_expected_payload():
     _client(handler).add_episode(
         name="note 42", body='{"kind":"note"}',
         reference_time=datetime(2026, 7, 28, 12, 0, 0),
-        uuid="wizard-note-42", source_description="wizard:note",
+        source_description="wizard:note",
     )
     assert seen["url"] == "http://graph.test/messages"
     assert seen["json"]["group_id"] == "wizard"
-    assert seen["json"]["messages"][0]["uuid"] == "wizard-note-42"
+    assert seen["json"]["messages"][0]["name"] == "note 42"
 
 
 def test_search_returns_facts():
@@ -64,7 +64,7 @@ def test_add_episode_role_type_is_user():
     _client(handler).add_episode(
         name="note 42", body='{"kind":"note"}',
         reference_time=datetime(2026, 7, 28, 12, 0, 0),
-        uuid="wizard-note-42", source_description="wizard:note",
+        source_description="wizard:note",
     )
     message = seen["json"]["messages"][0]
     # graphiti-core 0.22.0 422s on any role_type other than "user".
@@ -85,7 +85,7 @@ def test_add_episode_full_message_shape():
     _client(handler).add_episode(
         name="note 42", body='{"kind":"note"}',
         reference_time=reference_time,
-        uuid="wizard-note-42", source_description="wizard:note",
+        source_description="wizard:note",
     )
     assert seen["url"] == "http://graph.test/messages"
     payload = seen["json"]
@@ -93,7 +93,7 @@ def test_add_episode_full_message_shape():
     message = payload["messages"][0]
     assert set(message.keys()) == {
         "content", "role_type", "role", "name", "timestamp",
-        "source_description", "uuid",
+        "source_description",
     }
     assert message["timestamp"] == reference_time.isoformat()
 
@@ -155,7 +155,7 @@ def test_add_episode_http_status_error_raises_graphiti_unavailable():
         _client(handler).add_episode(
             name="note 42", body='{"kind":"note"}',
             reference_time=datetime(2026, 7, 28, 12, 0, 0),
-            uuid="wizard-note-42", source_description="wizard:note",
+            source_description="wizard:note",
         )
 
 
@@ -200,7 +200,7 @@ def test_add_episode_uses_write_timeout_search_uses_read_timeout(monkeypatch):
     c.add_episode(
         name="note 42", body='{"kind":"note"}',
         reference_time=datetime(2026, 7, 28, 12, 0, 0),
-        uuid="wizard-note-42", source_description="wizard:note",
+        source_description="wizard:note",
     )
 
     assert seen_timeouts[0] == 1.0
@@ -212,3 +212,42 @@ def test_write_timeout_defaults_to_read_timeout_when_not_given():
     c = GraphitiClient(url="http://graph.test", group_id="wizard", timeout_seconds=1.0)
     assert c._write_timeout == 1.0
     assert c._read_timeout == 1.0
+
+
+# --- uuid must never be sent (graphiti-core 0.22.0) --------------------------
+# add_episode(uuid=...) is an UPDATE selector: graphiti.py:368 does
+# EpisodicNode.get_by_uuid(uuid) and raises NodeNotFoundError for a new
+# episode. That escapes graph_service's worker() and kills the single async
+# ingest consumer process-wide, so every later POST returns 202 into a dead
+# queue. Verified live: with uuid, 0 nodes; without, episode + entities extract.
+# /search returns EDGE uuids, never episode uuids, so sending one bought
+# nothing on the read path either.
+
+def test_add_episode_sends_no_uuid():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"status": "ok"})
+
+    _client(handler).add_episode(
+        name="wizard-note-42", body='{"kind":"note"}',
+        reference_time=datetime(2026, 7, 28, 12, 0, 0),
+        source_description="wizard:note",
+    )
+    assert "uuid" not in seen["json"]["messages"][0]
+
+
+def test_add_episode_carries_identity_in_name():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"status": "ok"})
+
+    _client(handler).add_episode(
+        name="wizard-note-42", body='{"kind":"note"}',
+        reference_time=datetime(2026, 7, 28, 12, 0, 0),
+        source_description="wizard:note",
+    )
+    assert seen["json"]["messages"][0]["name"] == "wizard-note-42"
