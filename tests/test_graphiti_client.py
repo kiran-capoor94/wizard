@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -95,7 +95,8 @@ def test_add_episode_full_message_shape():
         "content", "role_type", "role", "name", "timestamp",
         "source_description",
     }
-    assert message["timestamp"] == reference_time.isoformat()
+    # normalised to tz-aware UTC on the wire — see _as_utc
+    assert message["timestamp"] == reference_time.astimezone(timezone.utc).isoformat()
 
 
 def test_search_posts_group_ids_array_and_max_facts():
@@ -251,3 +252,78 @@ def test_add_episode_carries_identity_in_name():
         source_description="wizard:note",
     )
     assert seen["json"]["messages"][0]["name"] == "wizard-note-42"
+
+
+# --- timestamps must be timezone-aware UTC --------------------------------
+# Wizard's SQLite timestamps come from datetime.now() — LOCAL and naive. Sent
+# as-is, Graphiti stores a naive valid_at, and retrieve_episodes (which
+# compares against an aware datetime.now(timezone.utc)) never matches them.
+# Consequences: GET /episodes returns [] for the wizard partition, and
+# add_episode's own previous-episodes lookup is always empty, so every episode
+# is extracted with no prior context and no entity resolution against earlier
+# ones. Verified live: kiranos episodes (aware) are returned, wizard's are not.
+
+def test_add_episode_converts_naive_local_timestamp_to_utc():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"status": "ok"})
+
+    naive = datetime(2026, 7, 28, 12, 0, 0)  # local, no tzinfo
+    _client(handler).add_episode(
+        name="wizard-note-42", body="{}", reference_time=naive,
+        source_description="wizard:note",
+    )
+    sent = seen["json"]["messages"][0]["timestamp"]
+    parsed = datetime.fromisoformat(sent)
+    assert parsed.tzinfo is not None, f"timestamp must be tz-aware, got {sent!r}"
+    assert parsed.utcoffset() == timedelta(0), "must be normalised to UTC"
+    assert parsed == naive.astimezone(timezone.utc)
+
+
+def test_add_episode_normalises_an_aware_timestamp_to_utc():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"status": "ok"})
+
+    aware = datetime(2026, 7, 28, 12, 0, 0, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+    _client(handler).add_episode(
+        name="wizard-note-42", body="{}", reference_time=aware,
+        source_description="wizard:note",
+    )
+    parsed = datetime.fromisoformat(seen["json"]["messages"][0]["timestamp"])
+    assert parsed.utcoffset() == timedelta(0)
+    assert parsed == aware.astimezone(timezone.utc)
+
+
+# --- existing episode names, for idempotent/resumable backfill ------------
+
+def test_existing_episode_names_returns_the_set_of_names():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/episodes/wizard"
+        return httpx.Response(200, json=[
+            {"uuid": "a", "name": "wizard-note-1"},
+            {"uuid": "b", "name": "wizard-note-2"},
+        ])
+
+    assert _client(handler).existing_episode_names(limit=500) == {
+        "wizard-note-1", "wizard-note-2",
+    }
+
+
+def test_existing_episode_names_tolerates_entries_without_a_name():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"uuid": "a"}, {"uuid": "b", "name": "wizard-note-2"}])
+
+    assert _client(handler).existing_episode_names(limit=500) == {"wizard-note-2"}
+
+
+def test_existing_episode_names_raises_graphiti_unavailable_on_http_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    with pytest.raises(GraphitiUnavailable):
+        _client(handler).existing_episode_names(limit=500)
