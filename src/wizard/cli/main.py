@@ -407,7 +407,12 @@ def backfill_embeddings() -> None:
 
 
 @app.command(name="backfill-graphiti")
-def backfill_graphiti() -> None:
+def backfill_graphiti(
+    limit: int | None = typer.Option(
+        None, "--limit", help="Push at most this many episodes, then stop. "
+        "Safe to re-run: episodes already in the graph are skipped.",
+    ),
+) -> None:
     """Push existing notes/sessions/meetings into the shared Graphiti graph."""
     from wizard.deps import get_graphiti_client, get_security
 
@@ -417,6 +422,7 @@ def backfill_graphiti() -> None:
             enabled=settings.graphiti.enabled,
             db=db,
             security=get_security(),
+            limit=limit,
         )
 
 
