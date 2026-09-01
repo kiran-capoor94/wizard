@@ -8,7 +8,6 @@ from wizard.graph_memory import (
     episode_uuid,
     fact_to_search_result,
     note_body,
-    parse_episode_uuid,
 )
 from wizard.schemas import SearchResult
 
@@ -17,22 +16,10 @@ def _sr(eid: int) -> SearchResult:
     return SearchResult(entity_type="note", entity_id=eid, title="t", snippet="s")
 
 
-def test_uuid_round_trip():
+def test_episode_uuid_is_the_namespaced_identity():
     assert episode_uuid("note", 42) == "wizard-note-42"
-    assert parse_episode_uuid("wizard-note-42") == ("note", 42)
 
 
-def test_parse_rejects_foreign_uuids():
-    assert parse_episode_uuid("kiranos-idea-9") is None
-    assert parse_episode_uuid("garbage") is None
-    assert parse_episode_uuid("wizard-note-notanint") is None
-
-
-def test_parse_rejects_task_uuids():
-    # Tasks are never written to Graphiti (no dual-write path exists for
-    # them), so a "wizard-task-*" uuid can never legitimately be a graph
-    # hit — it must be dropped rather than treated as valid-but-unfindable.
-    assert parse_episode_uuid("wizard-task-5") is None
 
 
 def test_note_body_encodes_supersedes_uuid():
@@ -141,6 +128,21 @@ def test_fact_to_search_result_handles_missing_fields_without_raising():
     assert result.title == "fact"
     assert result.snippet == ""
     assert result.created_at is None
+
+
+def test_a_wizard_shaped_uuid_on_a_fact_is_never_treated_as_an_entity_id():
+    """/search returns EDGE uuids, never episode uuids.
+
+    An edge uuid can coincidentally look like anything, and Graphiti never
+    echoes back the episode `name` we wrote. So a graph hit cannot be resolved
+    to a Wizard row, and must stay a fact-level result. This pins that: do not
+    reintroduce uuid parsing on the read path.
+    """
+    result = fact_to_search_result({
+        "uuid": "wizard-note-42", "name": "n", "fact": "f",
+    })
+    assert result.entity_type == "fact"
+    assert result.entity_id is None
 
 
 def test_fact_to_search_result_handles_unparseable_timestamp():

@@ -33,10 +33,16 @@
 > duplicate episodes. Clear the partition first (`DELETE /group/{group_id}`) for
 > a clean rebuild.
 >
-> **Still open:** Wizard's read path (`parse_episode_uuid`) keys on
-> `results[].uuid` expecting `wizard-{type}-{id}`. Since search returns edge
-> uuids, that mapping cannot work against this version and needs redesign —
-> resolve edges to their source episodes, or match on `name`.
+> **The read path was already correct.** An earlier revision of this note
+> claimed it needed redesign. It did not: `fact_to_search_result` has always
+> mapped a hit to a fact-level result (`entity_type="fact"`, `entity_id=None`)
+> and never read `results[].uuid`. Only the now-deleted `parse_episode_uuid`
+> helper encoded the wrong assumption, and nothing called it.
+>
+> A graph hit therefore cannot be resolved back to a Wizard row, and that is
+> the intended behaviour rather than a gap — facts are surfaced as facts.
+> Do not reintroduce uuid parsing on the read path; a regression test in
+> `tests/test_graph_memory.py` pins this.
 
 ## The original 5 open questions (answered, except as corrected above)
 

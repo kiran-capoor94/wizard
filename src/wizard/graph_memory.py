@@ -14,23 +14,15 @@ from .schemas import SearchResult
 
 logger = logging.getLogger(__name__)
 
-# "task" excluded: tasks are never written to Graphiti, so recognizing the
-# type here would make task hits silently unfindable in graphiti-mode.
-_VALID_TYPES = {"note", "session", "meeting"}
-
-
 def episode_uuid(entity_type: str, entity_id: int) -> str:
+    """The namespaced identity written as an episode's `name`.
+
+    Write-only. There is no parsing counterpart: /search returns EDGE (fact)
+    uuids, never episode uuids, so a graph hit cannot be resolved back to a
+    Wizard row. fact_to_search_result surfaces facts as their own result kind
+    instead (entity_type="fact", entity_id=None).
+    """
     return f"wizard-{entity_type}-{entity_id}"
-
-
-def parse_episode_uuid(uuid: str) -> tuple[str, int] | None:
-    parts = uuid.split("-", 2)
-    if len(parts) != 3 or parts[0] != "wizard" or parts[1] not in _VALID_TYPES:
-        return None
-    try:
-        return parts[1], int(parts[2])
-    except ValueError:
-        return None
 
 
 def note_body(
