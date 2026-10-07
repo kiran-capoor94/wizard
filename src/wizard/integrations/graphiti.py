@@ -3,13 +3,29 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
 from ..exceptions import GraphitiUnavailable
 
 logger = logging.getLogger(__name__)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normalise to timezone-aware UTC.
+
+    Wizard's SQLite timestamps come from datetime.now() — local and naive.
+    Sent as-is, Graphiti stores a naive valid_at, and retrieve_episodes
+    (which compares against an aware datetime.now(timezone.utc)) never matches
+    them: GET /episodes returns [] for our partition, and add_episode's own
+    previous-episodes lookup is always empty, so every episode is extracted
+    with no prior context and no entity resolution against earlier ones.
+
+    astimezone() reads a naive value as local — which is what it is — and
+    converts; an already-aware value is just normalised.
+    """
+    return dt.astimezone(timezone.utc)
 
 
 class GraphitiClient:
@@ -52,7 +68,7 @@ class GraphitiClient:
             "group_id": self._group_id,
             "messages": [{
                 "content": body, "role_type": "user", "role": "wizard",
-                "name": name, "timestamp": reference_time.isoformat(),
+                "name": name, "timestamp": _as_utc(reference_time).isoformat(),
                 "source_description": source_description,
             }],
         }
@@ -62,6 +78,22 @@ class GraphitiClient:
                 r.raise_for_status()
         except httpx.HTTPError as e:
             raise GraphitiUnavailable(str(e)) from e
+
+    def existing_episode_names(self, limit: int) -> set[str]:
+        """Episode names already in this group, for idempotent/resumable backfill.
+
+        The episode `name` is our namespaced identity (wizard-{type}-{id});
+        Graphiti generates its own uuids, so `name` is the only field we can
+        match on. Requires timestamps to be tz-aware — see _as_utc.
+        """
+        try:
+            with self._client(self._read_timeout) as c:
+                r = c.get(f"/episodes/{self._group_id}", params={"last_n": limit})
+                r.raise_for_status()
+                episodes = r.json()
+        except httpx.HTTPError as e:
+            raise GraphitiUnavailable(str(e)) from e
+        return {e["name"] for e in episodes if e.get("name")}
 
     def search(self, query: str, limit: int) -> list[dict]:
         try:

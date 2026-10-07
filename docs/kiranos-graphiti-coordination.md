@@ -44,6 +44,32 @@
 > Do not reintroduce uuid parsing on the read path; a regression test in
 > `tests/test_graph_memory.py` pins this.
 
+> ## ⚠️ Correction 2 — timestamps must be timezone-aware
+>
+> Wizard was sending naive `reference_time` (its SQLite timestamps come from
+> `datetime.now()` — local, no tzinfo). Graphiti then stored a naive `valid_at`,
+> and `retrieve_episodes` — which compares against `datetime.now(timezone.utc)`
+> — never matched them.
+>
+> Two consequences, both silent:
+>
+> 1. `GET /episodes/{group_id}` returned `[]` for the wizard partition even
+>    with episodes present, so there was no way to tell what had been ingested.
+> 2. `add_episode`'s own previous-episodes lookup was always empty, so every
+>    episode was extracted with **no prior context and no entity resolution
+>    against earlier episodes** — a quietly degraded graph.
+>
+> Verified live: KiranOS episodes (which carry `Z`-suffixed timestamps) were
+> returned by `GET /episodes`; Wizard's were not.
+>
+> Wizard now normalises to UTC at the client boundary
+> (`integrations.graphiti._as_utc`). **KiranOS should confirm it always sends
+> tz-aware timestamps** — it appears to, but it is now a contract requirement
+> rather than an accident.
+>
+> Note that episodes written before this fix remain invisible to
+> `retrieve_episodes`. The wizard partition was cleared once to start clean.
+
 ## The original 5 open questions (answered, except as corrected above)
 
 **From:** Wizard side (PR [#57](https://github.com/kiran-capoor94/wizard/pull/57), branch `feat/graphiti-shared-substrate`)

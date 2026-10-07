@@ -11,6 +11,9 @@ submissions and sleeps between batches so the worker can drain.
 import json
 from unittest.mock import MagicMock
 
+import pytest
+import typer
+
 from wizard.cli.graphiti import _paced_push, run_backfill_graphiti
 from wizard.models import Note, NoteType
 from wizard.repositories import NoteRepository
@@ -157,3 +160,65 @@ def test_one_failing_phase_does_not_abort_the_others(db_session, capsys):
     assert "1 note episode(s)" in out.out
     assert "0 session episode(s)" in out.out
     assert "session phase FAILED" in out.err
+
+
+# --- idempotent + resumable ------------------------------------------------
+# Graphiti has no uuid upsert (see wizard.cli.graphiti), so re-running used to
+# duplicate every episode. That made backfill all-or-nothing: it could not be
+# stopped and resumed, which matters because a full run is hours of local
+# inference and has hard-locked a 16 GB machine. Skipping names already in the
+# graph makes re-runs safe and turns --limit into a resumable chunk.
+
+def _mock_client(existing: set[str] | None = None) -> MagicMock:
+    client = MagicMock()
+    client.existing_episode_names.return_value = existing or set()
+    return client
+
+
+def test_backfill_skips_episodes_already_in_the_graph(db_session):
+    note_repo = NoteRepository()
+    note = Note(note_type=NoteType.DECISION, content="use WAL")
+    note_repo.save(db_session, note)
+    db_session.commit()
+
+    client = _mock_client(existing={f"wizard-note-{note.id}"})
+    run_backfill_graphiti(
+        client=client, enabled=True, db=db_session, security=SecurityService(allowlist=[], enabled=True)
+    )
+
+    names = [c.kwargs["name"] for c in client.add_episode.call_args_list]
+    assert f"wizard-note-{note.id}" not in names
+
+
+def test_backfill_limit_caps_how_many_episodes_are_pushed(db_session):
+    note_repo = NoteRepository()
+    for i in range(5):
+        note_repo.save(db_session, Note(note_type=NoteType.DECISION, content=f"c{i}"))
+    db_session.commit()
+
+    client = _mock_client()
+    run_backfill_graphiti(
+        client=client, enabled=True, db=db_session,
+        security=SecurityService(allowlist=[], enabled=True), limit=2,
+    )
+
+    assert client.add_episode.call_count == 2
+
+
+def test_backfill_aborts_when_it_cannot_determine_what_is_already_ingested(db_session, capsys):
+    """Pushing blind would duplicate everything, so this must not proceed."""
+    from wizard.exceptions import GraphitiUnavailable
+
+    note_repo = NoteRepository()
+    note_repo.save(db_session, Note(note_type=NoteType.DECISION, content="c"))
+    db_session.commit()
+
+    client = MagicMock()
+    client.existing_episode_names.side_effect = GraphitiUnavailable("down")
+
+    with pytest.raises(typer.Exit):
+        run_backfill_graphiti(
+            client=client, enabled=True, db=db_session,
+            security=SecurityService(allowlist=[], enabled=True),
+        )
+    client.add_episode.assert_not_called()

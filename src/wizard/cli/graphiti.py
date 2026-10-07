@@ -20,9 +20,15 @@ import typer
 from sqlalchemy import text
 
 from wizard.config import settings
+from wizard.exceptions import GraphitiUnavailable
 from wizard.graph_memory import episode_uuid, meeting_body, note_body, session_body
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on the existing-episode lookup. Graphiti's /episodes requires an
+# explicit last_n; this must exceed the corpus size or skip detection silently
+# under-reports and re-pushes duplicates.
+EXISTING_LOOKUP_LIMIT = 10_000
 
 
 def run_backfill_graphiti(
@@ -33,6 +39,7 @@ def run_backfill_graphiti(
     batch_size: int | None = None,
     pause_seconds: float | None = None,
     sleep: Any = time.sleep,
+    limit: int | None = None,
 ) -> None:
     """Push all active notes, closed sessions, and meetings into Graphiti.
 
@@ -53,6 +60,19 @@ def run_backfill_graphiti(
     # Each phase is isolated: one malformed historical row must not cost the
     # other phases. Previously a single NULL timestamp in the session phase
     # aborted the command and the meetings phase never ran at all.
+    # Without knowing what is already ingested we would duplicate every
+    # episode, so this is fatal rather than a warning.
+    try:
+        existing = client.existing_episode_names(limit=EXISTING_LOOKUP_LIMIT)
+    except GraphitiUnavailable as e:
+        typer.echo(
+            f"Cannot reach Graphiti to determine what is already ingested ({e}). "
+            "Refusing to push, since that would duplicate episodes.",
+            err=True,
+        )
+        raise typer.Exit(1) from e
+
+    remaining = limit
     counts: dict[str, int] = {}
     failures: dict[str, str] = {}
     for label, fn in (
@@ -61,11 +81,21 @@ def run_backfill_graphiti(
         ("meeting", _backfill_meetings),
     ):
         try:
-            counts[label] = fn(client, db, security, batch_size, pause_seconds, sleep)
+            pushed = fn(
+                client, db, security, batch_size, pause_seconds, sleep, existing, remaining
+            )
         except Exception as e:  # noqa: BLE001 - report and continue to next phase
             counts[label] = 0
             failures[label] = f"{type(e).__name__}: {e}"
             logger.exception("Graphiti backfill phase failed: %s", label)
+            continue
+        counts[label] = pushed
+        if remaining is not None:
+            remaining -= pushed
+            if remaining <= 0:
+                for rest in ("note", "session", "meeting"):
+                    counts.setdefault(rest, 0)
+                break
 
     typer.echo(
         f"Backfill complete. Pushed {counts['note']} note episode(s), "
@@ -73,6 +103,21 @@ def run_backfill_graphiti(
     )
     for label, err in failures.items():
         typer.echo(f"  {label} phase FAILED: {err}", err=True)
+
+
+def _select(
+    episodes: list[dict[str, Any]], existing: set[str], remaining: int | None
+) -> list[dict[str, Any]]:
+    """Drop episodes already in the graph, then cap to the remaining budget.
+
+    Graphiti has no uuid upsert, so a re-run would duplicate everything. The
+    episode `name` is our namespaced identity and the only field we can match
+    on, which is why it must be present and why timestamps must be tz-aware
+    (a naive valid_at makes GET /episodes return nothing — see
+    integrations.graphiti._as_utc).
+    """
+    fresh = [e for e in episodes if e["name"] not in existing]
+    return fresh if remaining is None else fresh[:remaining]
 
 
 def _paced_push(
@@ -110,7 +155,8 @@ def _ts(value: Any) -> datetime:
 
 
 def _backfill_notes(
-    client: Any, db: Any, security: Any, batch_size: int, pause_seconds: float, sleep: Any
+    client: Any, db: Any, security: Any, batch_size: int, pause_seconds: float, sleep: Any,
+    existing: set[str], remaining: int | None,
 ) -> int:
     rows = db.execute(
         text(
@@ -135,11 +181,14 @@ def _backfill_notes(
         }
         for r in rows
     ]
-    return _paced_push(client, episodes, batch_size, pause_seconds, sleep)
+    return _paced_push(
+        client, _select(episodes, existing, remaining), batch_size, pause_seconds, sleep
+    )
 
 
 def _backfill_sessions(
-    client: Any, db: Any, security: Any, batch_size: int, pause_seconds: float, sleep: Any
+    client: Any, db: Any, security: Any, batch_size: int, pause_seconds: float, sleep: Any,
+    existing: set[str], remaining: int | None,
 ) -> int:
     # Sessions whose session_state is NULL were never cleanly closed (M2's
     # SessionCloser only populates it on close) — nothing to push for those.
@@ -172,11 +221,14 @@ def _backfill_sessions(
             "reference_time": _ts(r["reference_time"]),
             "source_description": "wizard:session",
         })
-    return _paced_push(client, episodes, batch_size, pause_seconds, sleep)
+    return _paced_push(
+        client, _select(episodes, existing, remaining), batch_size, pause_seconds, sleep
+    )
 
 
 def _backfill_meetings(
-    client: Any, db: Any, security: Any, batch_size: int, pause_seconds: float, sleep: Any
+    client: Any, db: Any, security: Any, batch_size: int, pause_seconds: float, sleep: Any,
+    existing: set[str], remaining: int | None,
 ) -> int:
     rows = db.execute(
         text("SELECT id, title, category, content, summary, created_at FROM meeting")
@@ -196,4 +248,6 @@ def _backfill_meetings(
         }
         for r in rows
     ]
-    return _paced_push(client, episodes, batch_size, pause_seconds, sleep)
+    return _paced_push(
+        client, _select(episodes, existing, remaining), batch_size, pause_seconds, sleep
+    )
